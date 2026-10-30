@@ -1598,3 +1598,24 @@ ol {
     padding: 0 14px;
   }
 }
+
+/* 顶栏更新提醒（V0.6.1） */
+.topbar-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--primary-soft-2);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.topbar-update:hover {
+  border-color: var(--primary);
+}

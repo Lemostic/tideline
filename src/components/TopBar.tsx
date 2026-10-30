@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { useSnapshot } from '@/store/appStore';
 import { useUiStore } from '@/store/uiStore';
+import { useUpdateStore } from '@/store/updateStore';
 
 const SECTION_LABELS: Record<string, string> = {
   '/': '首页',
@@ -22,6 +23,7 @@ export function TopBar() {
   const openSearch = useUiStore((state) => state.openSearch);
   const openNewBoard = useUiStore((state) => state.openNewBoard);
   const snapshot = useSnapshot();
+  const update = useUpdateStore((state) => state.result);
 
   const boardId = pathname.startsWith('/board/') ? pathname.slice('/board/'.length) : null;
   const board = boardId ? snapshot.boards.find((item) => item.id === boardId) : undefined;
@@ -72,6 +74,17 @@ export function TopBar() {
       <div className="topbar-crumb">{crumb}</div>
       <div className="topbar-spacer" />
       <div className="topbar-actions">
+        {update?.hasUpdate && update.latest ? (
+          <button
+            type="button"
+            className="topbar-update"
+            onClick={() => navigate('/settings')}
+            title={`发现新版本 ${update.latest.version}`}
+          >
+            <Icon name="download" size={13} />
+            可更新 v{update.latest.version}
+          </button>
+        ) : null}
         <button className="search-trigger" onClick={openSearch} aria-label="搜索">
           <Icon name="search" size={15} />
           <span>搜索看板或任务</span>

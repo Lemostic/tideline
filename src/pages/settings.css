@@ -337,3 +337,78 @@
   color: var(--faint) !important;
   font-size: 10.5px !important;
 }
+
+/* ---------- 更新检查（V0.6.1） ---------- */
+.settings-update {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+}
+
+.settings-update-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.settings-update-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 9.5px;
+  font-weight: 500;
+}
+
+.settings-update-muted {
+  margin: 0;
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+
+.settings-update-title {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.settings-update-notes {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.settings-update-meta {
+  margin: 2px 0 0;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.settings-update-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.settings-update-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+}

@@ -58,6 +58,7 @@ pub fn run() {
             commands::create_goal,
             commands::update_goal,
             commands::delete_goal,
+            commands::open_external,
             commands::export_backup,
             commands::import_backup,
             commands::get_storage_info,

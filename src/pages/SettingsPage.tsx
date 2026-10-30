@@ -3,9 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { Modal } from '@/components/Modal';
 import { api } from '@/lib/api';
+import { formatRelativeTime } from '@/lib/date';
+import { RELEASES_PAGE } from '@/lib/update';
 import type { StorageInfo } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useUpdateStore } from '@/store/updateStore';
 import './settings.css';
 
 interface PendingStorage {
@@ -21,12 +24,28 @@ export function SettingsPage() {
   const reset = useSettingsStore((state) => state.reset);
   const reloadSnapshot = useAppStore((state) => state.reloadSnapshot);
   const loadTrash = useAppStore((state) => state.loadTrash);
+  const updateResult = useUpdateStore((state) => state.result);
+  const updateChecking = useUpdateStore((state) => state.checking);
+  const updateError = useUpdateStore((state) => state.error);
+  const updateCheckedAt = useUpdateStore((state) => state.lastCheckedAt);
+  const checkUpdates = useUpdateStore((state) => state.check);
 
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [pendingStorage, setPendingStorage] = useState<PendingStorage | null>(null);
   const [storageBusy, setStorageBusy] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [storageFlash, setStorageFlash] = useState<string | null>(null);
+  const [updateActionError, setUpdateActionError] = useState<string | null>(null);
+
+  const handleOpenRelease = async () => {
+    setUpdateActionError(null);
+    const url = updateResult?.latest?.url ?? RELEASES_PAGE;
+    try {
+      await api.openExternal(url);
+    } catch (error) {
+      setUpdateActionError(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   useEffect(() => {
     void api
@@ -133,6 +152,23 @@ export function SettingsPage() {
               <option value="gantt">甘特</option>
               <option value="calendar">日历</option>
             </select>
+          </label>
+
+          <label className="settings-row">
+            <span className="settings-row-label">
+              <span>启动时检查更新</span>
+              <span className="settings-row-hint">每 24 小时最多检查一次 GitHub 正式版本</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.autoCheckUpdates}
+              className={`settings-switch${settings.autoCheckUpdates ? ' is-on' : ''}`}
+              onClick={() => settings.update({ autoCheckUpdates: !settings.autoCheckUpdates })}
+              aria-label="启动时检查更新"
+            >
+              <span className="settings-switch-knob" />
+            </button>
           </label>
         </section>
 
@@ -286,7 +322,12 @@ export function SettingsPage() {
           <div className="settings-about">
             <div className="settings-about-row">
               <span>版本</span>
-              <strong>v{__APP_VERSION__}</strong>
+              <strong>
+                v{__APP_VERSION__}
+                {updateResult?.hasUpdate && updateResult.latest ? (
+                  <span className="settings-update-badge">可更新</span>
+                ) : null}
+              </strong>
             </div>
             <div className="settings-about-row">
               <span>技术栈</span>
@@ -296,6 +337,85 @@ export function SettingsPage() {
               <span>许可证</span>
               <span>MIT · 开源免费</span>
             </div>
+          </div>
+
+          <div className="settings-update">
+            <div className="settings-update-head">
+              <span>更新检查</span>
+              {updateResult?.latest ? (
+                updateResult.hasUpdate ? (
+                  <span className="settings-update-badge">新版本 v{updateResult.latest.version}</span>
+                ) : (
+                  <span className="settings-update-muted">已是最新</span>
+                )
+              ) : null}
+            </div>
+
+            {updateError ? (
+              <p className="settings-update-error">{updateError}</p>
+            ) : updateResult?.latest ? (
+              <div className="settings-update-result">
+                {updateResult.hasUpdate ? (
+                  <>
+                    <p className="settings-update-title">
+                      发现新版本 v{updateResult.latest.version}
+                      {updateResult.latest.name && updateResult.latest.name !== updateResult.latest.version
+                        ? ` · ${updateResult.latest.name}`
+                        : ''}
+                    </p>
+                    {updateResult.latest.notes ? (
+                      <p className="settings-update-notes">
+                        {updateResult.latest.notes.slice(0, 180)}
+                        {updateResult.latest.notes.length > 180 ? '…' : ''}
+                      </p>
+                    ) : null}
+                    {updateResult.latest.publishedAt ? (
+                      <p className="settings-update-meta">
+                        发布于 {updateResult.latest.publishedAt.slice(0, 10)}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="settings-update-title">
+                    当前已是最新版本（v{updateResult.latest.version}）
+                  </p>
+                )}
+              </div>
+            ) : updateResult ? (
+              <p className="settings-update-muted">
+                仓库还没有正式发布版本，可打开发布页查看后续更新。
+              </p>
+            ) : (
+              <p className="settings-update-muted">
+                安装包签名完成前不会静默下载安装；检查到新版本后请从发布页手动下载安装包。
+              </p>
+            )}
+
+            {updateActionError ? (
+              <p className="settings-update-error">{updateActionError}</p>
+            ) : null}
+
+            <div className="settings-update-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => void checkUpdates().catch(() => undefined)}
+                disabled={updateChecking}
+              >
+                <Icon name="download" size={13} />
+                {updateChecking ? '检查中…' : '检查更新'}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void handleOpenRelease()}>
+                <Icon name="link" size={13} />
+                打开发布页
+              </button>
+            </div>
+
+            {updateCheckedAt ? (
+              <p className="settings-update-meta">
+                上次检查：{formatRelativeTime(updateCheckedAt)}
+              </p>
+            ) : null}
           </div>
 
           <div className="settings-actions">

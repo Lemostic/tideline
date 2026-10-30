@@ -22,6 +22,7 @@ import { TrashPage } from '@/pages/TrashPage';
 import { useAppStore } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
+import { isUpdateCheckDue, useUpdateStore } from '@/store/updateStore';
 
 export default function App() {
   const init = useAppStore((state) => state.init);
@@ -93,9 +94,25 @@ export default function App() {
         <TaskDrawer />
         <SearchDialog />
         <StartupRedirect />
+        <AutoUpdateCheck />
       </div>
     </HashRouter>
   );
+}
+
+/** 启动时检查更新：用户开启后每 24 小时最多访问一次 GitHub。 */
+function AutoUpdateCheck() {
+  const autoCheckUpdates = useSettingsStore((state) => state.autoCheckUpdates);
+  const lastCheckedAt = useUpdateStore((state) => state.lastCheckedAt);
+  const check = useUpdateStore((state) => state.check);
+
+  useEffect(() => {
+    if (!autoCheckUpdates) return;
+    if (!isUpdateCheckDue(lastCheckedAt)) return;
+    void check().catch(() => undefined);
+  }, [autoCheckUpdates, lastCheckedAt, check]);
+
+  return null;
 }
 
 /** 启动页偏好：只在应用首次挂载时把首页重定向到用户选择的启动页。 */

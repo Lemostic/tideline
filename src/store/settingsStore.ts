@@ -20,6 +20,8 @@ export interface Settings {
   showDependencyLines: boolean;
   /** 启动应用后默认进入的页面 */
   startPage: StartPage;
+  /** 启动时自动检查 GitHub 正式版本（每 24 小时最多一次） */
+  autoCheckUpdates: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -28,6 +30,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hideCompletedByDefault: false,
   showDependencyLines: true,
   startPage: '/',
+  autoCheckUpdates: false,
 };
 
 const STORAGE_KEY = 'tideline.settings.v1';
@@ -45,7 +48,15 @@ function normalize(raw: unknown): Settings {
   const startPage: StartPage = ['/', '/tasks', '/inbox'].includes(value.startPage as string)
     ? (value.startPage as StartPage)
     : DEFAULT_SETTINGS.startPage;
-  return { defaultView, weekStartsOn, hideCompletedByDefault, showDependencyLines, startPage };
+  const autoCheckUpdates = Boolean(value.autoCheckUpdates);
+  return {
+    defaultView,
+    weekStartsOn,
+    hideCompletedByDefault,
+    showDependencyLines,
+    startPage,
+    autoCheckUpdates,
+  };
 }
 
 function loadSettings(): Settings {

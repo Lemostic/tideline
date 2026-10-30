@@ -89,6 +89,8 @@ export interface TidelineApi {
   createGoal(input: NewGoalInput): Promise<Goal>;
   updateGoal(input: { id: string; patch: GoalPatch }): Promise<Goal>;
   deleteGoal(input: IdInput): Promise<void>;
+  /** 在系统默认浏览器打开发布页（仅允许 GitHub 仓库地址） */
+  openExternal(url: string): Promise<void>;
 }
 
 export function isTauri(): boolean {
@@ -130,6 +132,7 @@ const tauriApi: TidelineApi = {
   createGoal: (input) => invoke<Goal>('create_goal', { input }),
   updateGoal: (input) => invoke<Goal>('update_goal', { input }),
   deleteGoal: (input) => invoke<void>('delete_goal', { input }),
+  openExternal: (url) => invoke<void>('open_external', { url }),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
@@ -890,6 +893,13 @@ const localApi: TidelineApi = {
       goal.parentId === id ? { ...goal, parentId: null, updatedAt: now } : goal,
     );
     saveLocalDb(db);
+  },
+
+  async openExternal(url) {
+    if (!url.startsWith('https://github.com/Lemostic/tideline')) {
+      throw new Error('只允许打开发布页链接');
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
   },
 };
 

@@ -182,6 +182,49 @@ pub fn delete_goal(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
     repo::delete_goal(&mut conn, input)
 }
 
+/// 打开 GitHub 发布页；白名单限制避免任意 URL 被外部命令执行。
+fn is_allowed_release_url(url: &str) -> bool {
+    url == "https://github.com/Lemostic/tideline"
+        || url.starts_with("https://github.com/Lemostic/tideline/")
+}
+
+#[tauri::command]
+pub fn open_external(url: String) -> CmdResult<()> {
+    if !is_allowed_release_url(&url) {
+        return Err("只允许打开发布页链接".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|error| format!("打开浏览器失败：{error}"))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        return Err("当前平台暂不支持自动打开浏览器".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_allowed_release_url;
+
+    #[test]
+    fn open_external_only_allows_release_urls() {
+        assert!(is_allowed_release_url(
+            "https://github.com/Lemostic/tideline/releases/tag/v0.6.1"
+        ));
+        assert!(is_allowed_release_url("https://github.com/Lemostic/tideline"));
+        assert!(!is_allowed_release_url("https://example.com"));
+        assert!(!is_allowed_release_url(
+            "https://github.com/Lemostic/tideline.evil.example/releases"
+        ));
+        assert!(!is_allowed_release_url("javascript:alert(1)"));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 备份 / 恢复（V0.4）
 // ---------------------------------------------------------------------------
