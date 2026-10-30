@@ -170,6 +170,32 @@ export interface TemplateCategoryMeta {
   label: string;
 }
 
+/** 备份 / 恢复（V0.4）：与 Rust `BackupFile` / `src/lib/backup.ts` 保持一致 */
+export interface BackupFile {
+  app: 'tideline';
+  formatVersion: 1;
+  exportedAt: string;
+  boards: Board[];
+  lists: List[];
+  /** 包含回收站里的软删除任务（deletedAt 非空） */
+  cards: Card[];
+  inbox: InboxItem[];
+}
+
+export interface BackupSummary {
+  boards: number;
+  lists: number;
+  cards: number;
+  trashed: number;
+  inbox: number;
+}
+
+export interface BackupExport {
+  /** 备份文件写入位置；浏览器端为下载文件名说明 */
+  path: string;
+  summary: BackupSummary;
+}
+
 /** 仪表盘 / 看板集 / 目标：保留菜单入口与功能占位 */
 export type VipFeature = 'dashboard' | 'board-sets' | 'goals';
 

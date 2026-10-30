@@ -9,8 +9,17 @@
  * 单用户本地场景下数据量小，逻辑简单且没有一致性问题。
  */
 import { invoke } from '@tauri-apps/api/core';
+import {
+  backupFilename,
+  createBackup,
+  parseBackup,
+  serializeBackup,
+  summarizeBackup,
+} from './backup';
 import { createId, nowISO } from './ids';
 import type {
+  BackupExport,
+  BackupSummary,
   Board,
   BoardPatch,
   Card,
@@ -48,6 +57,10 @@ export interface TidelineApi {
   addInboxItem(input: { content: string }): Promise<InboxItem>;
   deleteInboxItem(input: IdInput): Promise<void>;
   convertInboxItem(input: ConvertInboxInput): Promise<Card>;
+  /** 导出全量 JSON 备份（桌面端写入「文档」目录，浏览器端触发下载） */
+  exportBackup(): Promise<BackupExport>;
+  /** 用 JSON 备份替换全部数据（失败时不应修改原数据） */
+  importBackup(json: string): Promise<BackupSummary>;
 }
 
 export function isTauri(): boolean {
@@ -74,6 +87,8 @@ const tauriApi: TidelineApi = {
   addInboxItem: (input) => invoke<InboxItem>('add_inbox_item', { input }),
   deleteInboxItem: (input) => invoke<void>('delete_inbox_item', { input }),
   convertInboxItem: (input) => invoke<Card>('convert_inbox_item', { input }),
+  exportBackup: () => invoke<BackupExport>('export_backup'),
+  importBackup: (json) => invoke<BackupSummary>('import_backup', { input: { json } }),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
@@ -439,6 +454,37 @@ const localApi: TidelineApi = {
     touchBoard(db, boardId);
     saveLocalDb(db);
     return card;
+  },
+
+  async exportBackup() {
+    const db = loadLocalDb();
+    const backup = createBackup(db);
+    const json = serializeBackup(backup);
+    const filename = backupFilename();
+    if (typeof document !== 'undefined' && typeof URL !== 'undefined') {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    return { path: filename, summary: summarizeBackup(backup) };
+  },
+
+  async importBackup(json) {
+    const backup = parseBackup(json);
+    saveLocalDb({
+      boards: backup.boards,
+      lists: backup.lists,
+      cards: backup.cards,
+      inbox: backup.inbox,
+    });
+    return summarizeBackup(backup);
   },
 };
 

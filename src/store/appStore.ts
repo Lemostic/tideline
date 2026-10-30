@@ -39,6 +39,8 @@ export interface AppState {
   loaded: boolean;
   error: string | null;
   init: () => Promise<void>;
+  /** 备份恢复后重新拉取快照，并清空按需加载的回收站缓存 */
+  reloadSnapshot: () => Promise<void>;
   clearError: () => void;
 
   createBoard: (input: NewBoardInput) => Promise<Board>;
@@ -87,6 +89,15 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ snapshot, loaded: true });
         const seeded = await seedDemoIfNeeded();
         if (seeded) set({ snapshot: await api.getSnapshot() });
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    reloadSnapshot: async () => {
+      try {
+        const snapshot = await api.getSnapshot();
+        set({ snapshot, trash: [] });
       } catch (error) {
         fail(error);
       }

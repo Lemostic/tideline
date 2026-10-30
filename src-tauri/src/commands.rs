@@ -5,6 +5,7 @@
 
 use tauri::State;
 
+use crate::backup;
 use crate::db::Db;
 use crate::models::*;
 use crate::repo;
@@ -121,4 +122,39 @@ pub fn delete_inbox_item(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
 pub fn convert_inbox_item(db: State<'_, Db>, input: ConvertInboxInput) -> CmdResult<Card> {
     let mut conn = db.lock()?;
     repo::convert_inbox_item(&mut conn, input)
+}
+
+// ---------------------------------------------------------------------------
+// 备份 / 恢复（V0.4）
+// ---------------------------------------------------------------------------
+
+/// 导出全量 JSON 备份到用户「文档」目录，返回实际文件路径与统计。
+#[tauri::command]
+pub fn export_backup(db: State<'_, Db>) -> CmdResult<BackupExport> {
+    let conn = db.lock()?;
+    let backup = backup::build(&conn)?;
+    let json = serde_json::to_string_pretty(&backup)
+        .map_err(|error| format!("备份序列化失败：{error}"))?;
+    let path = backup::default_export_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("创建备份目录失败：{error}"))?;
+    }
+    std::fs::write(&path, json).map_err(|error| format!("写入备份文件失败：{error}"))?;
+    Ok(BackupExport {
+        path: path.to_string_lossy().into_owned(),
+        summary: backup.summary(),
+    })
+}
+
+/// 从 JSON 文本恢复全量数据；校验失败或写入失败时事务回滚。
+#[tauri::command]
+pub fn import_backup(db: State<'_, Db>, input: ImportBackupInput) -> CmdResult<BackupSummary> {
+    // 本地单机工具的备份不会太大，限制上限避免误选超大文件把进程卡死。
+    if input.json.len() > 100 * 1024 * 1024 {
+        return Err("备份文件超过 100MB，已拒绝导入".to_string());
+    }
+    let backup: BackupFile = serde_json::from_str(&input.json)
+        .map_err(|error| format!("备份文件不是有效的 JSON：{error}"))?;
+    let mut conn = db.lock()?;
+    backup::restore(&mut conn, &backup)
 }

@@ -150,6 +150,42 @@ pub struct Snapshot {
 }
 
 // ---------------------------------------------------------------------------
+// 备份 / 恢复（V0.4）
+// ---------------------------------------------------------------------------
+
+/// 导出的备份文件格式。`cards` 包含回收站里的任务（`deletedAt` 非空），
+/// 因此恢复后回收站内容也能完整保留。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupFile {
+    pub app: String,
+    pub format_version: u32,
+    pub exported_at: String,
+    pub boards: Vec<Board>,
+    pub lists: Vec<List>,
+    pub cards: Vec<Card>,
+    pub inbox: Vec<InboxItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupSummary {
+    pub boards: usize,
+    pub lists: usize,
+    pub cards: usize,
+    pub trashed: usize,
+    pub inbox: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupExport {
+    /// 备份文件写入的绝对路径（桌面端导出到「文档」目录）。
+    pub path: String,
+    pub summary: BackupSummary,
+}
+
+// ---------------------------------------------------------------------------
 // 命令入参
 // ---------------------------------------------------------------------------
 
@@ -294,6 +330,13 @@ pub struct ConvertInboxInput {
     pub board_id: String,
     #[serde(default)]
     pub list_id: Option<String>,
+}
+
+/// 从前端上传的备份文件内容（JSON 文本）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportBackupInput {
+    pub json: String,
 }
 
 // ---------------------------------------------------------------------------

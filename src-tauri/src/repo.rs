@@ -337,6 +337,18 @@ pub fn get_snapshot(conn: &Connection) -> DbResult<Snapshot> {
     })
 }
 
+/// 备份用：返回全部任务（包含回收站里的软删除任务）。
+pub fn get_all_cards(conn: &Connection) -> DbResult<Vec<Card>> {
+    collect_rows(
+        conn,
+        &format!(
+            "SELECT {CARD_COLUMNS} FROM cards \
+             ORDER BY board_id ASC, position ASC, created_at ASC, id ASC"
+        ),
+        row_to_card,
+    )
+}
+
 pub fn create_board(conn: &mut Connection, input: NewBoardInput) -> DbResult<Board> {
     let tx = conn.transaction().map_err(db_err)?;
     let now = now_iso();

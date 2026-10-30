@@ -5,6 +5,7 @@
 //!
 //! `src-tauri/src/main.rs` 只调用这里的 `run()`。
 
+mod backup;
 mod commands;
 mod db;
 mod models;
@@ -47,6 +48,8 @@ pub fn run() {
             commands::add_inbox_item,
             commands::delete_inbox_item,
             commands::convert_inbox_item,
+            commands::export_backup,
+            commands::import_backup,
         ])
         .run(tauri::generate_context!())
         .expect("启动潮线 tideline 失败");
