@@ -3,12 +3,13 @@
 //! 每个写入命令只接收一个 `input` 参数（`get_snapshot` 无参），
 //! 加锁后把逻辑委托给 `repo`，并统一返回 `Result<T, String>`。
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::backup;
 use crate::db::Db;
 use crate::models::*;
 use crate::repo;
+use crate::storage;
 
 type CmdResult<T> = Result<T, String>;
 
@@ -170,4 +171,37 @@ pub fn import_backup(db: State<'_, Db>, input: ImportBackupInput) -> CmdResult<B
         .map_err(|error| format!("备份文件不是有效的 JSON：{error}"))?;
     let mut conn = db.lock()?;
     backup::restore(&mut conn, &backup)
+}
+
+// ---------------------------------------------------------------------------
+// 数据存储目录（V0.5）
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn get_storage_info(app: AppHandle) -> CmdResult<storage::StorageInfo> {
+    storage::info(&app)
+}
+
+/// 打开原生文件夹选择框；取消返回 null。
+#[tauri::command]
+pub fn pick_data_directory(app: AppHandle) -> CmdResult<Option<String>> {
+    Ok(storage::pick_folder(&app).map(|path| path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+pub fn change_data_directory(
+    app: AppHandle,
+    db: State<'_, Db>,
+    input: ChangeDataDirInput,
+) -> CmdResult<storage::StorageInfo> {
+    storage::change_data_directory(&app, &db, std::path::Path::new(input.path.trim()))
+}
+
+#[tauri::command]
+pub fn reset_data_directory(
+    app: AppHandle,
+    db: State<'_, Db>,
+) -> CmdResult<storage::StorageInfo> {
+    let target = storage::default_dir(&app)?;
+    storage::change_data_directory(&app, &db, &target)
 }

@@ -364,6 +364,13 @@ pub struct SetDependenciesInput {
     pub depends_on: Vec<String>,
 }
 
+/// 切换数据存储目录。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeDataDirInput {
+    pub path: String,
+}
+
 // ---------------------------------------------------------------------------
 // 单元测试：锁定与前端 TypeScript 契约一致的 JSON 形态
 // ---------------------------------------------------------------------------

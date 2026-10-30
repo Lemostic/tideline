@@ -233,3 +233,107 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- 数据存储目录 ---------- */
+.settings-flash {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  border-radius: var(--radius-md);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 12.5px;
+}
+
+.settings-flash.is-error {
+  border-color: rgba(197, 74, 58, 0.25);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.settings-storage {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-storage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.settings-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.settings-badge.is-custom {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.settings-storage-path {
+  display: block;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.settings-storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.settings-storage-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-storage-hint {
+  margin: 0;
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+
+.settings-storage-confirm p {
+  margin: 0 0 9px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.settings-storage-confirm code {
+  display: block;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.settings-storage-confirm-hint {
+  margin: 0 !important;
+  color: var(--faint) !important;
+  font-size: 10.5px !important;
+}

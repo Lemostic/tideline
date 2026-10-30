@@ -8,6 +8,7 @@
 //! 做幂等 `ALTER TABLE` 迁移，不重建表。V0.4 新增 `card_dependencies` 依赖表。
 //! 迁移完成后写入 `PRAGMA user_version = 4`。
 
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -16,18 +17,66 @@ use rusqlite::Connection;
 /// 由 Tauri 以 `State` 形式托管的数据库句柄。
 ///
 /// rusqlite 的 `Connection` 不是 `Sync`，包一层 `Mutex` 后即可安全放进 Tauri 状态；
-/// 单用户本地场景下串行访问完全够用。
-pub struct Db(Mutex<Connection>);
+/// 内部用 `Option` 保存连接，切换自定义数据目录时可以短暂移除后重新打开。
+pub struct Db(Mutex<Option<Connection>>);
 
 impl Db {
     pub fn new(connection: Connection) -> Self {
-        Self(Mutex::new(connection))
+        Self(Mutex::new(Some(connection)))
     }
 
-    pub fn lock(&self) -> Result<MutexGuard<'_, Connection>, String> {
-        self.0
+    pub fn lock(&self) -> Result<DbGuard<'_>, String> {
+        let guard = self
+            .0
             .lock()
-            .map_err(|_| "数据库连接繁忙，请稍后重试".to_string())
+            .map_err(|_| "数据库连接繁忙，请稍后重试".to_string())?;
+        if guard.is_none() {
+            return Err("正在切换数据目录，请稍后重试".to_string());
+        }
+        Ok(DbGuard(guard))
+    }
+
+    /// 取出连接（用于切换数据目录）；取出后其它命令会收到「正在切换」错误。
+    pub fn take(&self) -> Result<Connection, String> {
+        let mut guard = self
+            .0
+            .lock()
+            .map_err(|_| "数据库连接繁忙，请稍后重试".to_string())?;
+        guard
+            .take()
+            .ok_or_else(|| "正在切换数据目录，请稍后重试".to_string())
+    }
+
+    /// 放回一个已打开的新连接。
+    pub fn put(&self, connection: Connection) -> Result<(), String> {
+        let mut guard = self
+            .0
+            .lock()
+            .map_err(|_| "数据库连接繁忙，请稍后重试".to_string())?;
+        *guard = Some(connection);
+        Ok(())
+    }
+}
+
+/// 对 `Option<Connection>` 的轻量 guard：Deref 到 Connection，
+/// 让 20 多个命令保持原来的 `&conn` / `&mut conn` 写法不变。
+pub struct DbGuard<'a>(MutexGuard<'a, Option<Connection>>);
+
+impl Deref for DbGuard<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+            .as_ref()
+            .expect("数据库连接在命令执行期间不应为空")
+    }
+}
+
+impl DerefMut for DbGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+            .as_mut()
+            .expect("数据库连接在命令执行期间不应为空")
     }
 }
 

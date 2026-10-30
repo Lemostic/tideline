@@ -35,6 +35,7 @@ import type {
   NewCardInput,
   NewListInput,
   Snapshot,
+  StorageInfo,
   Subtask,
 } from './types';
 
@@ -64,6 +65,14 @@ export interface TidelineApi {
   exportBackup(): Promise<BackupExport>;
   /** 用 JSON 备份替换全部数据（失败时不应修改原数据） */
   importBackup(json: string): Promise<BackupSummary>;
+  /** 数据存储目录（V0.5） */
+  getStorageInfo(): Promise<StorageInfo>;
+  /** 原生文件夹选择框；取消返回 null */
+  pickDataDirectory(): Promise<string | null>;
+  /** 把数据库迁移到新目录并切换连接 */
+  changeDataDirectory(path: string): Promise<StorageInfo>;
+  /** 恢复默认应用数据目录 */
+  resetDataDirectory(): Promise<StorageInfo>;
 }
 
 export function isTauri(): boolean {
@@ -94,6 +103,11 @@ const tauriApi: TidelineApi = {
     invoke<CardDependency[]>('set_card_dependencies', { input }),
   exportBackup: () => invoke<BackupExport>('export_backup'),
   importBackup: (json) => invoke<BackupSummary>('import_backup', { input: { json } }),
+  getStorageInfo: () => invoke<StorageInfo>('get_storage_info'),
+  pickDataDirectory: () => invoke<string | null>('pick_data_directory'),
+  changeDataDirectory: (path) =>
+    invoke<StorageInfo>('change_data_directory', { input: { path } }),
+  resetDataDirectory: () => invoke<StorageInfo>('reset_data_directory'),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
@@ -581,6 +595,28 @@ const localApi: TidelineApi = {
       dependencies: backup.dependencies,
     });
     return summarizeBackup(backup);
+  },
+
+  async getStorageInfo() {
+    return {
+      dataDir: 'localStorage',
+      dbPath: 'localStorage · tideline.db.v1（浏览器开发模式）',
+      defaultDir: '',
+      isCustom: false,
+      editable: false,
+    };
+  },
+
+  async pickDataDirectory() {
+    return null;
+  },
+
+  async changeDataDirectory() {
+    throw new Error('浏览器开发模式不支持自定义数据目录，请在桌面端设置');
+  },
+
+  async resetDataDirectory() {
+    throw new Error('浏览器开发模式不支持自定义数据目录，请在桌面端设置');
   },
 };
 

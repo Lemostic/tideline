@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { Modal } from '@/components/Modal';
-import { api, isTauri } from '@/lib/api';
+import { api } from '@/lib/api';
 import { parseBackup, summarizeBackup } from '@/lib/backup';
-import type { BackupExport, BackupSummary } from '@/lib/types';
+import type { BackupExport, BackupSummary, StorageInfo } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import './data.css';
 
@@ -32,6 +32,14 @@ export function DataPage() {
   const [importing, setImporting] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
+
+  useEffect(() => {
+    void api
+      .getStorageInfo()
+      .then(setStorageInfo)
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     void loadTrash().catch(() => undefined);
@@ -90,9 +98,8 @@ export function DataPage() {
     }
   };
 
-  const storagePath = isTauri()
-    ? '%APPDATA%\\com.lemostic.tideline\\tideline.db'
-    : 'localStorage · tideline.db.v1（浏览器开发模式）';
+  const storagePath =
+    storageInfo?.dbPath ?? '%APPDATA%\\com.lemostic.tideline\\tideline.db';
 
   return (
     <div className="page data-page">
@@ -139,7 +146,9 @@ export function DataPage() {
           </div>
 
           <div className="data-path">
-            <span className="data-path-label">存储位置</span>
+            <span className="data-path-label">
+              存储位置{storageInfo?.isCustom ? ' · 自定义目录' : ''}
+            </span>
             <code className="data-path-value">{storagePath}</code>
           </div>
         </section>
@@ -228,8 +237,7 @@ export function DataPage() {
         <ul>
           <li>备份文件是纯 JSON 文本，不含账号、网络或设备信息，可长期保存。</li>
           <li>
-            桌面端数据文件位于 <code>%APPDATA%\com.lemostic.tideline\tideline.db</code>；直接复制该文件也能备份，
-            但复制前需要先退出应用。
+            桌面端数据库位置见上方「存储位置」；直接复制 <code>tideline.db</code> 也能备份，但复制前需要先退出应用。
           </li>
           <li>恢复会整体替换当前数据，不会尝试合并；恢复后沿用备份中的看板 / 列表 / 任务 id，索引会重建。</li>
           <li>当前版本不包含应用设置（如窗口大小、筛选条件），这些内容会在后续版本再考虑。</li>

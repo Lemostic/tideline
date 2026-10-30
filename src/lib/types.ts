@@ -212,6 +212,16 @@ export interface BackupExport {
   summary: BackupSummary;
 }
 
+/** 数据存储目录信息（V0.5） */
+export interface StorageInfo {
+  dataDir: string;
+  dbPath: string;
+  defaultDir: string;
+  isCustom: boolean;
+  /** 浏览器 localStorage 模式为 false */
+  editable: boolean;
+}
+
 /** 仪表盘 / 看板集 / 目标：保留菜单入口与功能占位 */
 export type VipFeature = 'dashboard' | 'board-sets' | 'goals';
 
