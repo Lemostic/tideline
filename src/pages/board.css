@@ -939,3 +939,93 @@
     justify-content: flex-start;
   }
 }
+
+/* ---------- 卡片颜色 / 列表 WIP（V0.7） ---------- */
+.task-card.has-accent {
+  border-top-width: 3px;
+}
+
+.column-color-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  margin-left: 2px;
+  border-radius: 2px;
+}
+
+.column-count.is-over {
+  color: var(--danger);
+}
+
+.column-wip-warning {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+/* ---------- 列表设置弹窗 ---------- */
+.list-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.list-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.list-settings-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.list-color-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.list-color-swatch {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+
+.list-color-swatch:hover {
+  transform: scale(1.08);
+}
+
+.list-color-swatch.is-active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px var(--ink-2);
+}
+
+.list-settings-hint {
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.list-settings-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 11px;
+}

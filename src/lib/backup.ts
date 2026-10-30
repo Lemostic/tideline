@@ -136,8 +136,15 @@ export function parseBackup(text: string): BackupFile {
   }
 
   const boards = requireArray(raw.boards, 'boards') as Board[];
-  const lists = requireArray(raw.lists, 'lists') as List[];
-  const cards = requireArray(raw.cards, 'cards') as Card[];
+  const lists = (requireArray(raw.lists, 'lists') as List[]).map((list) => ({
+    ...list,
+    color: list.color ?? 'slate',
+    wipLimit: typeof list.wipLimit === 'number' ? list.wipLimit : null,
+  }));
+  const cards = (requireArray(raw.cards, 'cards') as Card[]).map((card) => ({
+    ...card,
+    accent: card.accent ?? null,
+  }));
   const inbox = requireArray(raw.inbox, 'inbox') as InboxItem[];
 
   const boardIds = new Set<string>();

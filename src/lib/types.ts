@@ -32,6 +32,10 @@ export interface List {
   id: string;
   boardId: string;
   title: string;
+  /** 列主题色（V0.7） */
+  color: BoardColor;
+  /** 在制品上限；null 表示不限制 */
+  wipLimit: number | null;
   /** 同一看板内的排序序号，从 0 递增 */
   position: number;
   createdAt: string;
@@ -55,6 +59,8 @@ export interface Card {
   /** YYYY-MM-DD，甘特视图的起始日期；null 表示未排期 */
   startDate: string | null;
   priority: Priority | null;
+  /** 卡片强调色（V0.7）；null / undefined 使用默认卡片样式 */
+  accent?: BoardColor | null;
   completed: boolean;
   /** 软删除时间；非 null 表示在回收站中，正常快照不会返回这些任务 */
   deletedAt: string | null;
@@ -166,7 +172,7 @@ export type BoardPatch = Partial<
   Pick<Board, 'title' | 'description' | 'color' | 'starred'>
 >;
 
-export type ListPatch = Partial<Pick<List, 'title'>>;
+export type ListPatch = Partial<Pick<List, 'title' | 'color' | 'wipLimit'>>;
 
 export type CardPatch = Partial<
   Pick<
@@ -176,6 +182,7 @@ export type CardPatch = Partial<
     | 'dueDate'
     | 'startDate'
     | 'priority'
+    | 'accent'
     | 'completed'
     | 'listId'
     | 'labels'
@@ -192,6 +199,8 @@ export interface NewBoardInput {
 export interface NewListInput {
   boardId: string;
   title: string;
+  color?: BoardColor;
+  wipLimit?: number | null;
 }
 
 export interface NewCardInput {
@@ -202,6 +211,7 @@ export interface NewCardInput {
   dueDate?: string | null;
   startDate?: string | null;
   priority?: Priority | null;
+  accent?: BoardColor | null;
   labels?: string[];
   subtasks?: Subtask[];
 }

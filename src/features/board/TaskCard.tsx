@@ -2,7 +2,7 @@ import { useRef, type DragEvent, type KeyboardEvent } from 'react';
 import { Icon } from '@/components/Icon';
 import { dueBucket, formatDueLabel, formatMonthDay, formatRelativeTime } from '@/lib/date';
 import { blockersFor } from '@/lib/dependencies';
-import { PRIORITY_META, type Card } from '@/lib/types';
+import { PRIORITY_META, boardColorValue, type Card } from '@/lib/types';
 import { useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 
@@ -89,6 +89,7 @@ export function TaskCard({
 
   const className = [
     'task-card',
+    card.accent ? 'has-accent' : '',
     card.completed ? 'is-completed' : '',
     dragging ? 'is-dragging' : '',
     selectionMode ? 'is-selecting' : '',
@@ -103,6 +104,7 @@ export function TaskCard({
     <article
       className={className}
       data-card-id={card.id}
+      style={card.accent ? { borderTopColor: boardColorValue(card.accent) } : undefined}
       draggable={!selectionMode}
       role="button"
       tabIndex={0}

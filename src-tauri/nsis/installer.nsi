@@ -732,6 +732,9 @@ Section Install
 
   ; Save $INSTDIR in registry for future installations
   WriteRegStr SHCTX "${MANUPRODUCTKEY}" "" $INSTDIR
+  ; 额外保存一份明确的安装目录，供后续升级/重复安装读取；
+  ; 与 Add/Remove Programs 的 InstallLocation 互为兜底。
+  WriteRegStr SHCTX "${MANUPRODUCTKEY}" "InstallDir" "$INSTDIR"
 
   !if "${INSTALLMODE}" == "both"
     ; Save install mode to be selected by default for the next installation such as updating
@@ -946,14 +949,39 @@ Section Uninstall
   ${EndIf}
 SectionEnd
 
+Function TryRestorePreviousLocation
+  StrCmp $4 "" try_restore_done
+  ; 去掉可能存在的首尾引号
+  StrCpy $5 $4 1
+  StrCmp $5 "$\"" 0 +2
+    StrCpy $4 $4 "" 1
+  StrCpy $5 $4 1 -1
+  StrCmp $5 "$\"" 0 +3
+    StrLen $5 $4
+    IntOp $5 $5 - 1
+    StrCpy $4 $4 $5
+  StrCmp $4 "" try_restore_done
+  IfFileExists "$4\${MAINBINARYNAME}.exe" 0 try_restore_done
+  StrCpy $INSTDIR $4
+  StrCpy $R9 1
+  try_restore_done:
+FunctionEnd
+
 Function RestorePreviousInstallLocation
+  StrCpy $R9 0
+  ; 1) 历史默认值（旧版本写入）
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-  StrCmp $4 "" restore_done 0
-  ; 旧版本安装目录存在时，直接沿用（支持用户自定义安装路径），
-  ; 下次安装 / 升级默认覆盖到同一目录，而不是回到固定默认路径。
-  IfFileExists "$4\${MAINBINARYNAME}.exe" 0 restore_done
-    StrCpy $INSTDIR $4
-  restore_done:
+  Call TryRestorePreviousLocation
+  ; 2) V0.7 起显式写入的 InstallDir
+  ${If} $R9 = 0
+    ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" "InstallDir"
+    Call TryRestorePreviousLocation
+  ${EndIf}
+  ; 3) Add/Remove Programs 中的 InstallLocation（可能带引号）
+  ${If} $R9 = 0
+    ReadRegStr $4 SHCTX "${UNINSTKEY}" "InstallLocation"
+    Call TryRestorePreviousLocation
+  ${EndIf}
 FunctionEnd
 
 Function Skip

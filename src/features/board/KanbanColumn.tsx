@@ -1,10 +1,11 @@
 import { useRef, useState, type CSSProperties, type DragEvent } from 'react';
 import { Icon } from '@/components/Icon';
-import type { Card, List } from '@/lib/types';
+import { boardColorValue, type Card, type List } from '@/lib/types';
 import { useAppStore } from '@/store/appStore';
 import { useUiStore } from '@/store/uiStore';
 import { AddCardComposer } from './AddCardComposer';
 import { InlineEdit } from './InlineEdit';
+import { ListSettingsModal } from './ListSettingsModal';
 import { PopMenu } from './PopMenu';
 import { TaskCard } from './TaskCard';
 
@@ -52,7 +53,9 @@ export function KanbanColumn({
   const openCard = useUiStore((state) => state.openCard);
   const [editingTitle, setEditingTitle] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const overWip = list.wipLimit !== null && cards.length > list.wipLimit;
 
   const columnStyle = { '--column-accent': accentColor } as CSSProperties;
 
@@ -69,9 +72,13 @@ export function KanbanColumn({
   };
 
   return (
+    <>
     <section
       className={`board-column${isDropActive ? ' is-drop-over' : ''}`}
-      style={columnStyle}
+      style={{
+        ...columnStyle,
+        borderTopColor: boardColorValue(list.color),
+      }}
       aria-label={`列表：${list.title}`}
       // 拖拽事件挂在整列上：卡片下方空白、列头、底部区域都能接收放置，
       // 不再受「卡片区高度只到内容高度」影响。
@@ -79,6 +86,7 @@ export function KanbanColumn({
       onDrop={(event) => onDropColumn(list.id, event, bodyRef.current)}
     >
       <header className="board-column-head">
+        <span className="column-color-dot" style={{ background: boardColorValue(list.color) }} />
         <InlineEdit
           value={list.title}
           editing={editingTitle}
@@ -90,9 +98,18 @@ export function KanbanColumn({
           maxLength={60}
           title="点击重命名列表"
         />
-        <span className="column-count" title={`${cards.length} 个任务`}>
+        <span
+          className={`column-count${overWip ? ' is-over' : ''}`}
+          title={
+            list.wipLimit
+              ? `WIP 上限 ${list.wipLimit}，当前 ${cards.length} 个任务`
+              : `${cards.length} 个任务`
+          }
+        >
           {cards.length}
+          {list.wipLimit ? ` / ${list.wipLimit}` : ''}
         </span>
+        {overWip ? <span className="column-wip-warning">超 WIP</span> : null}
         <div className="column-head-actions">
           <button
             type="button"
@@ -111,6 +128,12 @@ export function KanbanColumn({
                 label: '重命名列表',
                 icon: 'pencil',
                 onSelect: () => setEditingTitle(true),
+              },
+              {
+                kind: 'item',
+                label: '列表设置',
+                icon: 'sliders',
+                onSelect: () => setSettingsOpen(true),
               },
               { kind: 'sep' },
               {
@@ -162,5 +185,15 @@ export function KanbanColumn({
         />
       </footer>
     </section>
+    <ListSettingsModal
+      open={settingsOpen}
+      list={list}
+      onClose={() => setSettingsOpen(false)}
+      onSubmit={async (patch) => {
+        await updateList(list.id, patch);
+        setSettingsOpen(false);
+      }}
+    />
+    </>
   );
 }

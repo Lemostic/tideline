@@ -703,3 +703,45 @@
 .drawer-goal-chip:hover {
   border-color: var(--primary);
 }
+
+.card-accent-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.card-accent-none {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.card-accent-none.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.card-accent-swatch {
+  width: 20px;
+  height: 20px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+
+.card-accent-swatch:hover {
+  transform: scale(1.12);
+}
+
+.card-accent-swatch.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px var(--ink-2);
+}

@@ -127,8 +127,8 @@ fn subtasks_from_json(raw: &str) -> Vec<Subtask> {
 // ---------------------------------------------------------------------------
 
 const BOARD_COLUMNS: &str = "id, title, description, color, starred, created_at, updated_at";
-const LIST_COLUMNS: &str = "id, board_id, title, position, created_at";
-const CARD_COLUMNS: &str = "id, board_id, list_id, title, description, due_date, start_date, priority, completed, labels, subtasks, position, deleted_at, created_at, updated_at";
+const LIST_COLUMNS: &str = "id, board_id, title, color, wip_limit, position, created_at";
+const CARD_COLUMNS: &str = "id, board_id, list_id, title, description, due_date, start_date, priority, accent, completed, labels, subtasks, position, deleted_at, created_at, updated_at";
 const INBOX_COLUMNS: &str = "id, content, created_at";
 
 fn row_to_board(row: &Row<'_>) -> rusqlite::Result<Board> {
@@ -149,6 +149,8 @@ fn row_to_list(row: &Row<'_>) -> rusqlite::Result<List> {
         id: row.get("id")?,
         board_id: row.get("board_id")?,
         title: row.get("title")?,
+        color: BoardColor::from_db(row.get::<_, String>("color")?.as_str()),
+        wip_limit: row.get("wip_limit")?,
         position: row.get("position")?,
         created_at: row.get("created_at")?,
     })
@@ -156,6 +158,7 @@ fn row_to_list(row: &Row<'_>) -> rusqlite::Result<List> {
 
 fn row_to_card(row: &Row<'_>) -> rusqlite::Result<Card> {
     let priority: Option<String> = row.get("priority")?;
+    let accent: Option<String> = row.get("accent")?;
     let labels: String = row.get("labels")?;
     let subtasks: String = row.get("subtasks")?;
     Ok(Card {
@@ -167,6 +170,7 @@ fn row_to_card(row: &Row<'_>) -> rusqlite::Result<Card> {
         due_date: row.get("due_date")?,
         start_date: row.get("start_date")?,
         priority: priority.as_deref().and_then(Priority::from_db),
+        accent: accent.map(|value| BoardColor::from_db(&value)),
         completed: row.get::<_, i64>("completed")? != 0,
         labels: labels_from_json(&labels),
         subtasks: subtasks_from_json(&subtasks),
@@ -1002,15 +1006,20 @@ pub fn create_list(conn: &mut Connection, input: NewListInput) -> DbResult<List>
         id: create_id("l"),
         board_id: input.board_id,
         title: fallback_trimmed(&input.title, "未命名列表"),
+        color: input.color.unwrap_or(BoardColor::Slate),
+        wip_limit: input.wip_limit.filter(|value| *value > 0),
         position,
         created_at: now_iso(),
     };
     tx.execute(
-        "INSERT INTO lists (id, board_id, title, position, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO lists (id, board_id, title, color, wip_limit, position, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             &list.id,
             &list.board_id,
             &list.title,
+            list.color.as_str(),
+            list.wip_limit,
             list.position,
             &list.created_at
         ],
@@ -1027,9 +1036,20 @@ pub fn update_list(conn: &mut Connection, input: UpdateListInput) -> DbResult<Li
     if let Some(title) = input.patch.title {
         list.title = fallback_trimmed(&title, "未命名列表");
     }
+    if let Some(color) = input.patch.color {
+        list.color = color;
+    }
+    if let Some(wip_limit) = input.patch.wip_limit {
+        list.wip_limit = wip_limit.filter(|value| *value > 0);
+    }
     tx.execute(
-        "UPDATE lists SET title = ?1 WHERE id = ?2",
-        params![&list.title, &list.id],
+        "UPDATE lists SET title = ?1, color = ?2, wip_limit = ?3 WHERE id = ?4",
+        params![
+            &list.title,
+            list.color.as_str(),
+            list.wip_limit,
+            &list.id,
+        ],
     )
     .map_err(db_err)?;
     touch_board(&tx, &list.board_id)?;
@@ -1069,6 +1089,7 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
         due_date: input.due_date,
         start_date: input.start_date,
         priority: input.priority,
+        accent: input.accent,
         completed: false,
         deleted_at: None,
         labels: input.labels.unwrap_or_default(),
@@ -1081,9 +1102,9 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
     let subtasks_json = subtasks_to_json(&card.subtasks)?;
     tx.execute(
         "INSERT INTO cards \
-         (id, board_id, list_id, title, description, due_date, start_date, priority, completed, \
+         (id, board_id, list_id, title, description, due_date, start_date, priority, accent, completed, \
          labels, subtasks, position, deleted_at, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, ?13, ?14)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, ?14, ?15)",
         params![
             &card.id,
             &card.board_id,
@@ -1093,6 +1114,7 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
             &card.due_date,
             &card.start_date,
             card.priority.map(Priority::as_str),
+            card.accent.map(BoardColor::as_str),
             card.completed as i64,
             &labels_json,
             &subtasks_json,
@@ -1124,6 +1146,9 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
     }
     if let Some(priority) = input.patch.priority {
         card.priority = priority;
+    }
+    if let Some(accent) = input.patch.accent {
+        card.accent = accent;
     }
     if let Some(completed) = input.patch.completed {
         card.completed = completed;
@@ -1165,14 +1190,15 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
     let subtasks_json = subtasks_to_json(&card.subtasks)?;
     tx.execute(
         "UPDATE cards SET title = ?1, description = ?2, due_date = ?3, start_date = ?4, \
-         priority = ?5, completed = ?6, labels = ?7, subtasks = ?8, position = ?9, \
-         updated_at = ?10 WHERE id = ?11",
+         priority = ?5, accent = ?6, completed = ?7, labels = ?8, subtasks = ?9, position = ?10, \
+         updated_at = ?11 WHERE id = ?12",
         params![
             &card.title,
             &card.description,
             &card.due_date,
             &card.start_date,
             card.priority.map(Priority::as_str),
+            card.accent.map(BoardColor::as_str),
             card.completed as i64,
             &labels_json,
             &subtasks_json,
@@ -1394,6 +1420,7 @@ pub fn convert_inbox_item(conn: &mut Connection, input: ConvertInboxInput) -> Db
         due_date: None,
         start_date: None,
         priority: None,
+        accent: None,
         completed: false,
         deleted_at: None,
         labels: Vec::new(),
@@ -1406,9 +1433,9 @@ pub fn convert_inbox_item(conn: &mut Connection, input: ConvertInboxInput) -> Db
     let subtasks_json = subtasks_to_json(&card.subtasks)?;
     tx.execute(
         "INSERT INTO cards \
-         (id, board_id, list_id, title, description, due_date, start_date, priority, completed, \
+         (id, board_id, list_id, title, description, due_date, start_date, priority, accent, completed, \
          labels, subtasks, position, deleted_at, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, ?6, ?7, ?8, ?9, NULL, ?10, ?11)",
+         VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, NULL, ?6, ?7, ?8, ?9, NULL, ?10, ?11)",
         params![
             &card.id,
             &card.board_id,
@@ -1462,6 +1489,8 @@ mod tests {
             NewListInput {
                 board_id: board_id.to_string(),
                 title: title.to_string(),
+                color: None,
+                wip_limit: None,
             },
         )
         .expect("创建列表失败")
@@ -1608,6 +1637,8 @@ mod tests {
             NewListInput {
                 board_id: board.id.clone(),
                 title: "   ".to_string(),
+                color: None,
+                wip_limit: None,
             },
         )
         .expect("创建列表");

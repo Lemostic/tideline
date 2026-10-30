@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS lists (
     id         TEXT PRIMARY KEY NOT NULL,
     board_id   TEXT NOT NULL REFERENCES boards (id) ON DELETE CASCADE,
     title      TEXT NOT NULL,
+    color      TEXT NOT NULL DEFAULT 'slate',
+    wip_limit  INTEGER,
     position   INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
@@ -109,6 +111,7 @@ CREATE TABLE IF NOT EXISTS cards (
     due_date    TEXT,
     start_date  TEXT,
     priority    TEXT CHECK (priority IN ('low', 'medium', 'high') OR priority IS NULL),
+    accent      TEXT,
     completed   INTEGER NOT NULL DEFAULT 0,
     labels      TEXT NOT NULL DEFAULT '[]',
     subtasks    TEXT NOT NULL DEFAULT '[]',
@@ -209,7 +212,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -228,6 +231,15 @@ const CARD_COLUMN_MIGRATIONS: &[(&str, &str)] = &[
         "ALTER TABLE cards ADD COLUMN subtasks TEXT NOT NULL DEFAULT '[]'",
     ),
     ("deleted_at", "ALTER TABLE cards ADD COLUMN deleted_at TEXT"),
+    ("accent", "ALTER TABLE cards ADD COLUMN accent TEXT"),
+];
+
+const LIST_COLUMN_MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "color",
+        "ALTER TABLE lists ADD COLUMN color TEXT NOT NULL DEFAULT 'slate'",
+    ),
+    ("wip_limit", "ALTER TABLE lists ADD COLUMN wip_limit INTEGER"),
 ];
 
 /// 幂等迁移：缺哪列补哪列，不重建表、不丢用户数据。
@@ -244,10 +256,18 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
             format!("迁移 cards.{column} 失败（请先备份数据库后重试）：{error}")
         })?;
     }
+    let existing_lists = table_columns(connection, "lists")?;
+    for (column, statement) in LIST_COLUMN_MIGRATIONS {
+        if existing_lists.iter().any(|name| name == column) {
+            continue;
+        }
+        connection.execute_batch(statement).map_err(|error| {
+            format!("迁移 lists.{column} 失败（请先备份数据库后重试）：{error}")
+        })?;
+    }
     connection
         .execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_cards_deleted_at ON cards (deleted_at);
-             CREATE TABLE IF NOT EXISTS card_dependencies (
+            "CREATE INDEX IF NOT EXISTS idx_cards_deleted_at ON cards (deleted_at);             CREATE TABLE IF NOT EXISTS card_dependencies (
                  card_id            TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
                  depends_on_card_id TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
                  PRIMARY KEY (card_id, depends_on_card_id)

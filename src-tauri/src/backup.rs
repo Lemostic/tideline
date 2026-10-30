@@ -276,12 +276,14 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
 
     for list in &backup.lists {
         tx.execute(
-            "INSERT INTO lists (id, board_id, title, position, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO lists (id, board_id, title, color, wip_limit, position, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 &list.id,
                 &list.board_id,
                 &list.title,
+                list.color.as_str(),
+                list.wip_limit,
                 list.position,
                 &list.created_at,
             ],
@@ -296,9 +298,9 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
             .map_err(|error| format!("子任务序列化失败：{error}"))?;
         tx.execute(
             "INSERT INTO cards \
-             (id, board_id, list_id, title, description, due_date, start_date, priority, \
+             (id, board_id, list_id, title, description, due_date, start_date, priority, accent, \
               completed, labels, subtasks, position, deleted_at, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 &card.id,
                 &card.board_id,
@@ -308,6 +310,7 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
                 &card.due_date,
                 &card.start_date,
                 card.priority.map(Priority::as_str),
+                card.accent.map(BoardColor::as_str),
                 card.completed as i64,
                 labels,
                 subtasks,
@@ -429,6 +432,8 @@ mod tests {
             NewListInput {
                 board_id: board.id.clone(),
                 title: "待办".to_string(),
+                color: None,
+                wip_limit: None,
             },
         )
         .expect("创建列表");
@@ -442,6 +447,7 @@ mod tests {
                 due_date: Some("2026-05-01".to_string()),
                 start_date: Some("2026-04-01".to_string()),
                 priority: Some(Priority::High),
+                accent: None,
                 labels: Some(vec!["研发".to_string()]),
                 subtasks: Some(vec![Subtask {
                     id: "s_1".to_string(),
@@ -601,6 +607,7 @@ mod tests {
                 due_date: None,
                 start_date: None,
                 priority: None,
+                accent: None,
                 completed: false,
                 deleted_at: None,
                 labels: Vec::new(),

@@ -161,6 +161,7 @@ function normalizeCard(raw: Card): Card {
     ...raw,
     startDate: raw.startDate ?? null,
     deletedAt: raw.deletedAt ?? null,
+    accent: raw.accent ?? null,
     labels,
     subtasks,
   };
@@ -207,7 +208,13 @@ function loadLocalDb(): LocalDb {
     const parsed = JSON.parse(raw) as Partial<LocalDb>;
     return {
       boards: Array.isArray(parsed.boards) ? parsed.boards : [],
-      lists: Array.isArray(parsed.lists) ? parsed.lists : [],
+      lists: Array.isArray(parsed.lists)
+        ? parsed.lists.map((list) => ({
+            ...list,
+            color: list.color ?? 'slate',
+            wipLimit: typeof list.wipLimit === 'number' ? list.wipLimit : null,
+          }))
+        : [],
       cards: Array.isArray(parsed.cards) ? parsed.cards.map(normalizeCard) : [],
       inbox: Array.isArray(parsed.inbox) ? parsed.inbox : [],
       dependencies: Array.isArray(parsed.dependencies)
@@ -490,6 +497,8 @@ const localApi: TidelineApi = {
       id: createId('l'),
       boardId: input.boardId,
       title: input.title.trim() || '未命名列表',
+      color: input.color ?? 'slate',
+      wipLimit: input.wipLimit && input.wipLimit > 0 ? input.wipLimit : null,
       position: siblings.length ? Math.max(...siblings.map((l) => l.position)) + 1 : 0,
       createdAt: nowISO(),
     };
@@ -503,6 +512,10 @@ const localApi: TidelineApi = {
     const db = loadLocalDb();
     const list = requireList(db, id);
     if (patch.title !== undefined) list.title = patch.title.trim() || '未命名列表';
+    if (patch.color !== undefined) list.color = patch.color;
+    if (patch.wipLimit !== undefined) {
+      list.wipLimit = patch.wipLimit && patch.wipLimit > 0 ? patch.wipLimit : null;
+    }
     touchBoard(db, list.boardId);
     saveLocalDb(db);
     return list;
@@ -536,6 +549,7 @@ const localApi: TidelineApi = {
       dueDate: input.dueDate ?? null,
       startDate: input.startDate ?? null,
       priority: input.priority ?? null,
+      accent: input.accent ?? null,
       completed: false,
       deletedAt: null,
       labels: input.labels ? [...input.labels] : [],
@@ -558,6 +572,7 @@ const localApi: TidelineApi = {
     if (patch.dueDate !== undefined) card.dueDate = patch.dueDate;
     if (patch.startDate !== undefined) card.startDate = patch.startDate;
     if (patch.priority !== undefined) card.priority = patch.priority;
+    if (patch.accent !== undefined) card.accent = patch.accent;
     if (patch.completed !== undefined) card.completed = patch.completed;
     if (patch.labels !== undefined) card.labels = [...patch.labels];
     if (patch.subtasks !== undefined) card.subtasks = patch.subtasks.map((item) => ({ ...item }));
@@ -734,6 +749,7 @@ const localApi: TidelineApi = {
       dueDate: null,
       startDate: null,
       priority: null,
+      accent: null,
       completed: false,
       deletedAt: null,
       labels: [],

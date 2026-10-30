@@ -142,12 +142,21 @@ pub struct Board {
     pub updated_at: String,
 }
 
+fn default_list_color() -> BoardColor {
+    BoardColor::Slate
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct List {
-    pub id: String,
+pub struct List {    pub id: String,
     pub board_id: String,
     pub title: String,
+    /// 列主题色（V0.7）
+    #[serde(default = "default_list_color")]
+    pub color: BoardColor,
+    /// 在制品上限；None 表示不限制
+    #[serde(default)]
+    pub wip_limit: Option<i64>,
     pub position: i64,
     pub created_at: String,
 }
@@ -173,6 +182,8 @@ pub struct Card {
     /// 甘特视图的起始日期（YYYY-MM-DD），null 表示未排期。
     pub start_date: Option<String>,
     pub priority: Option<Priority>,
+    /// 卡片强调色（V0.7），None 时使用默认卡片样式
+    pub accent: Option<BoardColor>,
     pub completed: bool,
     /// 软删除时间；非 null 表示在回收站，`get_snapshot` 不会返回这些任务。
     pub deleted_at: Option<String>,
@@ -344,6 +355,10 @@ pub struct UpdateBoardInput {
 pub struct NewListInput {
     pub board_id: String,
     pub title: String,
+    #[serde(default)]
+    pub color: Option<BoardColor>,
+    #[serde(default)]
+    pub wip_limit: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -351,6 +366,10 @@ pub struct NewListInput {
 pub struct ListPatch {
     #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
+    pub color: Option<BoardColor>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub wip_limit: Option<Option<i64>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -374,6 +393,8 @@ pub struct NewCardInput {
     pub start_date: Option<String>,
     #[serde(default)]
     pub priority: Option<Priority>,
+    #[serde(default)]
+    pub accent: Option<BoardColor>,
     #[serde(default)]
     pub labels: Option<Vec<String>>,
     #[serde(default)]
@@ -404,6 +425,8 @@ pub struct CardPatch {
     pub start_date: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub priority: Option<Option<Priority>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub accent: Option<Option<BoardColor>>,
     #[serde(default)]
     pub completed: Option<bool>,
     #[serde(default)]
@@ -575,6 +598,7 @@ mod tests {
             due_date: Some("2026-01-10".to_string()),
             start_date: Some("2026-02-01".to_string()),
             priority: Some(Priority::High),
+            accent: None,
             completed: false,
             deleted_at: None,
             labels: vec!["研发".to_string()],

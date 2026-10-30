@@ -22,6 +22,8 @@ const list: List = {
   id: 'l_1',
   boardId: 'b_1',
   title: '待办',
+  color: 'slate',
+  wipLimit: null,
   position: 0,
   createdAt: '2026-01-01T00:00:00.000Z',
 };

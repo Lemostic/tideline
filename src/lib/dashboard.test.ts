@@ -17,7 +17,7 @@ function board(id: string, title: string): Board {
 }
 
 function list(id: string, boardId: string): List {
-  return { id, boardId, title: '待办', position: 0, createdAt: '2026-05-01T00:00:00.000Z' };
+  return { id, boardId, title: '待办', color: 'slate', wipLimit: null, position: 0, createdAt: '2026-05-01T00:00:00.000Z' };
 }
 
 function card(

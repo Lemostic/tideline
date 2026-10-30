@@ -6,6 +6,7 @@ import { blockersFor, dependencyCandidates } from '@/lib/dependencies';
 import { createId } from '@/lib/ids';
 import { isBlankMarkdown, renderMarkdown } from '@/lib/markdown';
 import {
+  BOARD_COLORS,
   boardColorValue,
   PRIORITY_META,
   type Card,
@@ -460,6 +461,37 @@ export function TaskDrawer() {
                   >
                     无
                   </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="meta-row">
+              <div className="meta-label">
+                <Icon name="flag" size={14} />
+                卡片颜色
+              </div>
+              <div className="meta-value">
+                <div className="card-accent-group">
+                  <button
+                    type="button"
+                    className={`card-accent-none${!card.accent ? ' active' : ''}`}
+                    onClick={() => void updateCard(card.id, { accent: null })}
+                    title="默认样式"
+                  >
+                    默认
+                  </button>
+                  {BOARD_COLORS.map((color) => (
+                    <button
+                      key={color.key}
+                      type="button"
+                      className={`card-accent-swatch${card.accent === color.key ? ' active' : ''}`}
+                      style={{ background: color.value }}
+                      title={color.label}
+                      aria-label={`卡片颜色：${color.label}`}
+                      aria-pressed={card.accent === color.key}
+                      onClick={() => void updateCard(card.id, { accent: color.key })}
+                    />
+                  ))}
                 </div>
               </div>
             </div>
