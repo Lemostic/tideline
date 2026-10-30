@@ -1,0 +1,296 @@
+/* 收件箱：快速记录 + 待整理列表 */
+
+.page.inbox-page {
+  width: 100%;
+  max-width: none;
+}
+
+.inbox-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.inbox-pill.is-empty {
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* ---------- 快速记录 ---------- */
+.inbox-composer {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.inbox-composer:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.inbox-textarea {
+  width: 100%;
+  min-height: 62px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+.inbox-textarea::placeholder {
+  color: var(--faint);
+}
+
+.inbox-composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--line);
+}
+
+.inbox-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ---------- 提示条 ---------- */
+.inbox-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.inbox-note svg {
+  flex: 0 0 auto;
+  color: var(--faint);
+}
+
+.inbox-flash {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid #cbe8d5;
+  border-radius: var(--radius-sm);
+  background: var(--success-soft);
+  color: #2f8a53;
+  font-size: 12px;
+  line-height: 1.6;
+  animation: fade-in 150ms var(--ease);
+}
+
+.inbox-flash-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-flash-close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.inbox-flash-close:hover {
+  background: rgba(47, 138, 83, 0.1);
+  opacity: 1;
+}
+
+/* ---------- 列表 ---------- */
+.inbox-page .inbox-section-head {
+  padding: 20px 2px 10px;
+}
+
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inbox-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.inbox-item:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.inbox-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.inbox-item-text {
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.inbox-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.inbox-item-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding-top: 1px;
+}
+
+.btn.inbox-convert-btn {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.btn.inbox-convert-btn:hover:not(:disabled) {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.btn.btn-icon.inbox-delete-btn {
+  width: 28px;
+  height: 28px;
+  color: var(--faint);
+}
+
+.btn.btn-icon.inbox-delete-btn:hover:not(:disabled) {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.inbox-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbox-confirm-text {
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* ---------- 转为任务弹窗 ---------- */
+.inbox-convert-quote {
+  max-height: 132px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.inbox-convert-empty {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.inbox-convert-empty svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--faint);
+}
+
+.inbox-convert-empty-title {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.inbox-convert-empty-sub {
+  margin-top: 3px;
+}
+
+.inbox-convert-nolist {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 720px) {
+  .inbox-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .inbox-item-actions {
+    justify-content: flex-end;
+  }
+
+  .inbox-hint {
+    display: none;
+  }
+}

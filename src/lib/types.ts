@@ -1,0 +1,206 @@
+/**
+ * 潮线 tideline — 领域模型
+ *
+ * 数据全部落在一个本地 SQLite 文件中（浏览器环境降级为 localStorage），
+ * 前后端共享同一套模型定义，字段命名统一使用 camelCase。
+ */
+
+export type Priority = 'low' | 'medium' | 'high';
+
+/** 看板主题色，同时用于列表左侧色条与看板封面 */
+export type BoardColor =
+  | 'blue'
+  | 'amber'
+  | 'coral'
+  | 'green'
+  | 'violet'
+  | 'rose'
+  | 'teal'
+  | 'slate';
+
+export interface Board {
+  id: string;
+  title: string;
+  description: string;
+  color: BoardColor;
+  starred: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface List {
+  id: string;
+  boardId: string;
+  title: string;
+  /** 同一看板内的排序序号，从 0 递增 */
+  position: number;
+  createdAt: string;
+}
+
+/** 任务内的子任务（清单项），存在 cards.subtasks 的 JSON 里 */
+export interface Subtask {
+  id: string;
+  title: string;
+  done: boolean;
+}
+
+export interface Card {
+  id: string;
+  boardId: string;
+  listId: string;
+  title: string;
+  description: string;
+  /** YYYY-MM-DD，仅日期，不含时区；null 表示无截止日期 */
+  dueDate: string | null;
+  /** YYYY-MM-DD，甘特视图的起始日期；null 表示未排期 */
+  startDate: string | null;
+  priority: Priority | null;
+  completed: boolean;
+  /** 软删除时间；非 null 表示在回收站中，正常快照不会返回这些任务 */
+  deletedAt: string | null;
+  /** 自由标签，例如「研发」「高风险」 */
+  labels: string[];
+  /** 子任务清单，进度由完成数 / 总数派生 */
+  subtasks: Subtask[];
+  /** 同一列表内的排序序号，从 0 递增 */
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InboxItem {
+  id: string;
+  content: string;
+  createdAt: string;
+}
+
+/** 启动时一次性拉取的全量快照（本地单用户，数据量小） */
+export interface Snapshot {
+  boards: Board[];
+  lists: List[];
+  cards: Card[];
+  inbox: InboxItem[];
+}
+
+export type BoardPatch = Partial<
+  Pick<Board, 'title' | 'description' | 'color' | 'starred'>
+>;
+
+export type ListPatch = Partial<Pick<List, 'title'>>;
+
+export type CardPatch = Partial<
+  Pick<
+    Card,
+    | 'title'
+    | 'description'
+    | 'dueDate'
+    | 'startDate'
+    | 'priority'
+    | 'completed'
+    | 'listId'
+    | 'labels'
+    | 'subtasks'
+  >
+>;
+
+export interface NewBoardInput {
+  title: string;
+  description?: string;
+  color?: BoardColor;
+}
+
+export interface NewListInput {
+  boardId: string;
+  title: string;
+}
+
+export interface NewCardInput {
+  boardId: string;
+  listId: string;
+  title: string;
+  description?: string;
+  dueDate?: string | null;
+  startDate?: string | null;
+  priority?: Priority | null;
+  labels?: string[];
+  subtasks?: Subtask[];
+}
+
+export interface MoveCardInput {
+  cardId: string;
+  toListId: string;
+  /** 目标列表内的落点下标，越界时由后端收敛到末尾 */
+  toIndex: number;
+}
+
+export interface IdInput {
+  id: string;
+}
+
+export interface ConvertInboxInput {
+  id: string;
+  boardId: string;
+  listId?: string;
+}
+
+/** 模板中心的数据结构：模板是创建看板的一份“菜谱”，不是数据库实体 */
+export interface BoardTemplate {
+  id: string;
+  name: string;
+  summary: string;
+  category: TemplateCategory;
+  color: BoardColor;
+  /** 用简短 emoji 充当模板封面图标，避免离线加载图片 */
+  emoji: string;
+  lists: Array<{
+    title: string;
+    cards: string[];
+  }>;
+}
+
+export type TemplateCategory =
+  | 'hot'
+  | 'collab'
+  | 'content'
+  | 'product'
+  | 'personal';
+
+export interface TemplateCategoryMeta {
+  key: TemplateCategory | 'all';
+  label: string;
+}
+
+/** 仪表盘 / 看板集 / 目标：保留菜单入口与功能占位 */
+export type VipFeature = 'dashboard' | 'board-sets' | 'goals';
+
+/** 看板内可切换的视图，V0.2 起看板 / 表格 / 甘特已实现，日历待 V0.3 */
+export type BoardView = 'board' | 'table' | 'gantt' | 'calendar';
+
+export const BOARD_COLORS: ReadonlyArray<{
+  key: BoardColor;
+  label: string;
+  value: string;
+}> = [
+  { key: 'blue', label: '海蓝', value: '#4c8dff' },
+  { key: 'teal', label: '青碧', value: '#0f9e8e' },
+  { key: 'green', label: '苔绿', value: '#3fae6d' },
+  { key: 'amber', label: '暖沙', value: '#e9a23b' },
+  { key: 'coral', label: '珊瑚', value: '#ff7a59' },
+  { key: 'rose', label: '玫瑰', value: '#e5638d' },
+  { key: 'violet', label: '紫藤', value: '#8e7cff' },
+  { key: 'slate', label: '岩灰', value: '#7b8794' },
+];
+
+export function boardColorValue(color: BoardColor): string {
+  return BOARD_COLORS.find((c) => c.key === color)?.value ?? '#4c8dff';
+}
+
+export const PRIORITY_META: ReadonlyArray<{
+  key: Priority;
+  label: string;
+  color: string;
+}> = [
+  { key: 'high', label: '高', color: '#e5533d' },
+  { key: 'medium', label: '中', color: '#e9a23b' },
+  { key: 'low', label: '低', color: '#4c8dff' },
+];

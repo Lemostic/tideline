@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+dist-ssr/
+/release/
+*.local
+
+# tauri / rust
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# editor / os
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.openidea/
+.DS_Store
+Thumbs.db
+
+# test / verification artifacts
+.playwright/
+.verify/
+/screenshots/
+coverage/
+*.log

@@ -1,0 +1,559 @@
+/**
+ * 任务详情抽屉增强样式（子任务/进度、标签、Markdown 描述、开始日期）。
+ * 只使用 td- 前缀的新类名，不改动 base.css 里的抽屉基础样式。
+ */
+
+/*
+ * 抽屉内容变长后，flex 列布局会压缩子项而不是滚动（meta-grid 的 overflow:hidden
+ * 会被压成 1px 边框）。固定子项不参与收缩，让 .drawer-body 正常出现滚动条。
+ */
+.drawer-body > * {
+  flex: 0 0 auto;
+}
+
+/* ---------- 标题区补充：状态 chip、日期轻提示 ---------- */
+.td-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.td-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.td-status.done {
+  background: var(--success-soft);
+  color: #2f8a53;
+}
+
+.td-status.doing {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.td-status.todo {
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+.td-meta-hint {
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.td-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: #9a6a14;
+  font-size: 11.5px;
+  line-height: 1.6;
+  animation: fade-in 140ms var(--ease);
+}
+
+.td-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.td-note.warn {
+  background: var(--danger-soft);
+  color: #a84039;
+}
+
+/* ---------- 通用小节 ---------- */
+.td-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.td-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.td-section-meta {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- 子任务进度 ---------- */
+.td-progress-value {
+  margin-left: auto;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.td-progress-value.is-full {
+  color: #2f8a53;
+}
+
+.td-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.td-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 220ms var(--ease);
+}
+
+.td-progress-fill.is-full {
+  background: var(--success);
+}
+
+/* ---------- 子任务清单 ---------- */
+.td-subtasks {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.td-subtasks-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.td-subtasks-empty svg {
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+
+.td-subtask {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 5px 5px 4px;
+  border-radius: var(--radius-xs);
+  transition: background var(--transition);
+}
+
+.td-subtask:hover {
+  background: var(--surface-hover);
+}
+
+.td-check {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: #fff;
+  transition: background var(--transition), border-color var(--transition),
+    transform 80ms var(--ease);
+}
+
+.td-check:hover {
+  border-color: var(--primary);
+}
+
+.td-check:active {
+  transform: scale(0.92);
+}
+
+.td-check.on {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.td-subtask-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.td-subtask-title.done {
+  color: var(--faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-strong);
+}
+
+.td-icon-btn {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--faint);
+  transition: opacity var(--transition), background var(--transition),
+    color var(--transition);
+}
+
+.td-subtask-del {
+  opacity: 0;
+}
+
+.td-subtask:hover .td-subtask-del,
+.td-subtask-del:focus-visible {
+  opacity: 1;
+}
+
+.td-icon-btn:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ---------- 添加一行（子任务 / 标签共用） ---------- */
+.td-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.td-add-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.td-add-input::placeholder {
+  color: var(--faint);
+}
+
+.td-add-input:hover {
+  border-color: var(--line-strong);
+}
+
+.td-add-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.td-add-input:disabled {
+  background: var(--surface-muted);
+  color: var(--faint);
+  cursor: not-allowed;
+}
+
+.td-add-input:disabled::placeholder {
+  color: var(--faint);
+}
+
+.td-add-btn {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--primary-soft-2);
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  transition: background var(--transition), opacity var(--transition);
+}
+
+.td-add-btn:hover:not(:disabled) {
+  background: var(--primary-soft-2);
+}
+
+.td-add-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- 标签 ---------- */
+.td-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.td-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  transition: background var(--transition), color var(--transition),
+    border-color var(--transition);
+}
+
+.td-label:hover {
+  border-color: #f3d3cf;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.td-label-x {
+  opacity: 0.5;
+}
+
+.td-label:hover .td-label-x {
+  opacity: 1;
+}
+
+.td-inline-note {
+  margin: 0;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.td-label-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.td-label-suggest-label {
+  margin-right: 1px;
+}
+
+.td-label-suggest button {
+  height: 20px;
+  padding: 0 7px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1;
+  transition: border-color var(--transition), background var(--transition),
+    color var(--transition);
+}
+
+.td-label-suggest button:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+/* ---------- 描述：编辑 / 预览 ---------- */
+.td-seg {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-sunken);
+}
+
+.td-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  transition: background var(--transition), color var(--transition);
+}
+
+.td-seg button:hover {
+  color: var(--ink-2);
+}
+
+.td-seg button.on {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-xs);
+}
+
+.td-md-hint {
+  margin: 0;
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 1.8;
+}
+
+.td-md-hint code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.td-md-empty {
+  padding: 20px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.td-md {
+  min-height: 120px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.td-md > :first-child {
+  margin-top: 0;
+}
+
+.td-md > :last-child {
+  margin-bottom: 0;
+}
+
+.td-md p {
+  margin: 0 0 8px;
+}
+
+.td-md h3,
+.td-md h4,
+.td-md h5,
+.td-md h6 {
+  margin: 12px 0 6px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.td-md ul,
+.td-md ol {
+  margin: 2px 0 8px;
+  padding-left: 20px;
+  list-style: disc outside;
+}
+
+.td-md ol {
+  list-style: decimal outside;
+}
+
+.td-md li {
+  margin: 3px 0;
+}
+
+.td-md li::marker {
+  color: var(--faint);
+}
+
+.td-md code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.td-md pre {
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #f4f6f3;
+  overflow-x: auto;
+}
+
+.td-md pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.td-md blockquote {
+  margin: 6px 0;
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--primary-soft-2);
+  color: var(--muted);
+}
+
+.td-md a {
+  color: var(--primary-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.td-md a:hover {
+  color: var(--primary);
+}
+
+.td-md strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.td-md em {
+  font-style: italic;
+}
+
+.td-md del {
+  color: var(--faint);
+}

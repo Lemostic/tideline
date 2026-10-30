@@ -1,0 +1,447 @@
+/* 模板中心：分类 Tab、模板卡片、预览弹窗 */
+
+.tmpl-page {
+  padding-bottom: 36px;
+}
+
+/* ---------- 分类 Tab ---------- */
+.tmpl-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px 14px;
+}
+
+.tmpl-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition:
+    background 140ms var(--ease),
+    border-color 140ms var(--ease),
+    color 140ms var(--ease),
+    box-shadow 140ms var(--ease);
+}
+
+.tmpl-tab:hover {
+  background: rgba(27, 42, 36, 0.05);
+  color: var(--ink-2);
+}
+
+.tmpl-tab.active {
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: var(--shadow-xs);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.tmpl-tab-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.tmpl-tab.active .tmpl-tab-count {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+/* ---------- 筛选结果行 ---------- */
+.tmpl-filter-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 12px;
+  font-size: 11.5px;
+  color: var(--faint);
+  user-select: none;
+}
+
+.tmpl-filter-count {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.tmpl-filter-hint {
+  margin-left: auto;
+}
+
+/* ---------- 模板网格 ---------- */
+.tmpl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
+  gap: 14px;
+}
+
+.tmpl-card {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  color: inherit;
+  text-align: left;
+  transition:
+    transform 160ms var(--ease),
+    box-shadow 160ms var(--ease),
+    border-color 160ms var(--ease);
+}
+
+.tmpl-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.tmpl-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ---------- 模板封面 ---------- */
+.tmpl-cover {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 98px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(135deg, var(--tmpl-soft, #f4f7f3) 0%, #ffffff 96%);
+}
+
+.tmpl-cover::before,
+.tmpl-cover::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  background: var(--tmpl-color, var(--primary));
+  pointer-events: none;
+}
+
+.tmpl-cover::before {
+  left: -24px;
+  top: -34px;
+  width: 78px;
+  height: 78px;
+  opacity: 0.06;
+}
+
+.tmpl-cover::after {
+  right: -34px;
+  bottom: -52px;
+  width: 124px;
+  height: 124px;
+  opacity: 0.1;
+}
+
+.tmpl-cover-emoji {
+  position: relative;
+  z-index: 1;
+  font-size: 34px;
+  line-height: 1;
+  filter: drop-shadow(0 5px 10px rgba(24, 38, 33, 0.14));
+  transition: transform 180ms var(--ease);
+}
+
+.tmpl-card:hover .tmpl-cover-emoji {
+  transform: translateY(-2px) scale(1.06);
+}
+
+.tmpl-badge-hot {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: var(--shadow-xs);
+  color: #9a6a14;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.tmpl-badge-cat {
+  position: absolute;
+  z-index: 2;
+  right: 10px;
+  bottom: 9px;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* ---------- 模板信息 ---------- */
+.tmpl-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px 13px;
+}
+
+.tmpl-name {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+
+.tmpl-summary {
+  display: -webkit-box;
+  min-height: 38px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.tmpl-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: auto;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.tmpl-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.tmpl-meta-sep {
+  width: 1px;
+  height: 10px;
+  background: var(--line-strong);
+}
+
+/* ---------- 空分类 ---------- */
+.tmpl-empty {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+}
+
+/* ---------- 预览弹窗 ---------- */
+.tmpl-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.tmpl-preview-cover {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--tmpl-soft, #f4f7f3) 0%, #ffffff 100%);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.tmpl-preview-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tmpl-preview-plan-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.tmpl-preview-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tmpl-preview-list {
+  padding: 10px 11px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.tmpl-preview-list-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tmpl-preview-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.tmpl-preview-list-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.tmpl-preview-list-count {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.tmpl-preview-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.tmpl-preview-card {
+  position: relative;
+  padding: 6px 9px 6px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.tmpl-preview-card::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 12px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.tmpl-preview-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.tmpl-preview-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: auto;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.tmpl-preview-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: #a84039;
+  font-size: 12px;
+}
+
+/* ---------- 创建中 ---------- */
+.tmpl-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: tmpl-spin 700ms linear infinite;
+}
+
+@keyframes tmpl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- 响应式与动效偏好 ---------- */
+@media (max-width: 1080px) {
+  .tmpl-grid {
+    grid-template-columns: repeat(auto-fill, minmax(218px, 1fr));
+    gap: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .tmpl-preview-lists {
+    grid-template-columns: 1fr;
+  }
+
+  .tmpl-filter-hint {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tmpl-card,
+  .tmpl-cover-emoji,
+  .tmpl-tab {
+    transition: none;
+  }
+
+  .tmpl-card:hover {
+    transform: none;
+  }
+
+  .tmpl-card:hover .tmpl-cover-emoji {
+    transform: none;
+  }
+
+  .tmpl-spinner {
+    animation-duration: 1.4s;
+  }
+}

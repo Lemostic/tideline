@@ -1,0 +1,73 @@
+/* 潮线 tideline — 设计令牌：颜色、圆角、阴影、排版、动效 */
+:root {
+  color-scheme: light;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+
+  /* 背景与表面 */
+  --bg-app: #f3f5f2;
+  --bg-app-deep: #edf0ec;
+  --surface: #ffffff;
+  --surface-muted: #fafbf8;
+  --surface-hover: #f4f7f3;
+  --surface-sunken: #eef1ed;
+
+  /* 文本 */
+  --ink: #1e2a2f;
+  --ink-2: #3b4a50;
+  --muted: #6c7a80;
+  --faint: #98a4a8;
+
+  /* 描边 */
+  --line: #e7ebe5;
+  --line-strong: #d8ded7;
+
+  /* 品牌色：潮线青 */
+  --primary: #0f766e;
+  --primary-strong: #0b5f59;
+  --primary-soft: #e2f2ef;
+  --primary-soft-2: #cfeae5;
+
+  /* 点缀：暖沙 */
+  --accent: #e9a23b;
+  --accent-soft: #fdf2df;
+
+  /* 语义色 */
+  --danger: #d9534a;
+  --danger-soft: #fdeceb;
+  --warn: #c98a24;
+  --success: #3fae6d;
+  --success-soft: #eaf6ee;
+
+  /* 数据色（看板主题色板的兜底） */
+  --data-blue: #4c8dff;
+  --data-amber: #e9a23b;
+  --data-coral: #ff7a59;
+  --data-green: #3fae6d;
+  --data-violet: #8e7cff;
+  --data-rose: #e5638d;
+
+  /* 圆角 */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  /* 阴影 */
+  --shadow-xs: 0 1px 2px rgba(24, 38, 33, 0.04);
+  --shadow-sm: 0 1px 2px rgba(24, 38, 33, 0.05), 0 2px 8px rgba(24, 38, 33, 0.04);
+  --shadow-md: 0 2px 4px rgba(24, 38, 33, 0.05), 0 10px 28px rgba(24, 38, 33, 0.07);
+  --shadow-lg: 0 6px 16px rgba(24, 38, 33, 0.08), 0 28px 56px rgba(24, 38, 33, 0.12);
+
+  /* 布局 */
+  --sidebar-w: 232px;
+  --topbar-h: 56px;
+
+  /* 动效 */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --transition: 150ms var(--ease);
+}

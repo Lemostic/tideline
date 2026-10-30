@@ -1,0 +1,440 @@
+/* 回收站（V0.3）：软删除任务列表，恢复 / 彻底删除 / 清空 */
+
+.page.trash-page {
+  width: 100%;
+  max-width: none;
+}
+
+.page-head.trash-head {
+  align-items: center;
+  row-gap: 6px;
+}
+
+.trash-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---------- 操作反馈 ---------- */
+.trash-flash {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid #cbe8d5;
+  border-radius: var(--radius-sm);
+  background: var(--success-soft);
+  color: #2f8a53;
+  font-size: 12px;
+  line-height: 1.6;
+  animation: fade-in 150ms var(--ease);
+}
+
+.trash-flash-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trash-flash-close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.trash-flash-close:hover {
+  background: rgba(47, 138, 83, 0.1);
+  opacity: 1;
+}
+
+/* ---------- 加载骨架 ---------- */
+.trash-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trash-skeleton-row {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 15px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.trash-skeleton-title {
+  display: block;
+  width: 42%;
+  height: 12px;
+}
+
+.trash-skeleton-meta {
+  display: block;
+  width: 68%;
+  height: 10px;
+}
+
+/* ---------- 搜索工具条 ---------- */
+.trash-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 2px 0 12px;
+}
+
+.trash-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 320px;
+  max-width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--faint);
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.trash-search:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.trash-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+.trash-search-input::placeholder {
+  color: var(--faint);
+}
+
+.trash-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.trash-search-clear {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+.trash-search-clear:hover {
+  background: var(--line);
+  color: var(--ink-2);
+}
+
+.trash-toolbar-count {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.trash-no-match {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 34px 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.trash-no-match svg {
+  color: var(--faint);
+}
+
+/* ---------- 列表条目 ---------- */
+.trash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trash-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.trash-item:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.trash-item.is-busy {
+  opacity: 0.62;
+}
+
+.trash-item-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.trash-item-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.trash-item-title {
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.trash-item-title.is-done {
+  color: var(--faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-strong);
+}
+
+.trash-completed {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--success-soft);
+  color: #2f8a53;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.trash-labels {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.trash-label {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.trash-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+  min-width: 0;
+}
+
+.trash-meta-sep {
+  color: var(--line-strong);
+}
+
+.trash-origin {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink-2);
+}
+
+.trash-origin-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+
+.trash-origin-name {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-origin svg {
+  flex: 0 0 auto;
+  color: var(--faint);
+}
+
+.trash-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.trash-meta svg {
+  color: var(--faint);
+}
+
+.trash-priority-dot {
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.trash-subtasks {
+  gap: 6px;
+}
+
+.trash-subtasks-track {
+  display: inline-block;
+  width: 46px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.trash-subtasks-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+/* ---------- 行内操作与二次确认 ---------- */
+.trash-item-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding-top: 1px;
+}
+
+.trash-item .btn.trash-restore-btn {
+  color: var(--primary-strong);
+  font-weight: 500;
+}
+
+.trash-item .btn.btn-ghost.trash-restore-btn:hover:not(:disabled) {
+  border-color: var(--primary-soft-2);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.trash-item .btn.trash-purge-btn {
+  color: var(--danger);
+  opacity: 0.9;
+}
+
+.trash-item .btn.trash-purge-btn:hover:not(:disabled) {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.trash-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.trash-confirm-text {
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.trash-confirm.is-danger .trash-confirm-text {
+  color: var(--danger);
+}
+
+/* ---------- 清空确认弹窗 ---------- */
+.trash-empty-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+
+/* ---------- 小屏 ---------- */
+@media (max-width: 760px) {
+  .trash-item {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .trash-item-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .trash-search {
+    width: 100%;
+  }
+
+  .trash-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .trash-toolbar-count {
+    margin-left: 0;
+  }
+
+  .trash-origin-name {
+    max-width: 130px;
+  }
+}

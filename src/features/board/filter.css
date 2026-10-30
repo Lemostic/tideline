@@ -1,0 +1,442 @@
+/* 看板筛选条：单行紧凑工具条 + 多选弹层 + 激活 chips 摘要 */
+
+.bf-bar {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 2px 2px 8px;
+}
+
+/* ---------- 关键词搜索 ---------- */
+.bf-search {
+  position: relative;
+  flex: 0 1 224px;
+  min-width: 150px;
+}
+
+.bf-search-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.bf-search-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 28px 0 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  outline: none;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.bf-search-input::placeholder {
+  color: var(--faint);
+}
+
+.bf-search-input:hover {
+  border-color: var(--line-strong);
+}
+
+.bf-search-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.bf-search-clear {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--faint);
+  transition: background var(--transition), color var(--transition);
+}
+
+.bf-search-clear:hover {
+  background: rgba(27, 42, 36, 0.06);
+  color: var(--ink);
+}
+
+/* ---------- 状态分段 ---------- */
+.bf-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+}
+
+.bf-seg {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background var(--transition), color var(--transition),
+    box-shadow var(--transition);
+}
+
+.bf-seg:hover {
+  color: var(--ink-2);
+}
+
+.bf-seg.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-xs);
+}
+
+/* ---------- 多选触发器 / 弹层 ---------- */
+.bf-pop-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.bf-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background var(--transition), border-color var(--transition),
+    color var(--transition), box-shadow var(--transition);
+}
+
+.bf-trigger:hover {
+  background: rgba(27, 42, 36, 0.05);
+  color: var(--ink);
+}
+
+.bf-trigger.is-on,
+.bf-trigger.is-open {
+  border-color: var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  color: var(--ink-2);
+}
+
+.bf-caret {
+  color: var(--faint);
+  transition: transform var(--transition);
+}
+
+.bf-trigger.is-open .bf-caret {
+  transform: rotate(180deg);
+}
+
+.bf-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.bf-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 40;
+  width: 218px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  animation: pop-in 120ms var(--ease);
+}
+
+.bf-pop-left {
+  left: 0;
+}
+
+.bf-pop-right {
+  right: 0;
+}
+
+.bf-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 6px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.bf-pop-clear {
+  margin-left: auto;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--primary-strong);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.bf-pop-clear:hover {
+  background: var(--primary-soft);
+}
+
+.bf-pop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 232px;
+  overflow-y: auto;
+}
+
+.bf-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  text-align: left;
+  transition: background var(--transition);
+}
+
+.bf-option:hover {
+  background: var(--surface-hover);
+}
+
+.bf-check {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: #fff;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.bf-option.is-checked .bf-check {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.bf-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bf-option-count {
+  font-size: 10.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.bf-option .dot {
+  width: 6px;
+  height: 6px;
+}
+
+/* ---------- 激活筛选 chips ---------- */
+.bf-chips {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.bf-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.bf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 190px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.bf-chip:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+.bf-chip > svg {
+  flex: 0 0 auto;
+  color: var(--faint);
+}
+
+.bf-chip:hover > svg {
+  color: var(--muted);
+}
+
+.bf-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bf-chip-x {
+  flex: 0 0 auto;
+}
+
+.bf-chip .dot {
+  width: 6px;
+  height: 6px;
+}
+
+/* ---------- 计数 / 重置 ---------- */
+.bf-count {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.bf-count.is-zero {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.bf-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: var(--shadow-xs);
+  transition: background var(--transition), border-color var(--transition),
+    color var(--transition);
+}
+
+.bf-reset:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+/* ---------- 窄屏：允许换行，chips 独占一行 ---------- */
+@media (max-width: 1100px) {
+  .bf-bar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    min-height: 0;
+  }
+
+  .bf-bar .grow {
+    display: none;
+  }
+
+  .bf-search {
+    flex: 1 1 220px;
+  }
+
+  .bf-count {
+    order: 9;
+    margin-left: auto;
+  }
+
+  .bf-chips {
+    order: 10;
+    flex: 1 1 auto;
+  }
+
+  .bf-reset {
+    order: 11;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bf-search-input,
+  .bf-search-clear,
+  .bf-seg,
+  .bf-trigger,
+  .bf-caret,
+  .bf-pop,
+  .bf-option,
+  .bf-check,
+  .bf-chip,
+  .bf-reset {
+    transition: none;
+  }
+
+  .bf-trigger.is-open .bf-caret {
+    transform: none;
+  }
+
+  .bf-pop {
+    animation: none;
+  }
+}

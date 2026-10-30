@@ -1,0 +1,384 @@
+/* 首页：星标看板 / 最近 / 全部看板 */
+
+.home-page {
+  padding-bottom: 36px;
+}
+
+/* ---------- 分区标题 ---------- */
+.home-section {
+  margin-bottom: 4px;
+}
+
+.home-section-head {
+  padding-top: 20px;
+}
+
+.home-section-icon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+.home-section-icon-star {
+  background: var(--accent-soft);
+  color: #c4831f;
+}
+
+.home-section-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--faint);
+  user-select: none;
+}
+
+/* ---------- 看板网格 ---------- */
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(252px, 1fr));
+  gap: 14px;
+}
+
+/* ---------- 看板卡片 ---------- */
+.home-board-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 140px;
+  padding: 15px 14px 13px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition:
+    transform 160ms var(--ease),
+    box-shadow 160ms var(--ease),
+    border-color 160ms var(--ease);
+}
+
+/* 左侧 4px 主题色条 */
+.home-board-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  background: var(--board-color, var(--primary));
+}
+
+.home-board-card:hover,
+.home-board-card:focus-within {
+  z-index: 5;
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.home-board-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.home-board-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.home-board-title {
+  flex: 1;
+  min-width: 0;
+  margin-top: 1px;
+  font-size: 14.5px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.home-board-tools {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: 0 0 auto;
+  margin: -3px -4px 0 0;
+}
+
+.home-board-star,
+.home-board-more {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--faint);
+  opacity: 0.6;
+  transition:
+    opacity 140ms var(--ease),
+    background 140ms var(--ease),
+    color 140ms var(--ease);
+}
+
+.home-board-card:hover .home-board-star,
+.home-board-card:hover .home-board-more,
+.home-board-star:focus-visible,
+.home-board-more:focus-visible {
+  opacity: 1;
+}
+
+.home-board-star:hover,
+.home-board-more:hover,
+.home-board-more.open {
+  background: rgba(27, 42, 36, 0.06);
+  color: var(--ink);
+  opacity: 1;
+}
+
+.home-board-star.on {
+  opacity: 1;
+  background: var(--accent-soft);
+  color: #c4831f;
+}
+
+.home-board-star.on:hover {
+  background: #fbe7c5;
+  color: #a86f10;
+}
+
+.home-board-menu {
+  min-width: 158px;
+}
+
+.home-board-desc {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-board-desc.is-empty {
+  color: var(--faint);
+}
+
+.home-board-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--faint);
+  user-select: none;
+}
+
+.home-board-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.home-board-stat .home-board-sep,
+.home-board-sep {
+  color: var(--line-strong);
+}
+
+.home-board-time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 虚线新建卡片 ---------- */
+.home-new-board {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 140px;
+  padding: 18px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--muted);
+  transition:
+    border-color 160ms var(--ease),
+    background 160ms var(--ease),
+    box-shadow 160ms var(--ease),
+    color 160ms var(--ease);
+}
+
+.home-new-board:hover {
+  border-color: var(--primary);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+}
+
+.home-new-board-plus {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 4px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  transition:
+    background 160ms var(--ease),
+    color 160ms var(--ease);
+}
+
+.home-new-board:hover .home-new-board-plus {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.home-new-board-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.home-new-board:hover .home-new-board-title {
+  color: var(--ink);
+}
+
+.home-new-board-sub {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+/* ---------- 空状态 ---------- */
+.home-empty-card {
+  margin-top: 6px;
+  padding: 20px 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.home-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.home-empty-steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--line);
+  font-size: 11.5px;
+  color: var(--faint);
+  user-select: none;
+}
+
+.home-empty-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.home-empty-step em {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.home-empty-arrow {
+  display: grid;
+  place-items: center;
+  color: var(--line-strong);
+}
+
+/* ---------- 删除确认弹窗 ---------- */
+.home-delete-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.home-delete-icon {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.home-delete-text p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+
+.home-delete-text strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.home-delete-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.home-delete-error {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
+/* ---------- 响应式与动效偏好 ---------- */
+@media (max-width: 1080px) {
+  .home-grid {
+    grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+    gap: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-board-card,
+  .home-new-board,
+  .home-new-board-plus,
+  .home-board-star,
+  .home-board-more {
+    transition: none;
+  }
+
+  .home-board-card:hover,
+  .home-board-card:focus-within {
+    transform: none;
+  }
+}
