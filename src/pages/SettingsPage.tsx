@@ -183,6 +183,25 @@ export function SettingsPage() {
               <span className="settings-switch-knob" />
             </button>
           </label>
+
+          <label className="settings-row">
+            <span className="settings-row-label">
+              <span>任务链连线</span>
+              <span className="settings-row-hint">看板中用虚线箭头标出前置 → 后置任务关系</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.showDependencyLines}
+              className={`settings-switch${settings.showDependencyLines ? ' is-on' : ''}`}
+              onClick={() =>
+                settings.update({ showDependencyLines: !settings.showDependencyLines })
+              }
+              aria-label="任务链连线"
+            >
+              <span className="settings-switch-knob" />
+            </button>
+          </label>
         </section>
 
         <section className="settings-card">

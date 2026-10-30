@@ -16,6 +16,8 @@ export interface Settings {
   weekStartsOn: 0 | 1;
   /** 我的任务 / 表格视图默认隐藏已完成 */
   hideCompletedByDefault: boolean;
+  /** 看板中显示任务依赖的虚线箭头 */
+  showDependencyLines: boolean;
   /** 启动应用后默认进入的页面 */
   startPage: StartPage;
 }
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultView: 'board',
   weekStartsOn: 1,
   hideCompletedByDefault: false,
+  showDependencyLines: true,
   startPage: '/',
 };
 
@@ -38,10 +41,11 @@ function normalize(raw: unknown): Settings {
     : DEFAULT_SETTINGS.defaultView;
   const weekStartsOn = value.weekStartsOn === 0 ? 0 : 1;
   const hideCompletedByDefault = Boolean(value.hideCompletedByDefault);
+  const showDependencyLines = value.showDependencyLines !== false;
   const startPage: StartPage = ['/', '/tasks', '/inbox'].includes(value.startPage as string)
     ? (value.startPage as StartPage)
     : DEFAULT_SETTINGS.startPage;
-  return { defaultView, weekStartsOn, hideCompletedByDefault, startPage };
+  return { defaultView, weekStartsOn, hideCompletedByDefault, showDependencyLines, startPage };
 }
 
 function loadSettings(): Settings {

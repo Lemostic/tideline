@@ -1,6 +1,8 @@
-import { useState, type DragEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type DragEvent } from 'react';
+import { dependencyPath, type CardBox } from '@/lib/dependencyLayout';
 import type { Board, Card, List } from '@/lib/types';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore, useSnapshot } from '@/store/appStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import { AddListColumn } from './AddListColumn';
 import { KanbanColumn } from './KanbanColumn';
 
@@ -12,6 +14,14 @@ interface DropTarget {
   listId: string;
   /** 当前渲染顺序下的落点下标（包含被拖拽卡片自身） */
   index: number;
+}
+
+interface DependencyLine {
+  key: string;
+  d: string;
+  done: boolean;
+  from: string;
+  to: string;
 }
 
 interface KanbanBoardProps {
@@ -49,8 +59,76 @@ export function KanbanBoard({
   onToggleSelect,
 }: KanbanBoardProps) {
   const moveCard = useAppStore((state) => state.moveCard);
+  const snapshot = useSnapshot();
+  const showDependencyLines = useSettingsStore((state) => state.showDependencyLines);
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const [dependencyLines, setDependencyLines] = useState<DependencyLine[]>([]);
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  // 任务链连线：按卡片实际 DOM 位置计算曲线路径，滚动 / 缩放 / 筛选后重算。
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!showDependencyLines || !canvas) {
+      setDependencyLines([]);
+      return;
+    }
+
+    const cardsById = new Map(snapshot.cards.map((card) => [card.id, card]));
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const canvasRect = canvas.getBoundingClientRect();
+      const boxes = new Map<string, CardBox>();
+      canvas.querySelectorAll<HTMLElement>('[data-card-id]').forEach((element) => {
+        const cardId = element.dataset.cardId;
+        if (!cardId) return;
+        const rect = element.getBoundingClientRect();
+        boxes.set(cardId, {
+          left: rect.left - canvasRect.left,
+          top: rect.top - canvasRect.top,
+          right: rect.right - canvasRect.left,
+          bottom: rect.bottom - canvasRect.top,
+          width: rect.width,
+          height: rect.height,
+        });
+      });
+
+      const next: DependencyLine[] = [];
+      for (const dependency of snapshot.dependencies) {
+        const from = boxes.get(dependency.dependsOnCardId);
+        const to = boxes.get(dependency.cardId);
+        if (!from || !to) continue;
+        const path = dependencyPath(from, to);
+        if (!path) continue;
+        next.push({
+          key: `${dependency.dependsOnCardId}->${dependency.cardId}`,
+          d: path,
+          done: cardsById.get(dependency.dependsOnCardId)?.completed === true,
+          from: dependency.dependsOnCardId,
+          to: dependency.cardId,
+        });
+      }
+      setDependencyLines(next);
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(update);
+    };
+
+    update();
+    window.addEventListener('scroll', schedule, true);
+    window.addEventListener('resize', schedule);
+    const observer = new ResizeObserver(schedule);
+    observer.observe(canvas);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule, true);
+      window.removeEventListener('resize', schedule);
+      observer.disconnect();
+    };
+  }, [cardsByList, showDependencyLines, snapshot.cards, snapshot.dependencies]);
 
   const handleCardDragStart = (cardId: string) => {
     setDraggingCardId(cardId);
@@ -131,7 +209,7 @@ export function KanbanBoard({
         }
       }}
     >
-      <div className="board-canvas">
+      <div className="board-canvas" ref={canvasRef}>
         {lists.map((list) => (
           <KanbanColumn
             key={list.id}
@@ -152,6 +230,33 @@ export function KanbanBoard({
           />
         ))}
         <AddListColumn boardId={board.id} />
+        {showDependencyLines && dependencyLines.length > 0 ? (
+          <svg className="dependency-layer" aria-hidden="true">
+            <defs>
+              <marker
+                id="dependency-arrow"
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto"
+              >
+                <path d="M 0 1 L 9 5 L 0 9 Z" />
+              </marker>
+            </defs>
+            {dependencyLines.map((line) => (
+              <path
+                key={line.key}
+                d={line.d}
+                className={`dependency-line${line.done ? ' is-done' : ''}`}
+                data-dep-from={line.from}
+                data-dep-to={line.to}
+                markerEnd="url(#dependency-arrow)"
+              />
+            ))}
+          </svg>
+        ) : null}
       </div>
     </div>
   );
