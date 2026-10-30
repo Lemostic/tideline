@@ -48,6 +48,7 @@ pub fn run() {
             commands::add_inbox_item,
             commands::delete_inbox_item,
             commands::convert_inbox_item,
+            commands::set_card_dependencies,
             commands::export_backup,
             commands::import_backup,
         ])

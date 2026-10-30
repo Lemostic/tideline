@@ -17,6 +17,7 @@ import {
   type TaskSortKey,
 } from '@/features/tasks/group';
 import { useSnapshot } from '@/store/appStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
 import './tasks.css';
 
@@ -42,10 +43,12 @@ function priorityOf(priority: Card['priority']) {
 export function MyTasksPage() {
   const snapshot = useSnapshot();
   const openCard = useUiStore((state) => state.openCard);
+  const weekStartsOn = useSettingsStore((state) => state.weekStartsOn);
+  const hideCompletedByDefault = useSettingsStore((state) => state.hideCompletedByDefault);
 
   const [boardFilter, setBoardFilter] = useState<string>(ALL_BOARDS);
   const [sort, setSort] = useState<TaskSortKey>('due-asc');
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(() => !hideCompletedByDefault);
 
   // 看板可能在别处被删除：失效时自动回落到「全部看板」
   const filterValid =
@@ -62,8 +65,9 @@ export function MyTasksPage() {
         showCompleted,
         sort,
         now,
+        weekStartsOn,
       }),
-    [snapshot.cards, activeBoardId, showCompleted, sort, now],
+    [snapshot.cards, activeBoardId, showCompleted, sort, now, weekStartsOn],
   );
 
   const overdueCount = useMemo(
@@ -210,7 +214,8 @@ interface TaskCardViewProps {
 }
 
 function TaskCardView({ card, board, onOpen }: TaskCardViewProps) {
-  const bucket = dueBucket(card.dueDate);
+  const weekStartsOn = useSettingsStore((state) => state.weekStartsOn);
+  const bucket = dueBucket(card.dueDate, new Date(), weekStartsOn);
   const priority = priorityOf(card.priority);
 
   return (

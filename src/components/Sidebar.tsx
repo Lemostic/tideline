@@ -18,6 +18,7 @@ const WORKSPACE_NAV: NavEntry[] = [
   { to: '/templates', label: '模板中心', icon: 'layout-grid' },
   { to: '/trash', label: '回收站', icon: 'trash' },
   { to: '/data', label: '数据备份', icon: 'database' },
+  { to: '/settings', label: '设置', icon: 'sliders' },
 ];
 
 const VIP_NAV: NavEntry[] = [

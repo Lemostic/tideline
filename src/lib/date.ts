@@ -51,18 +51,21 @@ export function diffDays(fromKey: string, toKey: string): number {
   return Math.round((to.getTime() - from.getTime()) / 86_400_000);
 }
 
-/** 周一为一周起点 */
-export function startOfWeek(now: Date = new Date()): Date {
+/** 每周起始日：1=周一（默认），0=周日 */
+export type WeekStart = 0 | 1;
+
+/** 一周起点，默认周一；传入 0 则以周日为起点 */
+export function startOfWeek(now: Date = new Date(), weekStartsOn: WeekStart = 1): Date {
   const date = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const day = date.getDay(); // 0 = 周日
-  const offset = day === 0 ? 6 : day - 1;
+  const offset = (day - weekStartsOn + 7) % 7;
   date.setDate(date.getDate() - offset);
   return date;
 }
 
-/** 本周周日（含） */
-export function endOfWeek(now: Date = new Date()): Date {
-  const start = startOfWeek(now);
+/** 本周最后一天（含） */
+export function endOfWeek(now: Date = new Date(), weekStartsOn: WeekStart = 1): Date {
+  const start = startOfWeek(now, weekStartsOn);
   const end = new Date(start);
   end.setDate(start.getDate() + 6);
   return end;
@@ -84,14 +87,18 @@ export const DUE_BUCKETS: ReadonlyArray<DueBucketMeta> = [
   { key: 'none', label: '无截止日期', tone: 'muted' },
 ];
 
-export function dueBucket(dueDate: string | null, now: Date = new Date()): DueBucket {
+export function dueBucket(
+  dueDate: string | null,
+  now: Date = new Date(),
+  weekStartsOn: WeekStart = 1,
+): DueBucket {
   if (!dueDate) return 'none';
   const due = parseDateKey(dueDate);
   if (!due) return 'none';
   const today = toDateKey(now);
   if (dueDate < today) return 'overdue';
   if (dueDate === today) return 'today';
-  const weekEnd = endOfWeek(now);
+  const weekEnd = endOfWeek(now, weekStartsOn);
   if (due <= weekEnd) return 'week';
   return 'later';
 }
@@ -99,11 +106,12 @@ export function dueBucket(dueDate: string | null, now: Date = new Date()): DueBu
 export function groupCardsByDue(
   cards: Card[],
   now: Date = new Date(),
+  weekStartsOn: WeekStart = 1,
 ): Array<{ meta: DueBucketMeta; cards: Card[] }> {
   const buckets = new Map<DueBucket, Card[]>();
   for (const meta of DUE_BUCKETS) buckets.set(meta.key, []);
   for (const card of cards) {
-    buckets.get(dueBucket(card.dueDate, now))!.push(card);
+    buckets.get(dueBucket(card.dueDate, now, weekStartsOn))!.push(card);
   }
   return DUE_BUCKETS.map((meta) => {
     const list = buckets.get(meta.key)!;

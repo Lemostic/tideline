@@ -386,6 +386,24 @@
   text-decoration-color: var(--faint);
 }
 
+/* 被未完成的前置任务阻塞 */
+.task-card-blocked {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 描述摘要：两行截断 */
 .task-card-desc-text {
   display: -webkit-box;
@@ -757,5 +775,138 @@
   .board-stat,
   .board-toolbar-hint {
     display: none;
+  }
+}
+
+/* ---------- 看板批量操作（V0.4） ---------- */
+.board-batch-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.board-batch-btn.is-active {
+  border-color: rgba(15, 118, 110, 0.28);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.task-card.is-selecting {
+  cursor: default;
+}
+
+.task-card.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-soft);
+}
+
+.task-card-select {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  cursor: pointer;
+}
+
+.task-card-select input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.task-card-select-box {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: #fff;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.task-card-select:hover .task-card-select-box {
+  border-color: var(--primary);
+}
+
+.task-card-select input:checked + .task-card-select-box {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.task-card.is-selected .task-card-title {
+  padding-right: 18px;
+}
+
+.bulk-bar {
+  position: fixed;
+  right: 24px;
+  bottom: 20px;
+  left: calc(var(--sidebar-w) + 22px);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-lg, 0 12px 32px rgba(20, 37, 32, 0.14));
+  backdrop-filter: blur(8px);
+}
+
+.bulk-count {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.bulk-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.bulk-bar-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bulk-select select {
+  height: 30px;
+  max-width: 148px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+
+@media (max-width: 900px) {
+  .bulk-bar {
+    left: 22px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bulk-bar-actions {
+    justify-content: flex-start;
   }
 }

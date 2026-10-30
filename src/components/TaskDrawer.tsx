@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { formatDateCN, formatRelativeTime, parseDateKey, todayKey } from '@/lib/date';
+import { blockersFor, dependencyCandidates } from '@/lib/dependencies';
 import { createId } from '@/lib/ids';
 import { isBlankMarkdown, renderMarkdown } from '@/lib/markdown';
 import {
@@ -30,6 +31,7 @@ export function TaskDrawer() {
   const snapshot = useSnapshot();
   const updateCard = useAppStore((state) => state.updateCard);
   const deleteCard = useAppStore((state) => state.deleteCard);
+  const setDependencies = useAppStore((state) => state.setDependencies);
 
   const card = useMemo(
     () => snapshot.cards.find((item) => item.id === editingCardId),
@@ -51,6 +53,7 @@ export function TaskDrawer() {
   const [labelDraft, setLabelDraft] = useState('');
   const [rangeNote, setRangeNote] = useState<string | null>(null);
   const [labelNote, setLabelNote] = useState<string | null>(null);
+  const [dependencyPick, setDependencyPick] = useState('');
   const subtaskInputRef = useRef<HTMLInputElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
 
@@ -75,6 +78,7 @@ export function TaskDrawer() {
     setLabelDraft('');
     setRangeNote(null);
     setLabelNote(null);
+    setDependencyPick('');
     // 只在切换到另一张卡片时重置本地草稿
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card?.id]);
@@ -120,6 +124,24 @@ export function TaskDrawer() {
     subtaskTotal === 0 ? 0 : Math.round((subtaskDone / subtaskTotal) * 100);
   const allSubtasksDone = subtaskTotal > 0 && subtaskDone === subtaskTotal;
   const labelLimitReached = card.labels.length >= MAX_LABELS;
+  const blockers = blockersFor(card.id, snapshot.dependencies, snapshot.cards);
+  const unfinishedBlockers = blockers.filter((blocker) => !blocker.completed);
+  const dependencyOptions = dependencyCandidates(
+    card,
+    snapshot.cards.filter((item) => item.boardId === card.boardId),
+    snapshot.dependencies,
+  );
+  const addBlocker = (blockerId: string) => {
+    if (!blockerId) return;
+    void setDependencies(card.id, [...blockers.map((blocker) => blocker.id), blockerId]);
+    setDependencyPick('');
+  };
+  const removeBlocker = (blockerId: string) => {
+    void setDependencies(
+      card.id,
+      blockers.filter((blocker) => blocker.id !== blockerId).map((blocker) => blocker.id),
+    );
+  };
 
   /** 所有写操作都从最新快照取当前卡片，连续快速点击也不会互相覆盖 */
   const patchCard = (mutate: (current: Card) => CardPatch) => {
@@ -288,6 +310,12 @@ export function TaskDrawer() {
                   已逾期
                 </span>
               ) : null}
+              {!card.completed && unfinishedBlockers.length > 0 ? (
+                <span className="chip chip-danger" title="前置任务全部完成后才能顺利推进">
+                  <Icon name="link" size={11} />
+                  被 {unfinishedBlockers.length} 个前置任务阻塞
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -432,6 +460,76 @@ export function TaskDrawer() {
               </span>
             </div>
           ) : null}
+
+          <div className="td-section">
+            <div className="td-section-head">
+              <div className="drawer-section-title">
+                <Icon name="link" size={13} />
+                前置任务
+              </div>
+              {blockers.length > 0 ? (
+                <span className="td-progress-value">
+                  {blockers.length - unfinishedBlockers.length} / {blockers.length} 已完成
+                </span>
+              ) : null}
+            </div>
+
+            {blockers.length > 0 ? (
+              <ul className="td-dependencies">
+                {blockers.map((blocker) => (
+                  <li className={`td-dependency${blocker.completed ? ' is-done' : ''}`} key={blocker.id}>
+                    <Icon
+                      name={blocker.completed ? 'check-circle' : 'clock'}
+                      size={13}
+                      className="td-dependency-icon"
+                    />
+                    <span className="td-dependency-title" title={blocker.title}>
+                      {blocker.title}
+                    </span>
+                    {blocker.completed ? <span className="td-dependency-state">已完成</span> : null}
+                    <button
+                      type="button"
+                      className="td-dependency-remove"
+                      aria-label={`移除前置任务：${blocker.title}`}
+                      title="移除前置任务"
+                      onClick={() => removeBlocker(blocker.id)}
+                    >
+                      <Icon name="x" size={11} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="td-dependency-empty">暂无前置任务，添加后会在卡片上显示阻塞提示。</p>
+            )}
+
+            {unfinishedBlockers.length > 0 ? (
+              <p className="td-dependency-warn">
+                <Icon name="info" size={12} />
+                还有 {unfinishedBlockers.length} 个前置任务未完成
+              </p>
+            ) : null}
+
+            {dependencyOptions.length > 0 ? (
+              <label className="td-dependency-add">
+                <Icon name="plus" size={12} />
+                <select
+                  value={dependencyPick}
+                  aria-label="添加前置任务"
+                  onChange={(event) => addBlocker(event.target.value)}
+                >
+                  <option value="">添加前置任务…</option>
+                  {dependencyOptions.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <p className="td-dependency-empty">当前看板没有可作为前置的任务。</p>
+            )}
+          </div>
 
           <div className="td-section">
             <div className="td-section-head">

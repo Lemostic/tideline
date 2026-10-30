@@ -156,7 +156,7 @@ export function DataPage() {
           </div>
 
           <ul className="data-points">
-            <li>包含看板、列表、任务字段、标签、子任务、回收站与收件箱</li>
+            <li>包含看板、列表、任务字段、标签、子任务、任务依赖、回收站与收件箱</li>
             <li>桌面端默认写入「文档」目录；浏览器开发模式会触发文件下载</li>
             <li>建议每周或大量改动前导出一份</li>
           </ul>
@@ -174,7 +174,8 @@ export function DataPage() {
               <code className="data-result-path">{exported.path}</code>
               <div className="data-result-meta">
                 {exported.summary.boards} 个看板 · {exported.summary.cards} 个任务（回收站{' '}
-                {exported.summary.trashed} 个）· {exported.summary.inbox} 条收件箱
+                {exported.summary.trashed} 个）· {exported.summary.dependencies} 条依赖 ·{' '}
+                {exported.summary.inbox} 条收件箱
               </div>
             </div>
           ) : null}
@@ -269,6 +270,7 @@ export function DataPage() {
               <span>{pending.summary.boards} 个看板</span>
               <span>{pending.summary.lists} 个列表</span>
               <span>{pending.summary.cards} 个任务（回收站 {pending.summary.trashed} 个）</span>
+              <span>{pending.summary.dependencies} 条任务依赖</span>
               <span>{pending.summary.inbox} 条收件箱</span>
             </div>
             <p className="data-confirm-hint">建议先「导出 JSON 备份」保存当前数据。</p>

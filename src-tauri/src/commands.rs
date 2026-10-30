@@ -125,6 +125,19 @@ pub fn convert_inbox_item(db: State<'_, Db>, input: ConvertInboxInput) -> CmdRes
 }
 
 // ---------------------------------------------------------------------------
+// 任务依赖（V0.4）
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn set_card_dependencies(
+    db: State<'_, Db>,
+    input: SetDependenciesInput,
+) -> CmdResult<Vec<CardDependency>> {
+    let mut conn = db.lock()?;
+    repo::set_card_dependencies(&mut conn, input)
+}
+
+// ---------------------------------------------------------------------------
 // 备份 / 恢复（V0.4）
 // ---------------------------------------------------------------------------
 

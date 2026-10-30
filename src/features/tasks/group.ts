@@ -4,7 +4,7 @@
  * 日期分桶完全复用 src/lib/date.ts（dueBucket / groupCardsByDue / 截止日期文案），
  * 这里只负责把「看板筛选 + 已完成过滤 + 排序」接到分桶之上，方便单测与复用。
  */
-import { dueBucket, groupCardsByDue, type DueBucket, type DueBucketMeta } from '@/lib/date';
+import { dueBucket, groupCardsByDue, type DueBucket, type DueBucketMeta, type WeekStart } from '@/lib/date';
 import type { Card } from '@/lib/types';
 
 export type TaskSortKey = 'due-asc' | 'due-desc' | 'created-desc';
@@ -28,6 +28,8 @@ export interface TaskQuery {
   sort?: TaskSortKey;
   /** 便于单测注入固定「今天」 */
   now?: Date;
+  /** 每周起始日：1=周一（默认），0=周日 */
+  weekStartsOn?: WeekStart;
 }
 
 /** 创建时间新→旧；同一毫秒用 id 兜底，保证排序稳定 */
@@ -73,9 +75,9 @@ export function filterCards(cards: Card[], query: TaskQuery = {}): Card[] {
  * 返回顺序固定为 DUE_BUCKETS 的顺序：已逾期 / 今天 / 本周 / 稍后 / 无截止日期。
  */
 export function selectTaskGroups(cards: Card[], query: TaskQuery = {}): TaskGroup[] {
-  const { sort = 'due-asc', now = new Date() } = query;
+  const { sort = 'due-asc', now = new Date(), weekStartsOn = 1 } = query;
   const comparator = compareCards(sort);
-  return groupCardsByDue(filterCards(cards, query), now).map((group) => ({
+  return groupCardsByDue(filterCards(cards, query), now, weekStartsOn).map((group) => ({
     meta: group.meta,
     cards: [...group.cards].sort(comparator),
   }));

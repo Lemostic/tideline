@@ -80,6 +80,14 @@ export interface Snapshot {
   lists: List[];
   cards: Card[];
   inbox: InboxItem[];
+  /** 任务依赖边（V0.4）：cardId 依赖 dependsOnCardId */
+  dependencies: CardDependency[];
+}
+
+/** 任务依赖（V0.4）：`cardId` 被 `dependsOnCardId` 阻塞 */
+export interface CardDependency {
+  cardId: string;
+  dependsOnCardId: string;
 }
 
 export type BoardPatch = Partial<
@@ -143,6 +151,11 @@ export interface ConvertInboxInput {
   listId?: string;
 }
 
+export interface SetDependenciesInput {
+  cardId: string;
+  dependsOn: string[];
+}
+
 /** 模板中心的数据结构：模板是创建看板的一份“菜谱”，不是数据库实体 */
 export interface BoardTemplate {
   id: string;
@@ -180,6 +193,8 @@ export interface BackupFile {
   /** 包含回收站里的软删除任务（deletedAt 非空） */
   cards: Card[];
   inbox: InboxItem[];
+  /** V0.4 新增；旧备份没有该字段时按空依赖处理 */
+  dependencies: CardDependency[];
 }
 
 export interface BackupSummary {
@@ -188,6 +203,7 @@ export interface BackupSummary {
   cards: number;
   trashed: number;
   inbox: number;
+  dependencies: number;
 }
 
 export interface BackupExport {

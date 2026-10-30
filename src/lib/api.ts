@@ -23,6 +23,7 @@ import type {
   Board,
   BoardPatch,
   Card,
+  CardDependency,
   CardPatch,
   ConvertInboxInput,
   IdInput,
@@ -57,6 +58,8 @@ export interface TidelineApi {
   addInboxItem(input: { content: string }): Promise<InboxItem>;
   deleteInboxItem(input: IdInput): Promise<void>;
   convertInboxItem(input: ConvertInboxInput): Promise<Card>;
+  /** 整体替换某张任务的前置任务（V0.4） */
+  setCardDependencies(input: { cardId: string; dependsOn: string[] }): Promise<CardDependency[]>;
   /** 导出全量 JSON 备份（桌面端写入「文档」目录，浏览器端触发下载） */
   exportBackup(): Promise<BackupExport>;
   /** 用 JSON 备份替换全部数据（失败时不应修改原数据） */
@@ -87,6 +90,8 @@ const tauriApi: TidelineApi = {
   addInboxItem: (input) => invoke<InboxItem>('add_inbox_item', { input }),
   deleteInboxItem: (input) => invoke<void>('delete_inbox_item', { input }),
   convertInboxItem: (input) => invoke<Card>('convert_inbox_item', { input }),
+  setCardDependencies: (input) =>
+    invoke<CardDependency[]>('set_card_dependencies', { input }),
   exportBackup: () => invoke<BackupExport>('export_backup'),
   importBackup: (json) => invoke<BackupSummary>('import_backup', { input: { json } }),
 };
@@ -124,20 +129,28 @@ function normalizeCard(raw: Card): Card {
 
 function loadLocalDb(): LocalDb {
   if (typeof localStorage === 'undefined') {
-    return { boards: [], lists: [], cards: [], inbox: [] };
+    return { boards: [], lists: [], cards: [], inbox: [], dependencies: [] };
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { boards: [], lists: [], cards: [], inbox: [] };
+    if (!raw) return { boards: [], lists: [], cards: [], inbox: [], dependencies: [] };
     const parsed = JSON.parse(raw) as Partial<LocalDb>;
     return {
       boards: Array.isArray(parsed.boards) ? parsed.boards : [],
       lists: Array.isArray(parsed.lists) ? parsed.lists : [],
       cards: Array.isArray(parsed.cards) ? parsed.cards.map(normalizeCard) : [],
       inbox: Array.isArray(parsed.inbox) ? parsed.inbox : [],
+      dependencies: Array.isArray(parsed.dependencies)
+        ? parsed.dependencies.filter(
+            (item): item is CardDependency =>
+              Boolean(item) &&
+              typeof item.cardId === 'string' &&
+              typeof item.dependsOnCardId === 'string',
+          )
+        : [],
     };
   } catch {
-    return { boards: [], lists: [], cards: [], inbox: [] };
+    return { boards: [], lists: [], cards: [], inbox: [], dependencies: [] };
   }
 }
 
@@ -188,6 +201,37 @@ function requireCard(db: LocalDb, id: string): Card {
   return card;
 }
 
+/** 删除任务时同步清理依赖边（两个方向），避免引用已不存在的任务。 */
+function pruneDependencies(db: LocalDb, removedCardIds: Set<string>): void {
+  if (removedCardIds.size === 0) {
+    db.dependencies = [];
+    return;
+  }
+  db.dependencies = db.dependencies.filter(
+    (dependency) =>
+      !removedCardIds.has(dependency.cardId) &&
+      !removedCardIds.has(dependency.dependsOnCardId),
+  );
+}
+
+/** 沿依赖边判断 `from` 是否能到达 `target`，用于本地拒绝循环依赖。 */
+function dependencyReaches(
+  edges: Map<string, string[]>,
+  from: string,
+  target: string,
+): boolean {
+  const stack = [from];
+  const visited = new Set<string>();
+  while (stack.length > 0) {
+    const current = stack.pop() as string;
+    if (current === target) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    stack.push(...(edges.get(current) ?? []));
+  }
+  return false;
+}
+
 const localApi: TidelineApi = {
   async getSnapshot() {
     const db = loadLocalDb();
@@ -198,6 +242,9 @@ const localApi: TidelineApi = {
         .filter((card) => !card.deletedAt)
         .sort((a, b) => a.position - b.position),
       inbox: [...db.inbox].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      dependencies: [...db.dependencies].sort((a, b) =>
+        `${a.cardId}:${a.dependsOnCardId}`.localeCompare(`${b.cardId}:${b.dependsOnCardId}`),
+      ),
     };
   },
 
@@ -228,10 +275,14 @@ const localApi: TidelineApi = {
 
   async deleteBoard({ id }) {
     const db = loadLocalDb();
+    const removedCardIds = new Set(
+      db.cards.filter((card) => card.boardId === id).map((card) => card.id),
+    );
     db.boards = db.boards.filter((b) => b.id !== id);
     const removedListIds = new Set(db.lists.filter((l) => l.boardId === id).map((l) => l.id));
     db.lists = db.lists.filter((l) => l.boardId !== id);
     db.cards = db.cards.filter((c) => !removedListIds.has(c.listId) && c.boardId !== id);
+    pruneDependencies(db, removedCardIds);
     saveLocalDb(db);
   },
 
@@ -264,8 +315,12 @@ const localApi: TidelineApi = {
   async deleteList({ id }) {
     const db = loadLocalDb();
     const list = requireList(db, id);
+    const removedCardIds = new Set(
+      db.cards.filter((card) => card.listId === id).map((card) => card.id),
+    );
     db.lists = db.lists.filter((l) => l.id !== id);
     db.cards = db.cards.filter((c) => c.listId !== id);
+    pruneDependencies(db, removedCardIds);
     normalizeListPositions(db, list.boardId);
     touchBoard(db, list.boardId);
     saveLocalDb(db);
@@ -332,6 +387,7 @@ const localApi: TidelineApi = {
     if (card.deletedAt) return;
     card.deletedAt = nowISO();
     card.updatedAt = card.deletedAt;
+    pruneDependencies(db, new Set([card.id]));
     normalizePositions(db, card.listId);
     touchBoard(db, card.boardId);
     saveLocalDb(db);
@@ -366,12 +422,15 @@ const localApi: TidelineApi = {
   async purgeCard({ id }) {
     const db = loadLocalDb();
     db.cards = db.cards.filter((card) => card.id !== id);
+    pruneDependencies(db, new Set([id]));
     saveLocalDb(db);
   },
 
   async emptyTrash() {
     const db = loadLocalDb();
+    const removed = new Set(db.cards.filter((card) => card.deletedAt).map((card) => card.id));
     db.cards = db.cards.filter((card) => !card.deletedAt);
+    pruneDependencies(db, removed);
     saveLocalDb(db);
   },
 
@@ -397,6 +456,42 @@ const localApi: TidelineApi = {
     touchBoard(db, card.boardId);
     saveLocalDb(db);
     return card;
+  },
+
+  async setCardDependencies({ cardId, dependsOn }) {
+    const db = loadLocalDb();
+    const card = requireCard(db, cardId);
+    if (card.deletedAt) throw new Error('回收站中的任务不能设置前置任务');
+    const blockers: string[] = [];
+    for (const id of dependsOn) {
+      if (id === card.id) throw new Error('任务不能依赖自己');
+      if (blockers.includes(id)) continue;
+      const blocker = requireCard(db, id);
+      if (blocker.deletedAt) throw new Error(`前置任务「${blocker.title}」在回收站中`);
+      if (blocker.boardId !== card.boardId) throw new Error('只能依赖同一看板内的任务');
+      blockers.push(id);
+    }
+
+    const edges = new Map<string, string[]>();
+    for (const dependency of db.dependencies) {
+      if (dependency.cardId === card.id) continue;
+      const list = edges.get(dependency.cardId) ?? [];
+      list.push(dependency.dependsOnCardId);
+      edges.set(dependency.cardId, list);
+    }
+    edges.set(card.id, blockers);
+    for (const blocker of blockers) {
+      if (dependencyReaches(edges, blocker, card.id)) {
+        throw new Error('前置任务形成了循环依赖');
+      }
+    }
+
+    db.dependencies = db.dependencies.filter((dependency) => dependency.cardId !== card.id);
+    for (const blocker of blockers) {
+      db.dependencies.push({ cardId: card.id, dependsOnCardId: blocker });
+    }
+    saveLocalDb(db);
+    return blockers.map((dependsOnCardId) => ({ cardId: card.id, dependsOnCardId }));
   },
 
   async addInboxItem({ content }) {
@@ -483,6 +578,7 @@ const localApi: TidelineApi = {
       lists: backup.lists,
       cards: backup.cards,
       inbox: backup.inbox,
+      dependencies: backup.dependencies,
     });
     return summarizeBackup(backup);
   },

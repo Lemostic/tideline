@@ -57,12 +57,20 @@ const validBackup = () =>
     lists: [list],
     cards: [card(), card({ id: 'c_2', deletedAt: '2026-02-01T00:00:00.000Z' })],
     inbox,
+    dependencies: [{ cardId: 'c_2', dependsOnCardId: 'c_1' }],
   });
 
 describe('backup helpers', () => {
-  it('创建备份时统计活动任务与回收站任务', () => {
+  it('创建备份时统计活动任务、回收站任务与依赖', () => {
     const summary = summarizeBackup(validBackup());
-    expect(summary).toEqual({ boards: 1, lists: 1, cards: 2, trashed: 1, inbox: 1 });
+    expect(summary).toEqual({
+      boards: 1,
+      lists: 1,
+      cards: 2,
+      trashed: 1,
+      inbox: 1,
+      dependencies: 1,
+    });
   });
 
   it('解析合法备份并保留回收站字段', () => {

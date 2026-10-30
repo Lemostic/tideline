@@ -10,6 +10,7 @@ import type {
   BackupSummary,
   Board,
   Card,
+  CardDependency,
   InboxItem,
   List,
 } from './types';
@@ -24,19 +25,23 @@ export interface BackupData {
   lists: List[];
   cards: Card[];
   inbox: InboxItem[];
+  dependencies: CardDependency[];
 }
 
-export function summarizeBackup(backup: Pick<BackupFile, 'boards' | 'lists' | 'cards' | 'inbox'>): BackupSummary {
+export function summarizeBackup(
+  backup: Pick<BackupFile, 'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies'>,
+): BackupSummary {
   return {
     boards: backup.boards.length,
     lists: backup.lists.length,
     cards: backup.cards.length,
     trashed: backup.cards.filter((card) => card.deletedAt !== null).length,
     inbox: backup.inbox.length,
+    dependencies: backup.dependencies.length,
   };
 }
 
-/** 用当前全量数据（含回收站）生成备份对象。 */
+/** 用当前全量数据（含回收站与依赖）生成备份对象。 */
 export function createBackup(data: BackupData): BackupFile {
   return {
     app: BACKUP_APP,
@@ -46,6 +51,7 @@ export function createBackup(data: BackupData): BackupFile {
     lists: data.lists,
     cards: data.cards,
     inbox: data.inbox,
+    dependencies: data.dependencies,
   };
 }
 
@@ -72,6 +78,26 @@ function requireString(value: unknown, field: string): string {
 function requireArray(value: unknown, field: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`备份文件字段 ${field} 必须是数组`);
   return value;
+}
+
+/** 依赖图是否含环（DFS 三色标记）。 */
+function dependencyGraphHasCycle(edges: Map<string, string[]>): boolean {
+  const states = new Map<string, 1 | 2>();
+  const visit = (node: string): boolean => {
+    const state = states.get(node);
+    if (state === 1) return true;
+    if (state === 2) return false;
+    states.set(node, 1);
+    for (const next of edges.get(node) ?? []) {
+      if (visit(next)) return true;
+    }
+    states.set(node, 2);
+    return false;
+  };
+  for (const node of edges.keys()) {
+    if (visit(node)) return true;
+  }
+  return false;
 }
 
 /**
@@ -123,6 +149,7 @@ export function parseBackup(text: string): BackupFile {
   }
 
   const cardIds = new Set<string>();
+  const cardBoard = new Map<string, string>();
   for (const card of cards) {
     if (!isRecord(card)) throw new Error('备份中的任务数据格式不正确');
     const id = requireString(card.id, 'cards[].id');
@@ -134,7 +161,36 @@ export function parseBackup(text: string): BackupFile {
     if (!owner) throw new Error(`任务「${String(card.title)}」引用了不存在的列表`);
     if (owner !== boardId) throw new Error(`任务「${String(card.title)}」的列表与看板不一致`);
     cardIds.add(id);
+    cardBoard.set(id, boardId);
     requireString(card.title ?? '', 'cards[].title');
+  }
+
+  // 依赖字段是 V0.4 新增的，旧备份（V0.4.0）没有该字段时按空数组处理。
+  const rawDependencies = raw.dependencies === undefined ? [] : requireArray(raw.dependencies, 'dependencies');
+  const dependencies: CardDependency[] = [];
+  const dependencyEdges = new Map<string, string[]>();
+  for (const item of rawDependencies) {
+    if (!isRecord(item)) throw new Error('备份中的任务依赖格式不正确');
+    const cardId = requireString(item.cardId, 'dependencies[].cardId');
+    const dependsOnCardId = requireString(
+      item.dependsOnCardId,
+      'dependencies[].dependsOnCardId',
+    );
+    if (cardId === dependsOnCardId) throw new Error('备份中存在任务依赖自己的数据');
+    if (!cardIds.has(cardId)) throw new Error(`依赖引用了不存在的任务：${cardId}`);
+    if (!cardIds.has(dependsOnCardId)) {
+      throw new Error(`依赖引用了不存在的前置任务：${dependsOnCardId}`);
+    }
+    if (cardBoard.get(cardId) !== cardBoard.get(dependsOnCardId)) {
+      throw new Error('备份中存在跨看板的任务依赖');
+    }
+    dependencies.push({ cardId, dependsOnCardId });
+    const bucket = dependencyEdges.get(cardId) ?? [];
+    bucket.push(dependsOnCardId);
+    dependencyEdges.set(cardId, bucket);
+  }
+  if (dependencyGraphHasCycle(dependencyEdges)) {
+    throw new Error('备份中的任务依赖存在循环');
   }
 
   const inboxIds = new Set<string>();
@@ -153,5 +209,6 @@ export function parseBackup(text: string): BackupFile {
     lists,
     cards,
     inbox,
+    dependencies,
   };
 }

@@ -1,12 +1,19 @@
 import { useRef, type DragEvent, type KeyboardEvent } from 'react';
 import { Icon } from '@/components/Icon';
 import { dueBucket, formatDueLabel, formatMonthDay, formatRelativeTime } from '@/lib/date';
+import { blockersFor } from '@/lib/dependencies';
 import { PRIORITY_META, type Card } from '@/lib/types';
+import { useSnapshot } from '@/store/appStore';
+import { useSettingsStore } from '@/store/settingsStore';
 
 interface TaskCardProps {
   card: Card;
   /** 正在被拖动：半透明占位，让落点更清楚 */
   dragging: boolean;
+  /** 批量选择模式：显示复选框，点击卡片改为切换选中 */
+  selectionMode: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   /** 拖拽落点指示：在卡片上方 / 下方画一条主色线 */
   dropSide: 'before' | 'end' | null;
   onOpen: () => void;
@@ -23,14 +30,21 @@ const DESC_SNIPPET_MAX = 72;
 export function TaskCard({
   card,
   dragging,
+  selectionMode,
+  selected,
+  onToggleSelect,
   dropSide,
   onOpen,
   onCardDragStart,
   onCardDragEnd,
 }: TaskCardProps) {
   const draggedRef = useRef(false);
+  const snapshot = useSnapshot();
+  const weekStartsOn = useSettingsStore((state) => state.weekStartsOn);
+  const blockers = blockersFor(card.id, snapshot.dependencies, snapshot.cards);
+  const unfinishedBlockers = blockers.filter((blocker) => !blocker.completed);
   const dueLabel = card.dueDate ? formatDueLabel(card.dueDate) : '';
-  const dueTone = card.dueDate ? dueBucket(card.dueDate) : 'none';
+  const dueTone = card.dueDate ? dueBucket(card.dueDate, new Date(), weekStartsOn) : 'none';
   const priority = PRIORITY_META.find((item) => item.key === card.priority);
   const description = card.description.trim().replace(/\s+/g, ' ');
   const hasDescription = description.length > 0;
@@ -58,13 +72,18 @@ export function TaskCard({
 
   const handleClick = () => {
     if (draggedRef.current) return;
+    if (selectionMode) {
+      onToggleSelect();
+      return;
+    }
     onOpen();
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      onOpen();
+      if (selectionMode) onToggleSelect();
+      else onOpen();
     }
   };
 
@@ -72,6 +91,8 @@ export function TaskCard({
     'task-card',
     card.completed ? 'is-completed' : '',
     dragging ? 'is-dragging' : '',
+    selectionMode ? 'is-selecting' : '',
+    selected ? 'is-selected' : '',
     dropSide === 'before' ? 'drop-before' : '',
     dropSide === 'end' ? 'drop-end' : '',
   ]
@@ -82,16 +103,45 @@ export function TaskCard({
     <article
       className={className}
       data-card-id={card.id}
-      draggable
+      draggable={!selectionMode}
       role="button"
       tabIndex={0}
-      aria-label={`打开任务：${card.title}`}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
+      aria-label={selectionMode ? `选择任务：${card.title}` : `打开任务：${card.title}`}
+      aria-pressed={selectionMode ? selected : undefined}
+      onDragStart={selectionMode ? undefined : handleDragStart}
+      onDragEnd={selectionMode ? undefined : handleDragEnd}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
     >
+      {selectionMode ? (
+        <label
+          className="task-card-select"
+          onClick={(event) => event.stopPropagation()}
+          title={selected ? '取消选择' : '选择任务'}
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            aria-label={`选择任务：${card.title}`}
+            onChange={onToggleSelect}
+          />
+          <span className="task-card-select-box" aria-hidden="true">
+            {selected ? <Icon name="check" size={11} /> : null}
+          </span>
+        </label>
+      ) : null}
+
       <div className="task-card-title" title={card.title}>{card.title}</div>
+
+      {unfinishedBlockers.length > 0 ? (
+        <div
+          className="task-card-blocked"
+          title={`前置任务未完成：${unfinishedBlockers.map((item) => item.title).join('、')}`}
+        >
+          <Icon name="link" size={11} />
+          被 {unfinishedBlockers.length} 个前置任务阻塞
+        </div>
+      ) : null}
 
       {hasDescription ? (
         <p className="task-card-desc-text" title={description}>

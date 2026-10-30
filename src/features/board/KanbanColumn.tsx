@@ -14,6 +14,9 @@ interface KanbanColumnProps {
   cards: Card[];
   accentColor: string;
   draggingCardId: string | null;
+  batchMode: boolean;
+  selectedIds: Set<string>;
+  onToggleSelect: (cardId: string) => void;
   /** 落点下标（按当前渲染顺序，含被拖拽卡片自身）；null 表示不是目标列 */
   dropIndex: number | null;
   isDropActive: boolean;
@@ -34,6 +37,9 @@ export function KanbanColumn({
   cards,
   accentColor,
   draggingCardId,
+  batchMode,
+  selectedIds,
+  onToggleSelect,
   dropIndex,
   isDropActive,
   onDragOverColumn,
@@ -125,6 +131,9 @@ export function KanbanColumn({
             key={card.id}
             card={card}
             dragging={draggingCardId === card.id}
+            selectionMode={batchMode}
+            selected={selectedIds.has(card.id)}
+            onToggleSelect={() => onToggleSelect(card.id)}
             dropSide={
               dropIndex === index
                 ? 'before'

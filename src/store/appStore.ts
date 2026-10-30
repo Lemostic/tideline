@@ -23,7 +23,13 @@ import type {
   Snapshot,
 } from '@/lib/types';
 
-const EMPTY_SNAPSHOT: Snapshot = { boards: [], lists: [], cards: [], inbox: [] };
+const EMPTY_SNAPSHOT: Snapshot = {
+  boards: [],
+  lists: [],
+  cards: [],
+  inbox: [],
+  dependencies: [],
+};
 const SEED_FLAG = 'tideline.seeded';
 
 function dateKeyOffset(days: number): string {
@@ -56,6 +62,13 @@ export interface AppState {
   updateCard: (id: string, patch: CardPatch) => Promise<void>;
   deleteCard: (id: string) => Promise<void>;
   moveCard: (cardId: string, toListId: string, toIndex: number) => Promise<void>;
+  /** 整体替换某张任务的前置任务（V0.4） */
+  setDependencies: (cardId: string, dependsOn: string[]) => Promise<void>;
+
+  /** 看板内批量操作（V0.4）：顺序写入后刷新快照 */
+  bulkMoveCards: (cardIds: string[], toListId: string) => Promise<void>;
+  bulkDeleteCards: (cardIds: string[]) => Promise<void>;
+  bulkUpdateCards: (cardIds: string[], patch: CardPatch) => Promise<void>;
 
   loadTrash: () => Promise<void>;
   restoreCard: (id: string) => Promise<void>;
@@ -140,12 +153,20 @@ export const useAppStore = create<AppState>((set, get) => {
           const removedListIds = new Set(
             state.snapshot.lists.filter((l) => l.boardId === id).map((l) => l.id),
           );
+          const removedCardIds = new Set(
+            state.snapshot.cards
+              .filter((c) => removedListIds.has(c.listId) || c.boardId === id)
+              .map((c) => c.id),
+          );
           return {
             snapshot: {
               boards: state.snapshot.boards.filter((b) => b.id !== id),
               lists: state.snapshot.lists.filter((l) => l.boardId !== id),
               cards: state.snapshot.cards.filter((c) => !removedListIds.has(c.listId)),
               inbox: state.snapshot.inbox,
+              dependencies: state.snapshot.dependencies.filter(
+                (d) => !removedCardIds.has(d.cardId) && !removedCardIds.has(d.dependsOnCardId),
+              ),
             },
           };
         });
@@ -189,13 +210,21 @@ export const useAppStore = create<AppState>((set, get) => {
     deleteList: async (id) => {
       try {
         await api.deleteList({ id });
-        set((state) => ({
-          snapshot: {
-            ...state.snapshot,
-            lists: state.snapshot.lists.filter((l) => l.id !== id),
-            cards: state.snapshot.cards.filter((c) => c.listId !== id),
-          },
-        }));
+        set((state) => {
+          const removedCardIds = new Set(
+            state.snapshot.cards.filter((c) => c.listId === id).map((c) => c.id),
+          );
+          return {
+            snapshot: {
+              ...state.snapshot,
+              lists: state.snapshot.lists.filter((l) => l.id !== id),
+              cards: state.snapshot.cards.filter((c) => c.listId !== id),
+              dependencies: state.snapshot.dependencies.filter(
+                (d) => !removedCardIds.has(d.cardId) && !removedCardIds.has(d.dependsOnCardId),
+              ),
+            },
+          };
+        });
       } catch (error) {
         fail(error);
       }
@@ -234,6 +263,9 @@ export const useAppStore = create<AppState>((set, get) => {
           snapshot: {
             ...state.snapshot,
             cards: state.snapshot.cards.filter((c) => c.id !== id),
+            dependencies: state.snapshot.dependencies.filter(
+              (d) => d.cardId !== id && d.dependsOnCardId !== id,
+            ),
           },
         }));
       } catch (error) {
@@ -304,6 +336,63 @@ export const useAppStore = create<AppState>((set, get) => {
             },
           };
         });
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    setDependencies: async (cardId, dependsOn) => {
+      try {
+        const dependencies = await api.setCardDependencies({ cardId, dependsOn });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            dependencies: [
+              ...state.snapshot.dependencies.filter((dependency) => dependency.cardId !== cardId),
+              ...dependencies,
+            ],
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    bulkMoveCards: async (cardIds, toListId) => {
+      try {
+        const existingTargetCount = get().snapshot.cards.filter(
+          (card) => card.listId === toListId && !cardIds.includes(card.id),
+        ).length;
+        for (let index = 0; index < cardIds.length; index += 1) {
+          await api.moveCard({
+            cardId: cardIds[index],
+            toListId,
+            toIndex: existingTargetCount + index,
+          });
+        }
+        await get().reloadSnapshot();
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    bulkDeleteCards: async (cardIds) => {
+      try {
+        for (const cardId of cardIds) {
+          await api.deleteCard({ id: cardId });
+        }
+        await get().reloadSnapshot();
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    bulkUpdateCards: async (cardIds, patch) => {
+      try {
+        for (const cardId of cardIds) {
+          await api.updateCard({ id: cardId, patch });
+        }
+        await get().reloadSnapshot();
       } catch (error) {
         fail(error);
       }

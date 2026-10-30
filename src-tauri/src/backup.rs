@@ -29,6 +29,7 @@ pub fn build(conn: &Connection) -> Result<BackupFile, String> {
         lists: snapshot.lists,
         cards: repo::get_all_cards(conn)?,
         inbox: snapshot.inbox,
+        dependencies: repo::get_dependencies(conn)?,
     })
 }
 
@@ -40,8 +41,42 @@ impl BackupFile {
             cards: self.cards.len(),
             trashed: self.cards.iter().filter(|card| card.deleted_at.is_some()).count(),
             inbox: self.inbox.len(),
+            dependencies: self.dependencies.len(),
         }
     }
+}
+
+/// 依赖图是否含环（DFS 三色标记）。
+fn dependency_graph_has_cycle(edges: &HashMap<String, Vec<String>>) -> bool {
+    fn visit(
+        node: &str,
+        edges: &HashMap<String, Vec<String>>,
+        states: &mut HashMap<String, u8>,
+    ) -> bool {
+        match states.get(node).copied().unwrap_or(0) {
+            1 => return true,
+            2 => return false,
+            _ => {}
+        }
+        states.insert(node.to_string(), 1);
+        if let Some(next) = edges.get(node) {
+            for neighbor in next {
+                if visit(neighbor, edges, states) {
+                    return true;
+                }
+            }
+        }
+        states.insert(node.to_string(), 2);
+        false
+    }
+
+    let mut states = HashMap::new();
+    for node in edges.keys() {
+        if visit(node, edges, &mut states) {
+            return true;
+        }
+    }
+    false
 }
 
 /// 备份文件结构 / 引用完整性校验。导入前必须先调用，避免半套数据写进库。
@@ -82,6 +117,7 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
     }
 
     let mut card_ids = HashSet::new();
+    let mut card_board: HashMap<&str, &str> = HashMap::new();
     for card in &backup.cards {
         if card.id.trim().is_empty() {
             return Err("备份中存在空的任务 id".to_string());
@@ -98,6 +134,34 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         if *list_board_id != card.board_id {
             return Err(format!("任务「{}」的列表与看板不一致", card.title));
         }
+        card_board.insert(card.id.as_str(), card.board_id.as_str());
+    }
+
+    let mut dependency_edges: HashMap<String, Vec<String>> = HashMap::new();
+    for dependency in &backup.dependencies {
+        if dependency.card_id == dependency.depends_on_card_id {
+            return Err("备份中存在任务依赖自己的数据".to_string());
+        }
+        let Some(card_board_id) = card_board.get(dependency.card_id.as_str()) else {
+            return Err(format!("依赖引用了不存在的任务：{}", dependency.card_id));
+        };
+        let Some(blocker_board_id) = card_board.get(dependency.depends_on_card_id.as_str())
+        else {
+            return Err(format!(
+                "依赖引用了不存在的前置任务：{}",
+                dependency.depends_on_card_id
+            ));
+        };
+        if card_board_id != blocker_board_id {
+            return Err("备份中存在跨看板的任务依赖".to_string());
+        }
+        dependency_edges
+            .entry(dependency.card_id.clone())
+            .or_default()
+            .push(dependency.depends_on_card_id.clone());
+    }
+    if dependency_graph_has_cycle(&dependency_edges) {
+        return Err("备份中的任务依赖存在循环".to_string());
     }
 
     let mut inbox_ids = HashSet::new();
@@ -117,7 +181,8 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
 pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSummary, String> {
     validate(backup)?;
     let tx = conn.transaction().map_err(|error| format!("恢复失败：{error}"))?;
-    tx.execute("DELETE FROM cards", [])
+    tx.execute("DELETE FROM card_dependencies", [])
+        .and_then(|_| tx.execute("DELETE FROM cards", []))
         .and_then(|_| tx.execute("DELETE FROM lists", []))
         .and_then(|_| tx.execute("DELETE FROM boards", []))
         .and_then(|_| tx.execute("DELETE FROM inbox_items", []))
@@ -194,6 +259,14 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
         .map_err(|error| format!("写入收件箱条目失败：{error}"))?;
     }
 
+    for dependency in &backup.dependencies {
+        tx.execute(
+            "INSERT INTO card_dependencies (card_id, depends_on_card_id) VALUES (?1, ?2)",
+            params![&dependency.card_id, &dependency.depends_on_card_id],
+        )
+        .map_err(|error| format!("写入任务依赖失败：{error}"))?;
+    }
+
     tx.commit().map_err(|error| format!("恢复失败：{error}"))?;
     Ok(backup.summary())
 }
@@ -216,7 +289,9 @@ pub fn default_export_path() -> Result<PathBuf, String> {
 mod tests {
     use super::*;
     use crate::db;
-    use crate::models::{IdInput, NewBoardInput, NewCardInput, NewListInput, Priority};
+    use crate::models::{
+        IdInput, NewBoardInput, NewCardInput, NewListInput, Priority, SetDependenciesInput,
+    };
 
     fn seed(conn: &mut Connection) -> Card {
         let board = repo::create_board(
@@ -341,6 +416,7 @@ mod tests {
             lists: Vec::new(),
             cards: Vec::new(),
             inbox: Vec::new(),
+            dependencies: Vec::new(),
         };
         let summary = restore(&mut conn, &empty).expect("恢复空备份");
         assert_eq!(summary.cards, 0);
@@ -348,5 +424,74 @@ mod tests {
         assert!(snapshot.boards.is_empty());
         assert!(snapshot.lists.is_empty());
         assert!(snapshot.cards.is_empty());
+    }
+
+    #[test]
+    fn dependencies_round_trip_through_backup() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        let first = seed(&mut conn);
+        let snapshot = repo::get_snapshot(&conn).expect("快照");
+        let board_id = snapshot.boards[0].id.clone();
+        let list_id = snapshot.lists[0].id.clone();
+        let second = repo::create_card(
+            &mut conn,
+            NewCardInput {
+                board_id,
+                list_id,
+                title: "任务 B".to_string(),
+                ..Default::default()
+            },
+        )
+        .expect("创建任务 B");
+        repo::set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: second.id.clone(),
+                depends_on: vec![first.id.clone()],
+            },
+        )
+        .expect("设置依赖");
+
+        let backup = build(&conn).expect("构建备份");
+        assert_eq!(backup.summary().dependencies, 1);
+        assert_eq!(backup.dependencies[0].card_id, second.id);
+
+        let restored = restore(&mut conn, &backup).expect("恢复备份");
+        assert_eq!(restored.dependencies, 1);
+        let snapshot = repo::get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.dependencies.len(), 1);
+        assert_eq!(snapshot.dependencies[0].depends_on_card_id, first.id);
+    }
+
+    #[test]
+    fn invalid_dependency_backup_is_rejected() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        seed(&mut conn);
+        let mut backup = build(&conn).expect("构建备份");
+        if backup.cards.is_empty() {
+            backup.cards.push(Card {
+                id: "c_x".to_string(),
+                board_id: "b_x".to_string(),
+                list_id: "l_x".to_string(),
+                title: "x".to_string(),
+                description: String::new(),
+                due_date: None,
+                start_date: None,
+                priority: None,
+                completed: false,
+                deleted_at: None,
+                labels: Vec::new(),
+                subtasks: Vec::new(),
+                position: 0,
+                created_at: repo::now_iso(),
+                updated_at: repo::now_iso(),
+            });
+        }
+        backup.dependencies.push(CardDependency {
+            card_id: backup.cards[0].id.clone(),
+            depends_on_card_id: "c_missing".to_string(),
+        });
+        let error = validate(&backup).expect_err("应拒绝不存在的依赖");
+        assert!(error.contains("不存在"), "错误：{error}");
     }
 }

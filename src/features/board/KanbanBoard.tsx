@@ -19,6 +19,9 @@ interface KanbanBoardProps {
   lists: List[];
   cardsByList: Map<string, Card[]>;
   accentColor: string;
+  batchMode: boolean;
+  selectedIds: Set<string>;
+  onToggleSelect: (cardId: string) => void;
 }
 
 /** 根据指针位置计算插入下标：把每张卡片看作上下两半 */
@@ -36,7 +39,15 @@ function indexFromPointer(container: HTMLElement, clientY: number): number {
  * 原生 HTML5 拖拽：dragstart 记录卡片 id，dragover 计算落点画指示线，
  * drop 时把「视觉下标」换算成 moveCard 需要的「移除自身后的下标」。
  */
-export function KanbanBoard({ board, lists, cardsByList, accentColor }: KanbanBoardProps) {
+export function KanbanBoard({
+  board,
+  lists,
+  cardsByList,
+  accentColor,
+  batchMode,
+  selectedIds,
+  onToggleSelect,
+}: KanbanBoardProps) {
   const moveCard = useAppStore((state) => state.moveCard);
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -129,6 +140,9 @@ export function KanbanBoard({ board, lists, cardsByList, accentColor }: KanbanBo
             cards={cardsByList.get(list.id) ?? EMPTY_CARDS}
             accentColor={accentColor}
             draggingCardId={draggingCardId}
+            batchMode={batchMode}
+            selectedIds={selectedIds}
+            onToggleSelect={onToggleSelect}
             dropIndex={dropTarget?.listId === list.id ? dropTarget.index : null}
             isDropActive={dropTarget?.listId === list.id}
             onDragOverColumn={handleDragOverColumn}

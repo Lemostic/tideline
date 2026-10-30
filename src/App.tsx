@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { HashRouter, Route, Routes } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { HashRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { BrandMark } from '@/components/Icon';
 import { NewBoardModal } from '@/components/NewBoardModal';
 import { SearchDialog } from '@/components/SearchDialog';
@@ -11,10 +11,12 @@ import { DataPage } from '@/pages/DataPage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { MyTasksPage } from '@/pages/MyTasksPage';
+import { SettingsPage } from '@/pages/SettingsPage';
 import { TemplatesPage } from '@/pages/TemplatesPage';
 import { TrashPage } from '@/pages/TrashPage';
 import { VipFeaturePage } from '@/pages/VipFeaturePage';
 import { useAppStore } from '@/store/appStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
 
 export default function App() {
@@ -72,6 +74,7 @@ export default function App() {
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/trash" element={<TrashPage />} />
               <Route path="/data" element={<DataPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
               <Route path="/board/:boardId" element={<BoardPage />} />
               <Route path="/dashboard" element={<VipFeaturePage feature="dashboard" />} />
               <Route path="/board-sets" element={<VipFeaturePage feature="board-sets" />} />
@@ -83,9 +86,28 @@ export default function App() {
         <NewBoardModal />
         <TaskDrawer />
         <SearchDialog />
+        <StartupRedirect />
       </div>
     </HashRouter>
   );
+}
+
+/** 启动页偏好：只在应用首次挂载时把首页重定向到用户选择的启动页。 */
+function StartupRedirect() {
+  const startPage = useSettingsStore((state) => state.startPage);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const redirected = useRef(false);
+
+  useEffect(() => {
+    if (redirected.current) return;
+    redirected.current = true;
+    if (startPage !== '/' && (location.pathname === '/' || location.pathname === '')) {
+      navigate(startPage, { replace: true });
+    }
+  }, [location.pathname, navigate, startPage]);
+
+  return null;
 }
 
 function IconAlert() {

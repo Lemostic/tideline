@@ -12,6 +12,7 @@
 //! - `delete_card` 是软删除（deleted_at），`get_snapshot` 只返回活动卡片，
 //!   回收站通过 `get_trash` 读取，由 `restore_card` / `purge_card` / `empty_trash` 管理。
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -334,6 +335,7 @@ pub fn get_snapshot(conn: &Connection) -> DbResult<Snapshot> {
             &format!("SELECT {INBOX_COLUMNS} FROM inbox_items ORDER BY created_at DESC, id DESC"),
             row_to_inbox,
         )?,
+        dependencies: get_dependencies(conn)?,
     })
 }
 
@@ -347,6 +349,134 @@ pub fn get_all_cards(conn: &Connection) -> DbResult<Vec<Card>> {
         ),
         row_to_card,
     )
+}
+
+/// 全部任务依赖边（V0.4）。
+pub fn get_dependencies(conn: &Connection) -> DbResult<Vec<CardDependency>> {
+    let mut statement = conn
+        .prepare(
+            "SELECT card_id, depends_on_card_id FROM card_dependencies \
+             ORDER BY card_id ASC, depends_on_card_id ASC",
+        )
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(CardDependency {
+                card_id: row.get(0)?,
+                depends_on_card_id: row.get(1)?,
+            })
+        })
+        .map_err(db_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+}
+
+/// 判断从 `from` 出发沿依赖边是否可达 `target`（用于拒绝循环依赖）。
+fn dependency_reaches(
+    edges: &HashMap<String, Vec<String>>,
+    from: &str,
+    target: &str,
+) -> bool {
+    let mut stack = vec![from.to_string()];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(current) = stack.pop() {
+        if current == target {
+            return true;
+        }
+        if !visited.insert(current.clone()) {
+            continue;
+        }
+        if let Some(next) = edges.get(&current) {
+            stack.extend(next.iter().cloned());
+        }
+    }
+    false
+}
+
+/// 整体替换某张任务的前置任务列表（V0.4）。
+///
+/// 约束：只能依赖同一看板内的活动任务；不能依赖自己；不能形成循环。
+pub fn set_card_dependencies(
+    conn: &mut Connection,
+    input: SetDependenciesInput,
+) -> DbResult<Vec<CardDependency>> {
+    let tx = conn.transaction().map_err(db_err)?;
+    let card = get_card(&tx, &input.card_id)?;
+    if card.deleted_at.is_some() {
+        return Err("回收站中的任务不能设置前置任务".to_string());
+    }
+
+    let mut depends_on = Vec::new();
+    for id in input.depends_on {
+        if id == card.id {
+            return Err("任务不能依赖自己".to_string());
+        }
+        if !depends_on.contains(&id) {
+            depends_on.push(id);
+        }
+    }
+
+    for id in &depends_on {
+        let blocker = get_card(&tx, id)
+            .map_err(|_| format!("前置任务不存在：{id}"))?;
+        if blocker.deleted_at.is_some() {
+            return Err(format!("前置任务「{}」在回收站中", blocker.title));
+        }
+        if blocker.board_id != card.board_id {
+            return Err("只能依赖同一看板内的任务".to_string());
+        }
+    }
+
+    // 构建该看板的依赖图（先移除当前任务的旧边，再检查新边是否成环）。
+    let mut edges: HashMap<String, Vec<String>> = HashMap::new();
+    {
+        let mut statement = tx
+            .prepare(
+                "SELECT d.card_id, d.depends_on_card_id \
+                 FROM card_dependencies d JOIN cards c ON c.id = d.card_id \
+                 WHERE c.board_id = ?1",
+            )
+            .map_err(db_err)?;
+        let rows = statement
+            .query_map([&card.board_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(db_err)?;
+        for row in rows {
+            let (from, to) = row.map_err(db_err)?;
+            if from == card.id {
+                continue;
+            }
+            edges.entry(from).or_default().push(to);
+        }
+    }
+    edges.insert(card.id.clone(), depends_on.clone());
+    for blocker in &depends_on {
+        if dependency_reaches(&edges, blocker, &card.id) {
+            return Err("前置任务形成了循环依赖".to_string());
+        }
+    }
+
+    tx.execute(
+        "DELETE FROM card_dependencies WHERE card_id = ?1",
+        [&card.id],
+    )
+    .map_err(db_err)?;
+    for id in &depends_on {
+        tx.execute(
+            "INSERT INTO card_dependencies (card_id, depends_on_card_id) VALUES (?1, ?2)",
+            params![&card.id, id],
+        )
+        .map_err(db_err)?;
+    }
+    tx.commit().map_err(db_err)?;
+
+    Ok(depends_on
+        .into_iter()
+        .map(|depends_on_card_id| CardDependency {
+            card_id: card.id.clone(),
+            depends_on_card_id,
+        })
+        .collect())
 }
 
 pub fn create_board(conn: &mut Connection, input: NewBoardInput) -> DbResult<Board> {
@@ -630,6 +760,12 @@ pub fn delete_card(conn: &mut Connection, input: IdInput) -> DbResult<()> {
         tx.execute(
             "UPDATE cards SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2",
             params![&now, &card.id],
+        )
+        .map_err(db_err)?;
+        // 删除任务后，指向它的依赖边一并移除，避免其他任务被一个已不存在的任务阻塞。
+        tx.execute(
+            "DELETE FROM card_dependencies WHERE card_id = ?1 OR depends_on_card_id = ?1",
+            [&card.id],
         )
         .map_err(db_err)?;
         normalize_card_positions(&tx, &card.list_id)?;
@@ -2121,5 +2257,118 @@ mod tests {
 
         delete_inbox_item(&mut conn, id_input(&snapshot.inbox[0].id)).expect("删除收件箱");
         assert_eq!(get_snapshot(&conn).expect("快照").inbox.len(), 1);
+    }
+
+    #[test]
+    fn dependencies_persist_and_are_cleaned_on_soft_delete() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "依赖看板");
+        let list = new_list(&mut conn, &board.id, "待办");
+        let a = new_card(&mut conn, &board.id, &list.id, "A");
+        let b = new_card(&mut conn, &board.id, &list.id, "B");
+        let c = new_card(&mut conn, &board.id, &list.id, "C");
+
+        let saved = set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: c.id.clone(),
+                depends_on: vec![a.id.clone(), b.id.clone()],
+            },
+        )
+        .expect("设置依赖");
+        assert_eq!(saved.len(), 2);
+
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.dependencies.len(), 2);
+        assert!(snapshot
+            .dependencies
+            .iter()
+            .all(|dependency| dependency.card_id == c.id));
+
+        // 整体替换为空。
+        set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: c.id.clone(),
+                depends_on: Vec::new(),
+            },
+        )
+        .expect("清空依赖");
+        assert!(get_dependencies(&conn).expect("依赖").is_empty());
+
+        // 软删除前置任务 A：指向 A 的边被清理，避免任务被回收站任务阻塞。
+        set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: c.id.clone(),
+                depends_on: vec![a.id.clone()],
+            },
+        )
+        .expect("重新设置依赖");
+        delete_card(&mut conn, id_input(&a.id)).expect("删除前置任务");
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert!(snapshot.dependencies.is_empty());
+        assert!(snapshot.cards.iter().any(|card| card.id == c.id));
+    }
+
+    #[test]
+    fn dependencies_reject_cross_board_self_and_cycles() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板一");
+        let list = new_list(&mut conn, &board.id, "待办");
+        let a = new_card(&mut conn, &board.id, &list.id, "A");
+        let b = new_card(&mut conn, &board.id, &list.id, "B");
+        let other_board = new_board(&mut conn, "看板二");
+        let other_list = new_list(&mut conn, &other_board.id, "待办");
+        let other = new_card(&mut conn, &other_board.id, &other_list.id, "跨板任务");
+
+        let err = set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: a.id.clone(),
+                depends_on: vec![a.id.clone()],
+            },
+        )
+        .expect_err("不能依赖自己");
+        assert!(err.contains("自己"), "错误：{err}");
+
+        let err = set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: a.id.clone(),
+                depends_on: vec![other.id.clone()],
+            },
+        )
+        .expect_err("不能跨看板");
+        assert!(err.contains("同一看板"), "错误：{err}");
+
+        let err = set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: a.id.clone(),
+                depends_on: vec!["c_missing".to_string()],
+            },
+        )
+        .expect_err("不能依赖不存在任务");
+        assert!(err.contains("不存在"), "错误：{err}");
+
+        // B 依赖 A 合法；A 再依赖 B 形成环，应被拒绝。
+        set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: b.id.clone(),
+                depends_on: vec![a.id.clone()],
+            },
+        )
+        .expect("B 依赖 A");
+        let err = set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: a.id.clone(),
+                depends_on: vec![b.id.clone()],
+            },
+        )
+        .expect_err("循环依赖");
+        assert!(err.contains("循环"), "错误：{err}");
     }
 }

@@ -19,6 +19,8 @@ interface BoardHeaderProps {
   onViewChange: (view: BoardView) => void;
   totalCards: number;
   completedCards: number;
+  batchMode: boolean;
+  onToggleBatchMode: () => void;
 }
 
 /** 看板头部：主题色点 + 可编辑标题 + 星标 + 更多菜单 + 视图 Tabs */
@@ -28,6 +30,8 @@ export function BoardHeader({
   onViewChange,
   totalCards,
   completedCards,
+  batchMode,
+  onToggleBatchMode,
 }: BoardHeaderProps) {
   const navigate = useNavigate();
   const updateBoard = useAppStore((state) => state.updateBoard);
@@ -118,6 +122,18 @@ export function BoardHeader({
             </button>
           ))}
         </div>
+        {view === 'board' ? (
+          <button
+            type="button"
+            className={`btn btn-sm board-batch-btn${batchMode ? ' is-active' : ''}`}
+            onClick={onToggleBatchMode}
+            aria-pressed={batchMode}
+            title={batchMode ? '退出批量选择' : '进入批量选择'}
+          >
+            <Icon name="check-circle" size={14} />
+            {batchMode ? '退出批量' : '批量操作'}
+          </button>
+        ) : null}
         <span className="grow" />
         {board.description ? (
           <span className="board-desc" title={board.description}>

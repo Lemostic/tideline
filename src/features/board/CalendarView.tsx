@@ -23,6 +23,7 @@ import {
   type Priority,
 } from '@/lib/types';
 import { useAppStore } from '@/store/appStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
 import type { BoardViewProps } from './TableView';
 import './calendar.css';
@@ -75,6 +76,13 @@ interface CalendarNote {
 export function CalendarView({ board, lists, cards }: BoardViewProps) {
   const openCard = useUiStore((state) => state.openCard);
   const updateCard = useAppStore((state) => state.updateCard);
+  const weekStartsOn = useSettingsStore((state) => state.weekStartsOn);
+  const weekdayLabels =
+    weekStartsOn === 1
+      ? WEEKDAY_LABELS
+      : [WEEKDAY_LABELS[6], ...WEEKDAY_LABELS.slice(0, 6)];
+  const isWeekendIndex = (index: number) =>
+    weekStartsOn === 1 ? index % 7 >= 5 : index % 7 === 0 || index % 7 === 6;
 
   const today = todayKey();
   const [view, setView] = useState(() => {
@@ -119,9 +127,9 @@ export function CalendarView({ board, lists, cards }: BoardViewProps) {
   const gridStartKey = useMemo(() => {
     const first = new Date(view.year, view.month, 1);
     const dayOfWeek = first.getDay();
-    first.setDate(first.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    first.setDate(first.getDate() - ((dayOfWeek - weekStartsOn + 7) % 7));
     return toDateKey(first);
-  }, [view.year, view.month]);
+  }, [view.year, view.month, weekStartsOn]);
 
   const gridDays = useMemo(
     () => eachDateKey(gridStartKey, addDaysKey(gridStartKey, CELL_COUNT - 1)),
@@ -301,7 +309,7 @@ export function CalendarView({ board, lists, cards }: BoardViewProps) {
     if (!date) return null;
     const isCurrentMonth = dayKey.slice(0, 7) === monthKey;
     const isToday = dayKey === today;
-    const isWeekend = index % 7 >= 5;
+    const isWeekend = isWeekendIndex(index);
     const entries = entriesByDay.get(dayKey) ?? EMPTY_ENTRIES;
     const expanded = expandedDay === dayKey;
     // 有溢出时留一行给「+N 更多」，保证入口始终可见（不会被条目区滚动藏起来）
@@ -428,8 +436,8 @@ export function CalendarView({ board, lists, cards }: BoardViewProps) {
 
       <div className="cal-sheet">
         <div className="cal-weekdays">
-          {WEEKDAY_LABELS.map((label, index) => (
-            <span key={label} className={`cal-weekday${index >= 5 ? ' is-weekend' : ''}`}>
+          {weekdayLabels.map((label, index) => (
+            <span key={label} className={`cal-weekday${isWeekendIndex(index) ? ' is-weekend' : ''}`}>
               {label}
             </span>
           ))}

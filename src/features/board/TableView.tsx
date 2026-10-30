@@ -18,6 +18,7 @@ import {
   type Priority,
 } from '@/lib/types';
 import { useAppStore } from '@/store/appStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
 import { InlineEdit } from './InlineEdit';
 import './table.css';
@@ -79,9 +80,10 @@ function comparePriority(a: Card, b: Card): number {
 export function TableView({ board, lists, cards }: BoardViewProps) {
   const openCard = useUiStore((state) => state.openCard);
   const updateCard = useAppStore((state) => state.updateCard);
+  const hideCompletedByDefault = useSettingsStore((state) => state.hideCompletedByDefault);
 
   const [query, setQuery] = useState('');
-  const [showCompleted, setShowCompleted] = useState(true);
+  const [showCompleted, setShowCompleted] = useState(() => !hideCompletedByDefault);
   const [sortKey, setSortKey] = useState<SortKey>('due-asc');
   const [editingId, setEditingId] = useState<string | null>(null);
   /** 折叠的任务 id（默认全部展开，保证层级一眼可见） */

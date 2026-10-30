@@ -139,6 +139,14 @@ pub struct InboxItem {
     pub created_at: String,
 }
 
+/// 任务依赖（V0.4）：`card_id` 依赖 `depends_on_card_id`（前置任务）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardDependency {
+    pub card_id: String,
+    pub depends_on_card_id: String,
+}
+
 /// 启动时一次性拉取的全量快照。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -147,6 +155,9 @@ pub struct Snapshot {
     pub lists: Vec<List>,
     pub cards: Vec<Card>,
     pub inbox: Vec<InboxItem>,
+    /// 任务依赖边（V0.4），只包含仍存在的任务。
+    #[serde(default)]
+    pub dependencies: Vec<CardDependency>,
 }
 
 // ---------------------------------------------------------------------------
@@ -165,6 +176,9 @@ pub struct BackupFile {
     pub lists: Vec<List>,
     pub cards: Vec<Card>,
     pub inbox: Vec<InboxItem>,
+    /// V0.4 新增；旧备份没有该字段时按空依赖处理。
+    #[serde(default)]
+    pub dependencies: Vec<CardDependency>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -175,6 +189,8 @@ pub struct BackupSummary {
     pub cards: usize,
     pub trashed: usize,
     pub inbox: usize,
+    #[serde(default)]
+    pub dependencies: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -337,6 +353,15 @@ pub struct ConvertInboxInput {
 #[serde(rename_all = "camelCase")]
 pub struct ImportBackupInput {
     pub json: String,
+}
+
+/// 设置某张任务的前置任务（整体替换）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetDependenciesInput {
+    pub card_id: String,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,8 @@
 //!
 //! V0.2 起任务表新增 `start_date / labels / subtasks` 三列，V0.3 再新增 `deleted_at`
 //! 软删除列：新库直接按最新结构建表，旧库（V0.1 / V0.2 已有用户数据）在启动时按列存在性
-//! 做幂等 `ALTER TABLE` 迁移，不重建表。迁移完成后写入 `PRAGMA user_version = 3`。
+//! 做幂等 `ALTER TABLE` 迁移，不重建表。V0.4 新增 `card_dependencies` 依赖表。
+//! 迁移完成后写入 `PRAGMA user_version = 4`。
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -74,11 +75,18 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS card_dependencies (
+    card_id            TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+    depends_on_card_id TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+    PRIMARY KEY (card_id, depends_on_card_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_lists_board_position ON lists (board_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_list_position ON cards (list_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_board ON cards (board_id);
 CREATE INDEX IF NOT EXISTS idx_cards_due_date ON cards (due_date);
 CREATE INDEX IF NOT EXISTS idx_inbox_created_at ON inbox_items (created_at);
+CREATE INDEX IF NOT EXISTS idx_card_dependencies_depends_on ON card_dependencies (depends_on_card_id);
 "#;
 
 /// 打开磁盘数据库（生产路径）。
@@ -112,7 +120,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -148,8 +156,17 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
         })?;
     }
     connection
-        .execute_batch("CREATE INDEX IF NOT EXISTS idx_cards_deleted_at ON cards (deleted_at);")
-        .map_err(|error| format!("创建 cards.deleted_at 索引失败：{error}"))?;
+        .execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_cards_deleted_at ON cards (deleted_at);
+             CREATE TABLE IF NOT EXISTS card_dependencies (
+                 card_id            TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+                 depends_on_card_id TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+                 PRIMARY KEY (card_id, depends_on_card_id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_card_dependencies_depends_on
+                 ON card_dependencies (depends_on_card_id);",
+        )
+        .map_err(|error| format!("创建任务依赖表失败：{error}"))?;
     connection
         .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|error| format!("写入 user_version 失败：{error}"))?;
