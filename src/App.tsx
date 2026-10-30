@@ -7,6 +7,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { TaskDrawer } from '@/components/TaskDrawer';
 import { TopBar } from '@/components/TopBar';
 import { BoardPage } from '@/pages/BoardPage';
+import { DashboardPage } from '@/pages/DashboardPage';
 import { DataPage } from '@/pages/DataPage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
@@ -75,8 +76,8 @@ export default function App() {
               <Route path="/trash" element={<TrashPage />} />
               <Route path="/data" element={<DataPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/board/:boardId" element={<BoardPage />} />
-              <Route path="/dashboard" element={<VipFeaturePage feature="dashboard" />} />
               <Route path="/board-sets" element={<VipFeaturePage feature="board-sets" />} />
               <Route path="/goals" element={<VipFeaturePage feature="goals" />} />
               <Route path="*" element={<HomePage />} />
