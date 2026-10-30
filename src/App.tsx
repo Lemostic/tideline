@@ -13,12 +13,12 @@ import { DashboardPage } from '@/pages/DashboardPage';
 import { DataPage } from '@/pages/DataPage';
 import { GoalDetailPage } from '@/pages/GoalDetailPage';
 import { GoalsPage } from '@/pages/GoalsPage';
-import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { MyTasksPage } from '@/pages/MyTasksPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TemplatesPage } from '@/pages/TemplatesPage';
 import { TrashPage } from '@/pages/TrashPage';
+import { WorkbenchPage } from '@/pages/WorkbenchPage';
 import { useAppStore } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
@@ -73,7 +73,7 @@ export default function App() {
           ) : null}
           <div className="app-content">
             <Routes>
-              <Route path="/" element={<HomePage />} />
+              <Route path="/" element={<WorkbenchPage />} />
               <Route path="/tasks" element={<MyTasksPage />} />
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="/templates" element={<TemplatesPage />} />
@@ -86,7 +86,7 @@ export default function App() {
               <Route path="/board-sets/:setId" element={<BoardSetDetailPage />} />
               <Route path="/goals" element={<GoalsPage />} />
               <Route path="/goals/:goalId" element={<GoalDetailPage />} />
-              <Route path="*" element={<HomePage />} />
+              <Route path="*" element={<WorkbenchPage />} />
             </Routes>
           </div>
         </div>
@@ -115,7 +115,7 @@ function AutoUpdateCheck() {
   return null;
 }
 
-/** 启动页偏好：只在应用首次挂载时把首页重定向到用户选择的启动页。 */
+/** 启动页偏好：只在应用首次挂载时把工作台重定向到用户选择的启动页。 */
 function StartupRedirect() {
   const startPage = useSettingsStore((state) => state.startPage);
   const navigate = useNavigate();

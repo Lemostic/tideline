@@ -5,7 +5,7 @@ import { useUiStore } from '@/store/uiStore';
 import { useUpdateStore } from '@/store/updateStore';
 
 const SECTION_LABELS: Record<string, string> = {
-  '/': '首页',
+  '/': '工作台',
   '/tasks': '我的任务',
   '/inbox': '收件箱',
   '/templates': '模板中心',
@@ -37,10 +37,10 @@ export function TopBar() {
   const goal = goalId ? snapshot.goals.find((item) => item.id === goalId) : undefined;
   const crumb = board ? (
     <>
-      <button className="btn btn-icon" onClick={() => navigate('/')} aria-label="返回首页">
+      <button className="btn btn-icon" onClick={() => navigate('/')} aria-label="返回工作台">
         <Icon name="arrow-left" size={15} />
       </button>
-      <span>首页</span>
+      <span>工作台</span>
       <Icon name="chevron-right" size={12} />
       <strong>{board.title}</strong>
     </>

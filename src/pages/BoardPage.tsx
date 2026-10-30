@@ -25,6 +25,7 @@ export function BoardPage() {
   const navigate = useNavigate();
   const snapshot = useSnapshot();
   const defaultView = useSettingsStore((state) => state.defaultView);
+  const showDependencyLines = useSettingsStore((state) => state.showDependencyLines);
   const bulkMoveCards = useAppStore((state) => state.bulkMoveCards);
   const bulkDeleteCards = useAppStore((state) => state.bulkDeleteCards);
   const bulkUpdateCards = useAppStore((state) => state.bulkUpdateCards);
@@ -52,6 +53,15 @@ export function BoardPage() {
 
   // 筛选跨视图生效：看板列、表格、甘特、日历都只看过滤后的任务
   const visibleCards = useMemo(() => filterCards(boardCards, filters), [boardCards, filters]);
+
+  const hasBoardDependencies = useMemo(() => {
+    if (!showDependencyLines || !boardId) return false;
+    const ids = new Set(boardCards.map((card) => card.id));
+    return snapshot.dependencies.some(
+      (dependency) =>
+        ids.has(dependency.cardId) && ids.has(dependency.dependsOnCardId),
+    );
+  }, [boardCards, boardId, showDependencyLines, snapshot.dependencies]);
 
   // 按列表分组并按 position 升序；排序后的数组只在这里派生一次
   const cardsByList = useMemo(() => {
@@ -136,10 +146,10 @@ export function BoardPage() {
         <EmptyState
           icon={<Icon name="layout-grid" size={22} />}
           title="看板不存在"
-          description="它可能已经被删除，返回首页看看其他看板吧。"
+          description="它可能已经被删除，返回工作台看看其他看板吧。"
           action={
             <button type="button" className="btn btn-ghost" onClick={() => navigate('/')}>
-              返回首页
+              返回工作台
             </button>
           }
         />
@@ -157,6 +167,7 @@ export function BoardPage() {
         completedCards={stats.completed}
         batchMode={batchMode}
         onToggleBatchMode={toggleBatchMode}
+        showDependencyLegend={view === 'board' && hasBoardDependencies}
       />
       <BoardFilterBar
         filters={filters}

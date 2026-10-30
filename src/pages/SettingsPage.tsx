@@ -128,7 +128,7 @@ export function SettingsPage() {
               }
               aria-label="启动页"
             >
-              <option value="/">首页</option>
+              <option value="/">工作台</option>
               <option value="/tasks">我的任务</option>
               <option value="/inbox">收件箱</option>
             </select>
@@ -427,7 +427,7 @@ export function SettingsPage() {
       </div>
 
       <p className="settings-note">
-        默认值：启动页为首页、看板视图为看板、每周周一开始、不隐藏已完成。恢复默认只影响偏好，不会改动任何任务数据。
+        默认值：启动页为工作台、看板视图为看板、每周周一开始、不隐藏已完成。恢复默认只影响偏好，不会改动任何任务数据。
       </p>
 
       {pendingStorage ? (

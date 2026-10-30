@@ -11,7 +11,7 @@ interface NavEntry {
 }
 
 const WORKSPACE_NAV: NavEntry[] = [
-  { to: '/', label: '首页', icon: 'home', end: true },
+  { to: '/', label: '工作台', icon: 'home', end: true },
   { to: '/tasks', label: '我的任务', icon: 'check-circle' },
   { to: '/inbox', label: '收件箱', icon: 'inbox' },
   { to: '/templates', label: '模板中心', icon: 'layout-grid' },

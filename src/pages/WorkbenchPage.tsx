@@ -1,0 +1,472 @@
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Icon } from '@/components/Icon';
+import { EmptyState } from '@/components/Modal';
+import { DeleteBoardDialog, RenameBoardDialog } from '@/features/home/BoardDialogs';
+import { PopMenu } from '@/features/board/PopMenu';
+import {
+  dueBucket,
+  formatDueLabel,
+  formatRelativeTime,
+  todaySummary,
+} from '@/lib/date';
+import { goalProgressDetail, topLevelGoals } from '@/lib/goals';
+import { boardColorValue, type Board } from '@/lib/types';
+import { useAppStore, useSnapshot } from '@/store/appStore';
+import { useUiStore } from '@/store/uiStore';
+import './home.css';
+import './workbench.css';
+
+const FOCUS_LIMIT = 7;
+const RECENT_LIMIT = 6;
+
+function greetingForHour(hour: number): string {
+  if (hour < 6) return '夜深了';
+  if (hour < 12) return '早上好';
+  if (hour < 18) return '下午好';
+  return '晚上好';
+}
+
+/**
+ * 工作台（V0.7.1）：产品经理的本地门户。
+ * 聚合今日重点、目标进度、看板全景和最近动态，所有数据来自同一份本地快照。
+ */
+export function WorkbenchPage() {
+  const navigate = useNavigate();
+  const snapshot = useSnapshot();
+  const openNewBoard = useUiStore((state) => state.openNewBoard);
+  const openCard = useUiStore((state) => state.openCard);
+  const openSearch = useUiStore((state) => state.openSearch);
+  const toggleStar = useAppStore((state) => state.toggleStar);
+
+  const [renameTarget, setRenameTarget] = useState<Board | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Board | null>(null);
+
+  const now = useMemo(() => new Date(), [snapshot.cards]);
+  const today = useMemo(() => {
+    const date = new Date();
+    return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+  }, []);
+
+  const boardStats = useMemo(() => {
+    const map = new Map<
+      string,
+      { total: number; completed: number; overdue: number; listCount: number }
+    >();
+    for (const board of snapshot.boards) {
+      map.set(board.id, {
+        total: 0,
+        completed: 0,
+        overdue: 0,
+        listCount: snapshot.lists.filter((list) => list.boardId === board.id).length,
+      });
+    }
+    for (const card of snapshot.cards) {
+      const stat = map.get(card.boardId);
+      if (!stat) continue;
+      stat.total += 1;
+      if (card.completed) stat.completed += 1;
+      else if (card.dueDate !== null && card.dueDate < today) stat.overdue += 1;
+    }
+    return map;
+  }, [snapshot.boards, snapshot.lists, snapshot.cards, today]);
+
+  const openCards = useMemo(
+    () => snapshot.cards.filter((card) => !card.completed),
+    [snapshot.cards],
+  );
+  const overdue = useMemo(
+    () => openCards.filter((card) => card.dueDate !== null && card.dueDate < today),
+    [openCards, today],
+  );
+  const dueToday = useMemo(
+    () => openCards.filter((card) => card.dueDate === today),
+    [openCards, today],
+  );
+  const dueThisWeek = useMemo(
+    () => openCards.filter((card) => dueBucket(card.dueDate ?? null) === 'week'),
+    [openCards],
+  );
+  const recentCompleted = useMemo(() => {
+    const threshold = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return snapshot.cards.filter(
+      (card) => card.completed && Date.parse(card.updatedAt) >= threshold,
+    ).length;
+  }, [snapshot.cards]);
+
+  const focusCards = useMemo(() => {
+    const rank: Record<string, number> = { overdue: 0, today: 1, week: 2 };
+    return [...overdue, ...dueToday, ...dueThisWeek]
+      .filter((card, index, list) => list.findIndex((item) => item.id === card.id) === index)
+      .sort((a, b) => {
+        const bucketA = rank[dueBucket(a.dueDate)] ?? 3;
+        const bucketB = rank[dueBucket(b.dueDate)] ?? 3;
+        if (bucketA !== bucketB) return bucketA - bucketB;
+        return (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999');
+      })
+      .slice(0, FOCUS_LIMIT);
+  }, [overdue, dueToday, dueThisWeek]);
+
+  const activeGoals = useMemo(
+    () => snapshot.goals.filter((goal) => goal.status === 'active'),
+    [snapshot.goals],
+  );
+  const goalRows = useMemo(
+    () =>
+      topLevelGoals(activeGoals)
+        .slice(0, 4)
+        .map((goal) => ({
+          goal,
+          progress: goalProgressDetail(goal, snapshot.goals, snapshot.cards),
+        })),
+    [activeGoals, snapshot.goals, snapshot.cards],
+  );
+
+  const recentCards = useMemo(
+    () => [...snapshot.cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_LIMIT),
+    [snapshot.cards],
+  );
+  const boardRows = useMemo(
+    () =>
+      [...snapshot.boards].sort((a, b) => {
+        if (a.starred !== b.starred) return a.starred ? -1 : 1;
+        return b.updatedAt.localeCompare(a.updatedAt);
+      }),
+    [snapshot.boards],
+  );
+  const boardTitle = useMemo(
+    () => new Map(snapshot.boards.map((board) => [board.id, board.title])),
+    [snapshot.boards],
+  );
+  const listTitle = useMemo(
+    () => new Map(snapshot.lists.map((list) => [list.id, list.title])),
+    [snapshot.lists],
+  );
+
+  const emptyDescription = '工作台会汇总今日重点、目标进度和所有看板。先创建一个看板或从模板开始。';
+
+  if (snapshot.boards.length === 0) {
+    return (
+      <div className="page workbench-page">
+        <header className="wb-head">
+          <div>
+            <div className="page-eyebrow">工作台 · {todaySummary(now)}</div>
+            <h1 className="wb-title">{greetingForHour(now.getHours())}，开始搭建你的工作台</h1>
+            <p className="wb-sub">把看板、目标和今天要做的事收在同一处。</p>
+          </div>
+        </header>
+        <div className="home-empty-card">
+          <EmptyState
+            icon={<Icon name="layout-grid" size={22} />}
+            title="还没有看板，先建一个吧"
+            description={emptyDescription}
+            action={
+              <div className="home-empty-actions">
+                <button className="btn btn-primary" onClick={openNewBoard}>
+                  <Icon name="plus" size={14} />
+                  新建看板
+                </button>
+                <button className="btn btn-ghost" onClick={() => navigate('/templates')}>
+                  <Icon name="sparkles" size={14} />
+                  浏览模板
+                </button>
+              </div>
+            }
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page workbench-page">
+      <header className="wb-head">
+        <div className="wb-head-main">
+          <div className="page-eyebrow">工作台 · {todaySummary(now)}</div>
+          <h1 className="wb-title">
+            {greetingForHour(now.getHours())}，今天有{' '}
+            <em>{focusCards.length > 0 ? focusCards.length : '没有'}</em> 件需要关注
+          </h1>
+          <p className="wb-sub">
+            {snapshot.boards.length} 个看板 · {openCards.length} 个进行中任务 ·{' '}
+            {activeGoals.length} 个目标进行中
+          </p>
+        </div>
+        <div className="wb-actions">
+          <button type="button" className="btn btn-primary btn-sm" onClick={openNewBoard}>
+            <Icon name="plus" size={14} />
+            新建看板
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={openSearch}>
+            <Icon name="search" size={14} />
+            全局搜索
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/inbox')}>
+            <Icon name="inbox" size={14} />
+            快速记录
+          </button>
+        </div>
+      </header>
+
+      <section className="wb-kpis" aria-label="工作台指标">
+        <button type="button" className="wb-kpi" onClick={() => navigate('/')}>
+          <span className="wb-kpi-label">看板</span>
+          <strong>{snapshot.boards.length}</strong>
+          <span className="wb-kpi-hint">{snapshot.lists.length} 个列表</span>
+        </button>
+        <button type="button" className="wb-kpi" onClick={() => navigate('/tasks')}>
+          <span className="wb-kpi-label">进行中任务</span>
+          <strong>{openCards.length}</strong>
+          <span className="wb-kpi-hint">待推进</span>
+        </button>
+        <button type="button" className="wb-kpi is-danger" onClick={() => navigate('/tasks')}>
+          <span className="wb-kpi-label">已逾期</span>
+          <strong>{overdue.length}</strong>
+          <span className="wb-kpi-hint">{dueToday.length} 个今天到期</span>
+        </button>
+        <button type="button" className="wb-kpi" onClick={() => navigate('/tasks')}>
+          <span className="wb-kpi-label">本周完成</span>
+          <strong>{recentCompleted}</strong>
+          <span className="wb-kpi-hint">近 7 天</span>
+        </button>
+        <button type="button" className="wb-kpi" onClick={() => navigate('/goals')}>
+          <span className="wb-kpi-label">目标</span>
+          <strong>{activeGoals.length}</strong>
+          <span className="wb-kpi-hint">进行中</span>
+        </button>
+      </section>
+
+      <div className="wb-grid">
+        <section className="wb-card wb-focus">
+          <div className="wb-card-head">
+            <div>
+              <h2>今日聚焦</h2>
+              <p>逾期、今天和本周到期，按紧急程度排序</p>
+            </div>
+            <button type="button" className="wb-text-btn" onClick={() => navigate('/tasks')}>
+              全部任务 <Icon name="chevron-right" size={12} />
+            </button>
+          </div>
+          {focusCards.length === 0 ? (
+            <p className="wb-empty">今天没有到期或逾期任务，适合推进重要但不紧急的事。</p>
+          ) : (
+            <ul className="wb-task-list">
+              {focusCards.map((card) => {
+                const overdueCard = card.dueDate !== null && card.dueDate < today;
+                return (
+                  <li key={card.id}>
+                    <button type="button" className="wb-task" onClick={() => openCard(card.id)}>
+                      <span className={`wb-task-dot${overdueCard ? ' is-danger' : ''}`} />
+                      <span className="wb-task-main">
+                        <span className="wb-task-title">{card.title}</span>
+                        <span className="wb-task-meta">
+                          {boardTitle.get(card.boardId) ?? '未知看板'} ·{' '}
+                          {listTitle.get(card.listId) ?? '未知列表'}
+                        </span>
+                      </span>
+                      <span className={`wb-task-due${overdueCard ? ' is-danger' : ''}`}>
+                        {formatDueLabel(card.dueDate)}
+                      </span>
+                      <Icon name="chevron-right" size={12} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <section className="wb-card wb-goals">
+          <div className="wb-card-head">
+            <div>
+              <h2>目标进度</h2>
+              <p>关联任务完成后自动回写</p>
+            </div>
+            <button type="button" className="wb-text-btn" onClick={() => navigate('/goals')}>
+              全部目标 <Icon name="chevron-right" size={12} />
+            </button>
+          </div>
+          {goalRows.length === 0 ? (
+            <div className="wb-goal-empty">
+              <p className="wb-empty">还没有进行中的目标。</p>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/goals')}>
+                <Icon name="target" size={13} />
+                去创建目标
+              </button>
+            </div>
+          ) : (
+            <ul className="wb-goal-list">
+              {goalRows.map(({ goal, progress }) => (
+                <li key={goal.id}>
+                  <button
+                    type="button"
+                    className="wb-goal"
+                    onClick={() => navigate(`/goals/${goal.id}`)}
+                  >
+                    <span className="wb-goal-main">
+                      <span className="wb-goal-title">{goal.title}</span>
+                      <span className="wb-goal-meta">
+                        {progress.linkedCount} 个任务 · {progress.source === 'tasks' ? '任务回写' : progress.source === 'children' ? '子目标汇总' : '手动'}
+                      </span>
+                    </span>
+                    <span className="wb-goal-progress">
+                      <span className="wb-goal-bar">
+                        <span style={{ width: `${progress.percent}%` }} />
+                      </span>
+                      <strong>{progress.percent}%</strong>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="wb-card wb-boards">
+          <div className="wb-card-head">
+            <div>
+              <h2>看板全景</h2>
+              <p>一眼看到每个看板的推进与风险</p>
+            </div>
+            <button type="button" className="wb-text-btn" onClick={() => navigate('/dashboard')}>
+              仪表盘 <Icon name="chart" size={12} />
+            </button>
+          </div>
+          <div className="wb-board-list">
+            {boardRows.map((board) => {
+              const stat = boardStats.get(board.id) ?? {
+                total: 0,
+                completed: 0,
+                overdue: 0,
+                listCount: 0,
+              };
+              const rate = stat.total === 0 ? 0 : Math.round((stat.completed / stat.total) * 100);
+              return (
+                <article
+                  key={board.id}
+                  className="wb-board"
+                  onClick={() => navigate(`/board/${board.id}`)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      navigate(`/board/${board.id}`);
+                    }
+                  }}
+                >
+                  <span
+                    className="wb-board-dot"
+                    style={{ background: boardColorValue(board.color) }}
+                  />
+                  <div className="wb-board-main">
+                    <div className="wb-board-title-line">
+                      <h3>{board.title}</h3>
+                      {board.starred ? <Icon name="star-filled" size={11} /> : null}
+                    </div>
+                    <div className="wb-board-meta">
+                      <span>{stat.total} 个任务</span>
+                      <span>已完成 {stat.completed}</span>
+                      {stat.overdue > 0 ? (
+                        <span className="is-danger">{stat.overdue} 个逾期</span>
+                      ) : null}
+                      <span>更新于 {formatRelativeTime(board.updatedAt)}</span>
+                    </div>
+                    <div className="wb-board-bar">
+                      <span style={{ width: `${rate}%` }} />
+                    </div>
+                  </div>
+                  <strong className="wb-board-rate">{rate}%</strong>
+                  <div
+                    className="wb-board-actions"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className={`wb-board-icon${board.starred ? ' is-starred' : ''}`}
+                      onClick={() => void toggleStar(board.id).catch(() => undefined)}
+                      title={board.starred ? '取消星标' : '星标看板'}
+                      aria-label={board.starred ? `取消星标 ${board.title}` : `星标 ${board.title}`}
+                    >
+                      <Icon name={board.starred ? 'star-filled' : 'star'} size={13} />
+                    </button>
+                    <PopMenu
+                      ariaLabel={`${board.title} 更多操作`}
+                      entries={[
+                        {
+                          kind: 'item',
+                          label: '重命名看板',
+                          icon: 'pencil',
+                          onSelect: () => setRenameTarget(board),
+                        },
+                        { kind: 'sep' },
+                        {
+                          kind: 'item',
+                          label: '删除看板',
+                          icon: 'trash',
+                          danger: true,
+                          onSelect: () => setDeleteTarget(board),
+                        },
+                      ]}
+                    />
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="wb-card wb-recent">
+          <div className="wb-card-head">
+            <div>
+              <h2>最近更新</h2>
+              <p>刚刚被推进或修改的任务</p>
+            </div>
+          </div>
+          {recentCards.length === 0 ? (
+            <p className="wb-empty">还没有任务动态。</p>
+          ) : (
+            <ul className="wb-recent-list">
+              {recentCards.map((card) => (
+                <li key={card.id}>
+                  <button type="button" className="wb-recent-item" onClick={() => openCard(card.id)}>
+                    <span className={`wb-recent-state${card.completed ? ' is-done' : ''}`}>
+                      {card.completed ? <Icon name="check" size={9} /> : null}
+                    </span>
+                    <span className="wb-recent-main">
+                      <span className={`wb-recent-title${card.completed ? ' is-done' : ''}`}>
+                        {card.title}
+                      </span>
+                      <span className="wb-recent-meta">
+                        {boardTitle.get(card.boardId) ?? '未知看板'} ·{' '}
+                        {formatRelativeTime(card.updatedAt)}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="wb-recent-foot">
+            <button type="button" className="wb-text-btn" onClick={() => navigate('/inbox')}>
+              <Icon name="inbox" size={12} /> 收件箱 {snapshot.inbox.length > 0 ? `(${snapshot.inbox.length})` : ''}
+            </button>
+          </div>
+        </section>
+      </div>
+
+      {renameTarget ? (
+        <RenameBoardDialog board={renameTarget} onClose={() => setRenameTarget(null)} />
+      ) : null}
+      {deleteTarget ? (
+        <DeleteBoardDialog
+          board={deleteTarget}
+          listCount={boardStats.get(deleteTarget.id)?.listCount ?? 0}
+          taskCount={boardStats.get(deleteTarget.id)?.total ?? 0}
+          onClose={() => setDeleteTarget(null)}
+        />
+      ) : null}
+    </div>
+  );
+}

@@ -58,7 +58,7 @@ export function BoardSetsPage() {
             description="先创建至少一个看板，再把它加入看板集做跨看板汇总。"
             action={
               <button type="button" className="btn btn-primary" onClick={() => navigate('/')}>
-                返回首页
+                返回工作台
               </button>
             }
           />

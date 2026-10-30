@@ -21,6 +21,7 @@ interface BoardHeaderProps {
   completedCards: number;
   batchMode: boolean;
   onToggleBatchMode: () => void;
+  showDependencyLegend?: boolean;
 }
 
 /** 看板头部：主题色点 + 可编辑标题 + 星标 + 更多菜单 + 视图 Tabs */
@@ -32,6 +33,7 @@ export function BoardHeader({
   completedCards,
   batchMode,
   onToggleBatchMode,
+  showDependencyLegend = false,
 }: BoardHeaderProps) {
   const navigate = useNavigate();
   const updateBoard = useAppStore((state) => state.updateBoard);
@@ -103,6 +105,12 @@ export function BoardHeader({
           ]}
         />
         <span className="grow" />
+        {showDependencyLegend ? (
+          <span className="board-dependency-legend" title="虚线从黄色圆点的前置任务指向箭头所在的后置任务">
+            <span className="board-dependency-dot" />
+            前置任务 → 后置任务
+          </span>
+        ) : null}
         <span className="board-stat">{statText}</span>
       </div>
 

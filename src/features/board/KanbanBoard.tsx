@@ -235,14 +235,25 @@ export function KanbanBoard({
             <defs>
               <marker
                 id="dependency-arrow"
-                viewBox="0 0 10 10"
-                refX="8"
-                refY="5"
-                markerWidth="7"
-                markerHeight="7"
+                viewBox="0 0 12 12"
+                refX="10"
+                refY="6"
+                markerWidth="9"
+                markerHeight="9"
                 orient="auto"
               >
-                <path d="M 0 1 L 9 5 L 0 9 Z" />
+                <path d="M 1 1 L 11 6 L 1 11 Z" />
+              </marker>
+              <marker
+                id="dependency-start"
+                viewBox="0 0 8 8"
+                refX="4"
+                refY="4"
+                markerWidth="5"
+                markerHeight="5"
+                orient="auto"
+              >
+                <circle cx="4" cy="4" r="3" />
               </marker>
             </defs>
             {dependencyLines.map((line) => (
@@ -252,10 +263,11 @@ export function KanbanBoard({
                 className={`dependency-line${line.done ? ' is-done' : ''}`}
                 data-dep-from={line.from}
                 data-dep-to={line.to}
+                markerStart="url(#dependency-start)"
                 markerEnd="url(#dependency-arrow)"
               />
             ))}
-          </svg>
+            </svg>
         ) : null}
       </div>
     </div>

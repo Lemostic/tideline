@@ -1029,3 +1029,25 @@
   color: var(--danger);
   font-size: 11px;
 }
+
+/* 看板头部依赖线方向提示 */
+.board-dependency-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 10px;
+  color: var(--faint);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.board-dependency-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.dependency-layer marker circle {
+  fill: var(--primary);
+}

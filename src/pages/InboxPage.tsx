@@ -290,7 +290,7 @@ function ConvertInboxDialog({ item, onClose, onConverted }: ConvertInboxDialogPr
           <div>
             <p className="inbox-convert-empty-title">还没有看板</p>
             <p className="inbox-convert-empty-sub">
-              先到首页创建一个看板，收件箱的内容会一直保留在这里，之后再来转换。
+              先到工作台创建一个看板，收件箱的内容会一直保留在这里，之后再来转换。
             </p>
           </div>
         </div>
