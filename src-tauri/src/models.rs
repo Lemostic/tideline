@@ -76,6 +76,60 @@ impl Priority {
     }
 }
 
+/// 目标层级（V0.6）：公司 / 团队 / 个人。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GoalScope {
+    Company,
+    Team,
+    Personal,
+}
+
+impl GoalScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Company => "company",
+            Self::Team => "team",
+            Self::Personal => "personal",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "company" => Self::Company,
+            "personal" => Self::Personal,
+            _ => Self::Team,
+        }
+    }
+}
+
+/// 目标状态（V0.6）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GoalStatus {
+    Active,
+    Completed,
+    Archived,
+}
+
+impl GoalStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Completed => "completed",
+            Self::Archived => "archived",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "completed" => Self::Completed,
+            "archived" => Self::Archived,
+            _ => Self::Active,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Board {
@@ -160,6 +214,27 @@ pub struct BoardSet {
     pub updated_at: String,
 }
 
+/// 目标（V0.6）：可嵌套子目标，可选关联任务；进度由任务/子目标自动回写。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Goal {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub scope: GoalScope,
+    pub status: GoalStatus,
+    pub start_date: Option<String>,
+    pub due_date: Option<String>,
+    /// 无关联任务、无子目标时使用的手动进度（0–100）。
+    pub manual_progress: i64,
+    pub parent_id: Option<String>,
+    /// 关联任务 id，顺序即展示顺序；任务删除后由外键级联移除。
+    pub card_ids: Vec<String>,
+    pub position: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// 启动时一次性拉取的全量快照。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,6 +249,9 @@ pub struct Snapshot {
     /// 看板集（V0.5.4）。
     #[serde(default)]
     pub board_sets: Vec<BoardSet>,
+    /// 目标（V0.6）。
+    #[serde(default)]
+    pub goals: Vec<Goal>,
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +276,9 @@ pub struct BackupFile {
     /// V0.5.4 新增；旧备份没有该字段时按空看板集处理。
     #[serde(default)]
     pub board_sets: Vec<BoardSet>,
+    /// V0.6 新增；旧备份没有该字段时按空目标处理。
+    #[serde(default)]
+    pub goals: Vec<Goal>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -212,6 +293,8 @@ pub struct BackupSummary {
     pub dependencies: usize,
     #[serde(default)]
     pub board_sets: usize,
+    #[serde(default)]
+    pub goals: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -419,6 +502,59 @@ pub struct BoardSetPatch {
 pub struct UpdateBoardSetInput {
     pub id: String,
     pub patch: BoardSetPatch,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewGoalInput {
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GoalScope>,
+    #[serde(default)]
+    pub status: Option<GoalStatus>,
+    #[serde(default)]
+    pub start_date: Option<String>,
+    #[serde(default)]
+    pub due_date: Option<String>,
+    #[serde(default)]
+    pub manual_progress: Option<i64>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub card_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalPatch {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GoalScope>,
+    #[serde(default)]
+    pub status: Option<GoalStatus>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub start_date: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub due_date: Option<Option<String>>,
+    #[serde(default)]
+    pub manual_progress: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub parent_id: Option<Option<String>>,
+    /// 传数组时整体替换关联任务。
+    #[serde(default)]
+    pub card_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateGoalInput {
+    pub id: String,
+    pub patch: GoalPatch,
 }
 
 // ---------------------------------------------------------------------------

@@ -17,12 +17,15 @@ import type {
   BoardSetPatch,
   Card,
   CardPatch,
+  Goal,
+  GoalPatch,
   InboxItem,
   List,
   ListPatch,
   NewBoardInput,
   NewBoardSetInput,
   NewCardInput,
+  NewGoalInput,
   Snapshot,
 } from '@/lib/types';
 
@@ -33,6 +36,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   inbox: [],
   dependencies: [],
   boardSets: [],
+  goals: [],
 };
 const SEED_FLAG = 'tideline.seeded';
 
@@ -61,6 +65,10 @@ export interface AppState {
   createBoardSet: (input: NewBoardSetInput) => Promise<BoardSet>;
   updateBoardSet: (id: string, patch: BoardSetPatch) => Promise<void>;
   deleteBoardSet: (id: string) => Promise<void>;
+
+  createGoal: (input: NewGoalInput) => Promise<Goal>;
+  updateGoal: (id: string, patch: GoalPatch) => Promise<void>;
+  deleteGoal: (id: string) => Promise<void>;
 
   createList: (boardId: string, title: string) => Promise<List>;
   updateList: (id: string, patch: ListPatch) => Promise<void>;
@@ -180,6 +188,10 @@ export const useAppStore = create<AppState>((set, get) => {
                   ? { ...set, boardIds: set.boardIds.filter((boardId) => boardId !== id) }
                   : set,
               ),
+              goals: state.snapshot.goals.map((goal) => ({
+                ...goal,
+                cardIds: goal.cardIds.filter((cardId) => !removedCardIds.has(cardId)),
+              })),
             },
           };
         });
@@ -221,6 +233,48 @@ export const useAppStore = create<AppState>((set, get) => {
           snapshot: {
             ...state.snapshot,
             boardSets: state.snapshot.boardSets.filter((item) => item.id !== id),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    createGoal: async (input) => {
+      try {
+        const goal = await api.createGoal(input);
+        set((state) => ({
+          snapshot: { ...state.snapshot, goals: [...state.snapshot.goals, goal] },
+        }));
+        return goal;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateGoal: async (id, patch) => {
+      try {
+        const goal = await api.updateGoal({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            goals: state.snapshot.goals.map((item) => (item.id === id ? goal : item)),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteGoal: async (id) => {
+      try {
+        await api.deleteGoal({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            goals: state.snapshot.goals
+              .filter((item) => item.id !== id)
+              .map((item) => (item.parentId === id ? { ...item, parentId: null } : item)),
           },
         }));
       } catch (error) {

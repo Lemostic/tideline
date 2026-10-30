@@ -337,6 +337,7 @@ pub fn get_snapshot(conn: &Connection) -> DbResult<Snapshot> {
         )?,
         dependencies: get_dependencies(conn)?,
         board_sets: get_board_sets(conn)?,
+        goals: get_goals(conn)?,
     })
 }
 
@@ -529,6 +530,280 @@ pub fn delete_board_set(conn: &mut Connection, input: IdInput) -> DbResult<()> {
         .map_err(db_err)?;
     tx.commit().map_err(db_err)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 目标（V0.6）
+// ---------------------------------------------------------------------------
+
+const GOAL_COLUMNS: &str = "id, title, description, scope, status, start_date, due_date, \
+                            manual_progress, parent_id, position, created_at, updated_at";
+
+fn row_to_goal(row: &Row<'_>) -> rusqlite::Result<Goal> {
+    Ok(Goal {
+        id: row.get("id")?,
+        title: row.get("title")?,
+        description: row.get("description")?,
+        scope: GoalScope::from_db(row.get::<_, String>("scope")?.as_str()),
+        status: GoalStatus::from_db(row.get::<_, String>("status")?.as_str()),
+        start_date: row.get("start_date")?,
+        due_date: row.get("due_date")?,
+        manual_progress: row.get("manual_progress")?,
+        parent_id: row.get("parent_id")?,
+        card_ids: Vec::new(),
+        position: row.get("position")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn load_goal_cards(conn: &Connection, goal_id: &str) -> DbResult<Vec<String>> {
+    let mut statement = conn
+        .prepare(
+            "SELECT card_id FROM goal_cards WHERE goal_id = ?1 \
+             ORDER BY position ASC, card_id ASC",
+        )
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([goal_id], |row| row.get::<_, String>(0))
+        .map_err(db_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+}
+
+fn normalized_goal_card_ids(conn: &Connection, card_ids: &[String]) -> DbResult<Vec<String>> {
+    let mut unique = Vec::new();
+    for id in card_ids {
+        if unique.contains(id) {
+            continue;
+        }
+        let exists: Option<i64> = conn
+            .query_row("SELECT 1 FROM cards WHERE id = ?1", [id], |row| row.get(0))
+            .optional()
+            .map_err(db_err)?;
+        if exists.is_none() {
+            return Err(format!("任务不存在：{id}"));
+        }
+        unique.push(id.clone());
+    }
+    Ok(unique)
+}
+
+fn write_goal_cards(conn: &Connection, goal_id: &str, card_ids: &[String]) -> DbResult<()> {
+    for (position, card_id) in card_ids.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO goal_cards (goal_id, card_id, position) VALUES (?1, ?2, ?3)",
+            params![goal_id, card_id, position as i64],
+        )
+        .map_err(db_err)?;
+    }
+    Ok(())
+}
+
+fn normalize_parent_id(parent_id: Option<String>) -> Option<String> {
+    parent_id.and_then(|id| {
+        let trimmed = id.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+/// 校验父目标存在且不会形成环（沿父链向上查找）。
+fn validate_goal_parent(
+    conn: &Connection,
+    goal_id: Option<&str>,
+    parent_id: Option<&str>,
+) -> DbResult<()> {
+    let Some(parent_id) = parent_id else {
+        return Ok(());
+    };
+    if Some(parent_id) == goal_id {
+        return Err("目标不能把自己设为父目标".to_string());
+    }
+    let mut current = Some(parent_id.to_string());
+    let mut seen = 0;
+    while let Some(id) = current {
+        if Some(id.as_str()) == goal_id {
+            return Err("目标层级不能形成循环".to_string());
+        }
+        seen += 1;
+        if seen > 100 {
+            return Err("目标层级过深，已停止保存".to_string());
+        }
+        let parent: Option<Option<String>> = conn
+            .query_row("SELECT parent_id FROM goals WHERE id = ?1", [&id], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(db_err)?;
+        let Some(parent) = parent else {
+            return Err(format!("父目标不存在：{id}"));
+        };
+        current = parent;
+    }
+    Ok(())
+}
+
+fn next_goal_position(conn: &Connection) -> DbResult<i64> {
+    let max: Option<i64> = conn
+        .query_row("SELECT MAX(position) FROM goals", [], |row| row.get(0))
+        .optional()
+        .map_err(db_err)?
+        .flatten();
+    Ok(max.unwrap_or(-1) + 1)
+}
+
+pub fn get_goals(conn: &Connection) -> DbResult<Vec<Goal>> {
+    let mut goals = collect_rows(
+        conn,
+        &format!("SELECT {GOAL_COLUMNS} FROM goals ORDER BY position ASC, id ASC"),
+        row_to_goal,
+    )?;
+    for goal in &mut goals {
+        goal.card_ids = load_goal_cards(conn, &goal.id)?;
+    }
+    Ok(goals)
+}
+
+fn get_goal(conn: &Connection, id: &str) -> DbResult<Goal> {
+    let mut goal = conn
+        .query_row(
+            &format!("SELECT {GOAL_COLUMNS} FROM goals WHERE id = ?1"),
+            [id],
+            row_to_goal,
+        )
+        .optional()
+        .map_err(db_err)?
+        .ok_or_else(|| format!("目标不存在：{id}"))?;
+    goal.card_ids = load_goal_cards(conn, id)?;
+    Ok(goal)
+}
+
+pub fn create_goal(conn: &mut Connection, input: NewGoalInput) -> DbResult<Goal> {
+    let tx = conn.transaction().map_err(db_err)?;
+    let parent_id = normalize_parent_id(input.parent_id);
+    validate_goal_parent(&tx, None, parent_id.as_deref())?;
+    let card_ids = normalized_goal_card_ids(&tx, &input.card_ids.unwrap_or_default())?;
+    let now = now_iso();
+    let goal = Goal {
+        id: create_id("g"),
+        title: fallback_trimmed(&input.title, "未命名目标"),
+        description: trimmed_or_empty(input.description),
+        scope: input.scope.unwrap_or(GoalScope::Team),
+        status: input.status.unwrap_or(GoalStatus::Active),
+        start_date: input.start_date.and_then(non_empty),
+        due_date: input.due_date.and_then(non_empty),
+        manual_progress: input.manual_progress.unwrap_or(0).clamp(0, 100),
+        parent_id,
+        card_ids,
+        position: next_goal_position(&tx)?,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    tx.execute(
+        "INSERT INTO goals (id, title, description, scope, status, start_date, due_date, \
+         manual_progress, parent_id, position, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            &goal.id,
+            &goal.title,
+            &goal.description,
+            goal.scope.as_str(),
+            goal.status.as_str(),
+            &goal.start_date,
+            &goal.due_date,
+            goal.manual_progress,
+            &goal.parent_id,
+            goal.position,
+            &goal.created_at,
+            &goal.updated_at,
+        ],
+    )
+    .map_err(db_err)?;
+    write_goal_cards(&tx, &goal.id, &goal.card_ids)?;
+    tx.commit().map_err(db_err)?;
+    Ok(goal)
+}
+
+pub fn update_goal(conn: &mut Connection, input: UpdateGoalInput) -> DbResult<Goal> {
+    let tx = conn.transaction().map_err(db_err)?;
+    let mut goal = get_goal(&tx, &input.id)?;
+    let replace_cards = input.patch.card_ids.is_some();
+
+    if let Some(title) = input.patch.title {
+        goal.title = fallback_trimmed(&title, "未命名目标");
+    }
+    if let Some(description) = input.patch.description {
+        goal.description = description;
+    }
+    if let Some(scope) = input.patch.scope {
+        goal.scope = scope;
+    }
+    if let Some(status) = input.patch.status {
+        goal.status = status;
+    }
+    if let Some(start_date) = input.patch.start_date {
+        goal.start_date = start_date.and_then(non_empty);
+    }
+    if let Some(due_date) = input.patch.due_date {
+        goal.due_date = due_date.and_then(non_empty);
+    }
+    if let Some(progress) = input.patch.manual_progress {
+        goal.manual_progress = progress.clamp(0, 100);
+    }
+    if let Some(card_ids) = input.patch.card_ids {
+        goal.card_ids = normalized_goal_card_ids(&tx, &card_ids)?;
+    }
+    if let Some(parent_id) = input.patch.parent_id {
+        let parent_id = normalize_parent_id(parent_id);
+        validate_goal_parent(&tx, Some(&goal.id), parent_id.as_deref())?;
+        goal.parent_id = parent_id;
+    }
+    goal.updated_at = now_iso();
+    tx.execute(
+        "UPDATE goals SET title = ?1, description = ?2, scope = ?3, status = ?4, \
+         start_date = ?5, due_date = ?6, manual_progress = ?7, parent_id = ?8, \
+         updated_at = ?9 WHERE id = ?10",
+        params![
+            &goal.title,
+            &goal.description,
+            goal.scope.as_str(),
+            goal.status.as_str(),
+            &goal.start_date,
+            &goal.due_date,
+            goal.manual_progress,
+            &goal.parent_id,
+            &goal.updated_at,
+            &goal.id,
+        ],
+    )
+    .map_err(db_err)?;
+    if replace_cards {
+        tx.execute("DELETE FROM goal_cards WHERE goal_id = ?1", [&goal.id])
+            .map_err(db_err)?;
+        write_goal_cards(&tx, &goal.id, &goal.card_ids)?;
+    }
+    tx.commit().map_err(db_err)?;
+    Ok(goal)
+}
+
+pub fn delete_goal(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    let tx = conn.transaction().map_err(db_err)?;
+    tx.execute("DELETE FROM goals WHERE id = ?1", [&input.id])
+        .map_err(db_err)?;
+    tx.commit().map_err(db_err)?;
+    Ok(())
+}
+
+fn non_empty(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 /// 判断从 `from` 出发沿依赖边是否可达 `target`（用于拒绝循环依赖）。
@@ -2591,5 +2866,114 @@ mod tests {
         )
         .expect_err("不存在的看板应拒绝");
         assert!(err.contains("不存在"), "错误：{err}");
+    }
+
+    #[test]
+    fn goal_tree_cards_and_status_update() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "目标看板");
+        let list = new_list(&mut conn, &board.id, "待办");
+        let card = new_card(&mut conn, &board.id, &list.id, "关联任务");
+
+        let parent = create_goal(
+            &mut conn,
+            NewGoalInput {
+                title: "年度目标".to_string(),
+                description: Some("公司级".to_string()),
+                scope: Some(GoalScope::Company),
+                status: None,
+                start_date: None,
+                due_date: None,
+                manual_progress: Some(20),
+                parent_id: None,
+                card_ids: None,
+            },
+        )
+        .expect("创建父目标");
+        let child = create_goal(
+            &mut conn,
+            NewGoalInput {
+                title: "子目标".to_string(),
+                description: None,
+                scope: Some(GoalScope::Personal),
+                status: None,
+                start_date: None,
+                due_date: None,
+                manual_progress: None,
+                parent_id: Some(parent.id.clone()),
+                card_ids: Some(vec![card.id.clone()]),
+            },
+        )
+        .expect("创建子目标");
+        assert_eq!(child.parent_id, Some(parent.id.clone()));
+        assert_eq!(child.card_ids, vec![card.id.clone()]);
+        assert_eq!(get_goals(&conn).expect("目标列表").len(), 2);
+
+        let updated = update_goal(
+            &mut conn,
+            UpdateGoalInput {
+                id: parent.id.clone(),
+                patch: GoalPatch {
+                    status: Some(GoalStatus::Completed),
+                    manual_progress: Some(150),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("更新目标");
+        assert_eq!(updated.status, GoalStatus::Completed);
+        assert_eq!(updated.manual_progress, 100);
+
+        delete_goal(&mut conn, id_input(&parent.id)).expect("删除父目标");
+        let goals = get_goals(&conn).expect("目标列表");
+        assert_eq!(goals.len(), 1);
+        assert_eq!(goals[0].parent_id, None);
+    }
+
+    #[test]
+    fn goal_parent_cycle_is_rejected() {
+        let mut conn = memory_db();
+        let parent = create_goal(
+            &mut conn,
+            NewGoalInput {
+                title: "父".to_string(),
+                description: None,
+                scope: None,
+                status: None,
+                start_date: None,
+                due_date: None,
+                manual_progress: None,
+                parent_id: None,
+                card_ids: None,
+            },
+        )
+        .expect("创建父目标");
+        let child = create_goal(
+            &mut conn,
+            NewGoalInput {
+                title: "子".to_string(),
+                description: None,
+                scope: None,
+                status: None,
+                start_date: None,
+                due_date: None,
+                manual_progress: None,
+                parent_id: Some(parent.id.clone()),
+                card_ids: None,
+            },
+        )
+        .expect("创建子目标");
+        let err = update_goal(
+            &mut conn,
+            UpdateGoalInput {
+                id: parent.id,
+                patch: GoalPatch {
+                    parent_id: Some(Some(child.id)),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect_err("父目标挂到子目标下应拒绝");
+        assert!(err.contains("循环"), "错误：{err}");
     }
 }

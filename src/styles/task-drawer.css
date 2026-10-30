@@ -669,3 +669,37 @@
   color: var(--ink-2);
   font-size: 11.5px;
 }
+
+.drawer-goals {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.drawer-goals-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.drawer-goal-chip {
+  max-width: 210px;
+  overflow: hidden;
+  padding: 2px 7px;
+  border: 1px solid var(--primary-soft-2);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.drawer-goal-chip:hover {
+  border-color: var(--primary);
+}

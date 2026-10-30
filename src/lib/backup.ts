@@ -12,6 +12,7 @@ import type {
   BoardSet,
   Card,
   CardDependency,
+  Goal,
   InboxItem,
   List,
 } from './types';
@@ -28,12 +29,13 @@ export interface BackupData {
   inbox: InboxItem[];
   dependencies: CardDependency[];
   boardSets: BoardSet[];
+  goals: Goal[];
 }
 
 export function summarizeBackup(
   backup: Pick<
     BackupFile,
-    'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets'
+    'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets' | 'goals'
   >,
 ): BackupSummary {
   return {
@@ -44,10 +46,11 @@ export function summarizeBackup(
     inbox: backup.inbox.length,
     dependencies: backup.dependencies.length,
     boardSets: backup.boardSets.length,
+    goals: backup.goals.length,
   };
 }
 
-/** 用当前全量数据（含回收站、依赖与看板集）生成备份对象。 */
+/** 用当前全量数据（含回收站、依赖、看板集与目标）生成备份对象。 */
 export function createBackup(data: BackupData): BackupFile {
   return {
     app: BACKUP_APP,
@@ -59,6 +62,7 @@ export function createBackup(data: BackupData): BackupFile {
     inbox: data.inbox,
     dependencies: data.dependencies,
     boardSets: data.boardSets,
+    goals: data.goals,
   };
 }
 
@@ -245,6 +249,73 @@ export function parseBackup(text: string): BackupFile {
     });
   }
 
+  // 目标是 V0.6 新增的；旧备份没有该字段时按空数组处理。
+  const rawGoals = raw.goals === undefined ? [] : requireArray(raw.goals, 'goals');
+  const goals: Goal[] = [];
+  const goalIds = new Set<string>();
+  for (const item of rawGoals) {
+    if (!isRecord(item)) throw new Error('备份中的目标格式不正确');
+    const id = requireString(item.id, 'goals[].id');
+    if (goalIds.has(id)) throw new Error(`备份中存在重复的目标 id：${id}`);
+    goalIds.add(id);
+    const title = requireString(item.title, 'goals[].title');
+    const scope =
+      item.scope === 'company' || item.scope === 'personal' || item.scope === 'team'
+        ? item.scope
+        : 'team';
+    const status =
+      item.status === 'active' || item.status === 'completed' || item.status === 'archived'
+        ? item.status
+        : 'active';
+    const manualProgress =
+      typeof item.manualProgress === 'number' && Number.isFinite(item.manualProgress)
+        ? Math.min(100, Math.max(0, Math.round(item.manualProgress)))
+        : 0;
+    const rawCardIds = item.cardIds === undefined ? [] : requireArray(item.cardIds, 'goals[].cardIds');
+    const linked = new Set<string>();
+    const cardIds: string[] = [];
+    for (const cardId of rawCardIds) {
+      if (typeof cardId !== 'string' || cardId.trim() === '') {
+        throw new Error(`目标「${title}」的关联任务 id 不正确`);
+      }
+      if (!cards.some((card) => card.id === cardId)) {
+        throw new Error(`目标「${title}」关联了不存在的任务`);
+      }
+      if (linked.has(cardId)) throw new Error(`目标「${title}」中存在重复的关联任务`);
+      linked.add(cardId);
+      cardIds.push(cardId);
+    }
+    goals.push({
+      id,
+      title,
+      description: typeof item.description === 'string' ? item.description : '',
+      scope,
+      status,
+      startDate: typeof item.startDate === 'string' ? item.startDate : null,
+      dueDate: typeof item.dueDate === 'string' ? item.dueDate : null,
+      manualProgress,
+      parentId: typeof item.parentId === 'string' ? item.parentId : null,
+      cardIds,
+      position: typeof item.position === 'number' ? item.position : goals.length,
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+  for (const goal of goals) {
+    if (goal.parentId === null) continue;
+    if (!goalIds.has(goal.parentId)) {
+      throw new Error(`目标「${goal.title}」引用了不存在的父目标`);
+    }
+    let current: string | null = goal.parentId;
+    let guard = 0;
+    while (current) {
+      if (current === goal.id) throw new Error('备份中的目标层级存在循环');
+      guard += 1;
+      if (guard > 100) throw new Error('备份中的目标层级过深');
+      current = goals.find((item) => item.id === current)?.parentId ?? null;
+    }
+  }
+
   return {
     app: BACKUP_APP,
     formatVersion: BACKUP_FORMAT_VERSION,
@@ -255,5 +326,6 @@ export function parseBackup(text: string): BackupFile {
     inbox,
     dependencies,
     boardSets,
+    goals,
   };
 }

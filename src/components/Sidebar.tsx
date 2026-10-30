@@ -8,7 +8,6 @@ interface NavEntry {
   label: string;
   icon: IconName;
   end?: boolean;
-  vip?: boolean;
 }
 
 const WORKSPACE_NAV: NavEntry[] = [
@@ -19,12 +18,9 @@ const WORKSPACE_NAV: NavEntry[] = [
   { to: '/trash', label: '回收站', icon: 'trash' },
   { to: '/dashboard', label: '仪表盘', icon: 'chart' },
   { to: '/board-sets', label: '看板集', icon: 'layers' },
+  { to: '/goals', label: '目标', icon: 'target' },
   { to: '/data', label: '数据备份', icon: 'database' },
   { to: '/settings', label: '设置', icon: 'sliders' },
-];
-
-const VIP_NAV: NavEntry[] = [
-  { to: '/goals', label: '目标', icon: 'target', vip: true },
 ];
 
 export function Sidebar() {
@@ -65,24 +61,6 @@ export function Sidebar() {
             {entry.to === '/inbox' && inboxCount > 0 ? (
               <span className="nav-meta">{inboxCount}</span>
             ) : null}
-          </NavLink>
-        ))}
-      </nav>
-
-      <div className="sidebar-section">进阶</div>
-      <nav className="nav" aria-label="进阶">
-        {VIP_NAV.map((entry) => (
-          <NavLink
-            key={entry.to}
-            to={entry.to}
-            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
-            title={`${entry.label}（后续版本推出）`}
-          >
-            <span className="nav-icon">
-              <Icon name={entry.icon} size={17} />
-            </span>
-            <span className="nav-label">{entry.label}</span>
-            {entry.vip ? <span className="vip-tag">即将推出</span> : null}
           </NavLink>
         ))}
       </nav>

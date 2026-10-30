@@ -31,6 +31,8 @@ export function TopBar() {
   const boardSet = boardSetId
     ? snapshot.boardSets.find((item) => item.id === boardSetId)
     : undefined;
+  const goalId = pathname.startsWith('/goals/') ? pathname.slice('/goals/'.length) : null;
+  const goal = goalId ? snapshot.goals.find((item) => item.id === goalId) : undefined;
   const crumb = board ? (
     <>
       <button className="btn btn-icon" onClick={() => navigate('/')} aria-label="返回首页">
@@ -48,6 +50,15 @@ export function TopBar() {
       <span>看板集</span>
       <Icon name="chevron-right" size={12} />
       <strong>{boardSet.title}</strong>
+    </>
+  ) : goal ? (
+    <>
+      <button className="btn btn-icon" onClick={() => navigate('/goals')} aria-label="返回目标">
+        <Icon name="arrow-left" size={15} />
+      </button>
+      <span>目标</span>
+      <Icon name="chevron-right" size={12} />
+      <strong>{goal.title}</strong>
     </>
   ) : (
     <>

@@ -11,13 +11,14 @@ import { BoardSetDetailPage } from '@/pages/BoardSetDetailPage';
 import { BoardSetsPage } from '@/pages/BoardSetsPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { DataPage } from '@/pages/DataPage';
+import { GoalDetailPage } from '@/pages/GoalDetailPage';
+import { GoalsPage } from '@/pages/GoalsPage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { MyTasksPage } from '@/pages/MyTasksPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TemplatesPage } from '@/pages/TemplatesPage';
 import { TrashPage } from '@/pages/TrashPage';
-import { VipFeaturePage } from '@/pages/VipFeaturePage';
 import { useAppStore } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
@@ -82,7 +83,8 @@ export default function App() {
               <Route path="/board/:boardId" element={<BoardPage />} />
               <Route path="/board-sets" element={<BoardSetsPage />} />
               <Route path="/board-sets/:setId" element={<BoardSetDetailPage />} />
-              <Route path="/goals" element={<VipFeaturePage feature="goals" />} />
+              <Route path="/goals" element={<GoalsPage />} />
+              <Route path="/goals/:goalId" element={<GoalDetailPage />} />
               <Route path="*" element={<HomePage />} />
             </Routes>
           </div>

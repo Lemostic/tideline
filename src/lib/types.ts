@@ -84,6 +84,8 @@ export interface Snapshot {
   dependencies: CardDependency[];
   /** 看板集（V0.5.4）：多板汇总 */
   boardSets: BoardSet[];
+  /** 目标（V0.6）：目标树与任务关联 */
+  goals: Goal[];
 }
 
 /** 任务依赖（V0.4）：`cardId` 被 `dependsOnCardId` 阻塞 */
@@ -110,6 +112,55 @@ export interface NewBoardSetInput {
 }
 
 export type BoardSetPatch = Partial<Pick<BoardSet, 'title' | 'description' | 'boardIds'>>;
+
+export type GoalScope = 'company' | 'team' | 'personal';
+export type GoalStatus = 'active' | 'completed' | 'archived';
+
+/** 目标（V0.6）：可嵌套子目标；有关联任务时进度按任务完成度自动计算 */
+export interface Goal {
+  id: string;
+  title: string;
+  description: string;
+  scope: GoalScope;
+  status: GoalStatus;
+  startDate: string | null;
+  dueDate: string | null;
+  /** 无关联任务、无子目标时使用的手动进度 0–100 */
+  manualProgress: number;
+  parentId: string | null;
+  /** 关联任务 id，顺序即展示顺序 */
+  cardIds: string[];
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewGoalInput {
+  title: string;
+  description?: string;
+  scope?: GoalScope;
+  status?: GoalStatus;
+  startDate?: string | null;
+  dueDate?: string | null;
+  manualProgress?: number;
+  parentId?: string | null;
+  cardIds?: string[];
+}
+
+export type GoalPatch = Partial<
+  Pick<
+    Goal,
+    | 'title'
+    | 'description'
+    | 'scope'
+    | 'status'
+    | 'startDate'
+    | 'dueDate'
+    | 'manualProgress'
+    | 'parentId'
+    | 'cardIds'
+  >
+>;
 
 export type BoardPatch = Partial<
   Pick<Board, 'title' | 'description' | 'color' | 'starred'>
@@ -218,6 +269,8 @@ export interface BackupFile {
   dependencies: CardDependency[];
   /** V0.5.4 新增；旧备份没有该字段时按空看板集处理 */
   boardSets: BoardSet[];
+  /** V0.6 新增；旧备份没有该字段时按空目标处理 */
+  goals: Goal[];
 }
 
 export interface BackupSummary {
@@ -228,6 +281,7 @@ export interface BackupSummary {
   inbox: number;
   dependencies: number;
   boardSets: number;
+  goals: number;
 }
 
 export interface BackupExport {
@@ -245,9 +299,6 @@ export interface StorageInfo {
   /** 浏览器 localStorage 模式为 false */
   editable: boolean;
 }
-
-/** 目标：保留菜单入口与功能占位 */
-export type VipFeature = 'goals';
 
 /** 看板内可切换的视图，V0.2 起看板 / 表格 / 甘特已实现，日历待 V0.3 */
 export type BoardView = 'board' | 'table' | 'gantt' | 'calendar';

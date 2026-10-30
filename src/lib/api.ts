@@ -27,6 +27,10 @@ import type {
   Card,
   CardDependency,
   CardPatch,
+  Goal,
+  GoalPatch,
+  GoalScope,
+  GoalStatus,
   ConvertInboxInput,
   IdInput,
   InboxItem,
@@ -36,6 +40,7 @@ import type {
   NewBoardInput,
   NewBoardSetInput,
   NewCardInput,
+  NewGoalInput,
   NewListInput,
   Snapshot,
   StorageInfo,
@@ -80,6 +85,10 @@ export interface TidelineApi {
   createBoardSet(input: NewBoardSetInput): Promise<BoardSet>;
   updateBoardSet(input: { id: string; patch: BoardSetPatch }): Promise<BoardSet>;
   deleteBoardSet(input: IdInput): Promise<void>;
+  /** 目标（V0.6） */
+  createGoal(input: NewGoalInput): Promise<Goal>;
+  updateGoal(input: { id: string; patch: GoalPatch }): Promise<Goal>;
+  deleteGoal(input: IdInput): Promise<void>;
 }
 
 export function isTauri(): boolean {
@@ -118,6 +127,9 @@ const tauriApi: TidelineApi = {
   createBoardSet: (input) => invoke<BoardSet>('create_board_set', { input }),
   updateBoardSet: (input) => invoke<BoardSet>('update_board_set', { input }),
   deleteBoardSet: (input) => invoke<void>('delete_board_set', { input }),
+  createGoal: (input) => invoke<Goal>('create_goal', { input }),
+  updateGoal: (input) => invoke<Goal>('update_goal', { input }),
+  deleteGoal: (input) => invoke<void>('delete_goal', { input }),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
@@ -151,14 +163,43 @@ function normalizeCard(raw: Card): Card {
   };
 }
 
+function normalizeGoalScope(value: unknown): GoalScope {
+  return value === 'company' || value === 'personal' ? value : 'team';
+}
+
+function normalizeGoalStatus(value: unknown): GoalStatus {
+  return value === 'completed' || value === 'archived' ? value : 'active';
+}
+
+function clampProgress(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : 0;
+  return Math.min(100, Math.max(0, Math.round(numeric)));
+}
+
 function loadLocalDb(): LocalDb {
   if (typeof localStorage === 'undefined') {
-    return { boards: [], lists: [], cards: [], inbox: [], dependencies: [], boardSets: [] };
+    return {
+      boards: [],
+      lists: [],
+      cards: [],
+      inbox: [],
+      dependencies: [],
+      boardSets: [],
+      goals: [],
+    };
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return { boards: [], lists: [], cards: [], inbox: [], dependencies: [], boardSets: [] };
+      return {
+        boards: [],
+        lists: [],
+        cards: [],
+        inbox: [],
+        dependencies: [],
+        boardSets: [],
+        goals: [],
+      };
     }
     const parsed = JSON.parse(raw) as Partial<LocalDb>;
     return {
@@ -189,9 +230,40 @@ function loadLocalDb(): LocalDb {
               boardIds: item.boardIds.filter((id): id is string => typeof id === 'string'),
             }))
         : [],
+      goals: Array.isArray(parsed.goals)
+        ? parsed.goals
+            .filter(
+              (item): item is Goal =>
+                Boolean(item) &&
+                typeof item.id === 'string' &&
+                typeof item.title === 'string',
+            )
+            .map((item) => ({
+              ...item,
+              description: typeof item.description === 'string' ? item.description : '',
+              scope: normalizeGoalScope(item.scope),
+              status: normalizeGoalStatus(item.status),
+              startDate: typeof item.startDate === 'string' ? item.startDate : null,
+              dueDate: typeof item.dueDate === 'string' ? item.dueDate : null,
+              manualProgress: clampProgress(item.manualProgress),
+              parentId: typeof item.parentId === 'string' ? item.parentId : null,
+              cardIds: Array.isArray(item.cardIds)
+                ? item.cardIds.filter((id): id is string => typeof id === 'string')
+                : [],
+              position: typeof item.position === 'number' ? item.position : 0,
+            }))
+        : [],
     };
   } catch {
-    return { boards: [], lists: [], cards: [], inbox: [], dependencies: [], boardSets: [] };
+    return {
+      boards: [],
+      lists: [],
+      cards: [],
+      inbox: [],
+      dependencies: [],
+      boardSets: [],
+      goals: [],
+    };
   }
 }
 
@@ -258,6 +330,51 @@ function normalizeBoardSetBoardIds(db: LocalDb, boardIds: string[]): string[] {
   return unique;
 }
 
+function requireGoal(db: LocalDb, id: string): Goal {
+  const goal = db.goals.find((item) => item.id === id);
+  if (!goal) throw new Error(`目标不存在：${id}`);
+  return goal;
+}
+
+function normalizeGoalCardIds(db: LocalDb, cardIds: string[]): string[] {
+  const unique: string[] = [];
+  for (const id of cardIds) {
+    if (unique.includes(id)) continue;
+    requireCard(db, id);
+    unique.push(id);
+  }
+  return unique;
+}
+
+function validateGoalParent(
+  db: LocalDb,
+  goalId: string | null,
+  parentId: string | null,
+): string | null {
+  if (!parentId) return null;
+  if (goalId && parentId === goalId) throw new Error('目标不能把自己设为父目标');
+  let current: string | null = parentId;
+  let guard = 0;
+  while (current) {
+    if (goalId && current === goalId) throw new Error('目标层级不能形成循环');
+    guard += 1;
+    if (guard > 100) throw new Error('目标层级过深，已停止保存');
+    const parent = db.goals.find((item) => item.id === current);
+    if (!parent) throw new Error(`父目标不存在：${current}`);
+    current = parent.parentId;
+  }
+  return parentId;
+}
+
+/** 彻底删除任务时同步清理目标关联（软删除保留关联，恢复后仍可回写进度）。 */
+function pruneGoalCards(db: LocalDb, removedCardIds: Set<string>): void {
+  if (removedCardIds.size === 0) return;
+  db.goals = db.goals.map((goal) => ({
+    ...goal,
+    cardIds: goal.cardIds.filter((cardId) => !removedCardIds.has(cardId)),
+  }));
+}
+
 /** 删除任务时同步清理依赖边（两个方向），避免引用已不存在的任务。 */
 function pruneDependencies(db: LocalDb, removedCardIds: Set<string>): void {
   if (removedCardIds.size === 0) {
@@ -305,6 +422,9 @@ const localApi: TidelineApi = {
       boardSets: [...db.boardSets].sort((a, b) =>
         a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
       ),
+      goals: [...db.goals].sort(
+        (a, b) => a.position - b.position || a.id.localeCompare(b.id),
+      ),
     };
   },
 
@@ -351,6 +471,10 @@ const localApi: TidelineApi = {
           }
         : set,
     );
+    db.goals = db.goals.map((goal) => ({
+      ...goal,
+      cardIds: goal.cardIds.filter((cardId) => !removedCardIds.has(cardId)),
+    }));
     pruneDependencies(db, removedCardIds);
     saveLocalDb(db);
   },
@@ -492,6 +616,7 @@ const localApi: TidelineApi = {
     const db = loadLocalDb();
     db.cards = db.cards.filter((card) => card.id !== id);
     pruneDependencies(db, new Set([id]));
+    pruneGoalCards(db, new Set([id]));
     saveLocalDb(db);
   },
 
@@ -500,6 +625,7 @@ const localApi: TidelineApi = {
     const removed = new Set(db.cards.filter((card) => card.deletedAt).map((card) => card.id));
     db.cards = db.cards.filter((card) => !card.deletedAt);
     pruneDependencies(db, removed);
+    pruneGoalCards(db, removed);
     saveLocalDb(db);
   },
 
@@ -649,6 +775,7 @@ const localApi: TidelineApi = {
       inbox: backup.inbox,
       dependencies: backup.dependencies,
       boardSets: backup.boardSets,
+      goals: backup.goals,
     });
     return summarizeBackup(backup);
   },
@@ -707,6 +834,61 @@ const localApi: TidelineApi = {
   async deleteBoardSet({ id }) {
     const db = loadLocalDb();
     db.boardSets = db.boardSets.filter((set) => set.id !== id);
+    saveLocalDb(db);
+  },
+
+  async createGoal(input) {
+    const db = loadLocalDb();
+    const now = nowISO();
+    const parentId = validateGoalParent(db, null, input.parentId ?? null);
+    const goal: Goal = {
+      id: createId('g'),
+      title: input.title.trim() || '未命名目标',
+      description: input.description?.trim() ?? '',
+      scope: normalizeGoalScope(input.scope),
+      status: normalizeGoalStatus(input.status),
+      startDate: input.startDate ?? null,
+      dueDate: input.dueDate ?? null,
+      manualProgress: clampProgress(input.manualProgress),
+      parentId,
+      cardIds: normalizeGoalCardIds(db, input.cardIds ?? []),
+      position: db.goals.reduce((max, item) => Math.max(max, item.position), -1) + 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.goals.push(goal);
+    saveLocalDb(db);
+    return goal;
+  },
+
+  async updateGoal({ id, patch }) {
+    const db = loadLocalDb();
+    const goal = requireGoal(db, id);
+    if (patch.title !== undefined) goal.title = patch.title.trim() || '未命名目标';
+    if (patch.description !== undefined) goal.description = patch.description;
+    if (patch.scope !== undefined) goal.scope = normalizeGoalScope(patch.scope);
+    if (patch.status !== undefined) goal.status = normalizeGoalStatus(patch.status);
+    if (patch.startDate !== undefined) goal.startDate = patch.startDate;
+    if (patch.dueDate !== undefined) goal.dueDate = patch.dueDate;
+    if (patch.manualProgress !== undefined) goal.manualProgress = clampProgress(patch.manualProgress);
+    if (patch.parentId !== undefined) {
+      goal.parentId = validateGoalParent(db, goal.id, patch.parentId);
+    }
+    if (patch.cardIds !== undefined) {
+      goal.cardIds = normalizeGoalCardIds(db, patch.cardIds);
+    }
+    goal.updatedAt = nowISO();
+    saveLocalDb(db);
+    return goal;
+  },
+
+  async deleteGoal({ id }) {
+    const db = loadLocalDb();
+    const now = nowISO();
+    db.goals = db.goals.filter((goal) => goal.id !== id);
+    db.goals = db.goals.map((goal) =>
+      goal.parentId === id ? { ...goal, parentId: null, updatedAt: now } : goal,
+    );
     saveLocalDb(db);
   },
 };

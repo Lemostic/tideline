@@ -145,6 +145,28 @@ CREATE TABLE IF NOT EXISTS board_set_boards (
     PRIMARY KEY (set_id, board_id)
 );
 
+CREATE TABLE IF NOT EXISTS goals (
+    id              TEXT PRIMARY KEY NOT NULL,
+    title           TEXT NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    scope           TEXT NOT NULL DEFAULT 'team',
+    status          TEXT NOT NULL DEFAULT 'active',
+    start_date      TEXT,
+    due_date        TEXT,
+    manual_progress INTEGER NOT NULL DEFAULT 0,
+    parent_id       TEXT REFERENCES goals (id) ON DELETE SET NULL,
+    position        INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS goal_cards (
+    goal_id  TEXT NOT NULL REFERENCES goals (id) ON DELETE CASCADE,
+    card_id  TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (goal_id, card_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_lists_board_position ON lists (board_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_list_position ON cards (list_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_board ON cards (board_id);
@@ -152,6 +174,8 @@ CREATE INDEX IF NOT EXISTS idx_cards_due_date ON cards (due_date);
 CREATE INDEX IF NOT EXISTS idx_inbox_created_at ON inbox_items (created_at);
 CREATE INDEX IF NOT EXISTS idx_card_dependencies_depends_on ON card_dependencies (depends_on_card_id);
 CREATE INDEX IF NOT EXISTS idx_board_set_boards_board ON board_set_boards (board_id);
+CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals (parent_id);
+CREATE INDEX IF NOT EXISTS idx_goal_cards_card ON goal_cards (card_id);
 "#;
 
 /// 打开磁盘数据库（生产路径）。
@@ -185,7 +209,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -244,9 +268,31 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
                  PRIMARY KEY (set_id, board_id)
              );
              CREATE INDEX IF NOT EXISTS idx_board_set_boards_board
-                 ON board_set_boards (board_id);",
+                 ON board_set_boards (board_id);
+             CREATE TABLE IF NOT EXISTS goals (
+                 id              TEXT PRIMARY KEY NOT NULL,
+                 title           TEXT NOT NULL,
+                 description     TEXT NOT NULL DEFAULT '',
+                 scope           TEXT NOT NULL DEFAULT 'team',
+                 status          TEXT NOT NULL DEFAULT 'active',
+                 start_date      TEXT,
+                 due_date        TEXT,
+                 manual_progress INTEGER NOT NULL DEFAULT 0,
+                 parent_id       TEXT REFERENCES goals (id) ON DELETE SET NULL,
+                 position        INTEGER NOT NULL DEFAULT 0,
+                 created_at      TEXT NOT NULL,
+                 updated_at      TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS goal_cards (
+                 goal_id  TEXT NOT NULL REFERENCES goals (id) ON DELETE CASCADE,
+                 card_id  TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+                 position INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY (goal_id, card_id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals (parent_id);
+             CREATE INDEX IF NOT EXISTS idx_goal_cards_card ON goal_cards (card_id);",
         )
-        .map_err(|error| format!("创建任务依赖/看板集表失败：{error}"))?;
+        .map_err(|error| format!("创建任务依赖/看板集/目标表失败：{error}"))?;
     connection
         .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|error| format!("写入 user_version 失败：{error}"))?;

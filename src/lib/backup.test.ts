@@ -59,6 +59,7 @@ const validBackup = () =>
     inbox,
     dependencies: [{ cardId: 'c_2', dependsOnCardId: 'c_1' }],
     boardSets: [],
+    goals: [],
   });
 
 describe('backup helpers', () => {
@@ -72,6 +73,7 @@ describe('backup helpers', () => {
       inbox: 1,
       dependencies: 1,
       boardSets: 0,
+      goals: 0,
     });
   });
 

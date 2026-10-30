@@ -161,6 +161,28 @@ pub fn delete_board_set(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
 }
 
 // ---------------------------------------------------------------------------
+// 目标（V0.6）
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn create_goal(db: State<'_, Db>, input: NewGoalInput) -> CmdResult<Goal> {
+    let mut conn = db.lock()?;
+    repo::create_goal(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn update_goal(db: State<'_, Db>, input: UpdateGoalInput) -> CmdResult<Goal> {
+    let mut conn = db.lock()?;
+    repo::update_goal(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn delete_goal(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_goal(&mut conn, input)
+}
+
+// ---------------------------------------------------------------------------
 // 备份 / 恢复（V0.4）
 // ---------------------------------------------------------------------------
 

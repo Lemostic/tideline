@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { formatDateCN, formatRelativeTime, parseDateKey, todayKey } from '@/lib/date';
 import { blockersFor, dependencyCandidates } from '@/lib/dependencies';
@@ -26,6 +27,7 @@ type DescriptionMode = 'edit' | 'preview';
  * 子任务、标签、开始日期是 V0.2 新增字段，全部即时写回本地快照。
  */
 export function TaskDrawer() {
+  const navigate = useNavigate();
   const editingCardId = useUiStore((state) => state.editingCardId);
   const closeCard = useUiStore((state) => state.closeCard);
   const snapshot = useSnapshot();
@@ -44,6 +46,10 @@ export function TaskDrawer() {
   const lists = useMemo(
     () => snapshot.lists.filter((item) => item.boardId === card?.boardId),
     [snapshot.lists, card?.boardId],
+  );
+  const linkedGoals = useMemo(
+    () => (card ? snapshot.goals.filter((goal) => goal.cardIds.includes(card.id)) : []),
+    [snapshot.goals, card],
   );
 
   const [title, setTitle] = useState('');
@@ -317,6 +323,28 @@ export function TaskDrawer() {
                 </span>
               ) : null}
             </div>
+            {linkedGoals.length > 0 ? (
+              <div className="drawer-goals">
+                <span className="drawer-goals-label">
+                  <Icon name="target" size={12} />
+                  关联目标
+                </span>
+                {linkedGoals.map((goal) => (
+                  <button
+                    key={goal.id}
+                    type="button"
+                    className="drawer-goal-chip"
+                    title={goal.title}
+                    onClick={() => {
+                      closeCard();
+                      navigate(`/goals/${goal.id}`);
+                    }}
+                  >
+                    {goal.title}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div className="meta-grid">

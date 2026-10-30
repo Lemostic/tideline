@@ -31,6 +31,7 @@ pub fn build(conn: &Connection) -> Result<BackupFile, String> {
         inbox: snapshot.inbox,
         dependencies: repo::get_dependencies(conn)?,
         board_sets: repo::get_board_sets(conn)?,
+        goals: repo::get_goals(conn)?,
     })
 }
 
@@ -44,6 +45,7 @@ impl BackupFile {
             inbox: self.inbox.len(),
             dependencies: self.dependencies.len(),
             board_sets: self.board_sets.len(),
+            goals: self.goals.len(),
         }
     }
 }
@@ -195,6 +197,48 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         }
     }
 
+    let mut goal_ids = HashSet::new();
+    for goal in &backup.goals {
+        if goal.id.trim().is_empty() {
+            return Err("备份中存在空的目标 id".to_string());
+        }
+        if !goal_ids.insert(goal.id.as_str()) {
+            return Err(format!("备份中存在重复的目标 id：{}", goal.id));
+        }
+        let mut linked = HashSet::new();
+        for card_id in &goal.card_ids {
+            if !linked.insert(card_id.as_str()) {
+                return Err(format!("目标「{}」中存在重复的关联任务", goal.title));
+            }
+            if !card_ids.contains(card_id.as_str()) {
+                return Err(format!("目标「{}」关联了不存在的任务", goal.title));
+            }
+        }
+    }
+    for goal in &backup.goals {
+        if let Some(parent_id) = &goal.parent_id {
+            if !goal_ids.contains(parent_id.as_str()) {
+                return Err(format!("目标「{}」引用了不存在的父目标", goal.title));
+            }
+            let mut current = Some(parent_id.clone());
+            let mut seen = 0;
+            while let Some(id) = current {
+                if id == goal.id {
+                    return Err("备份中的目标层级存在循环".to_string());
+                }
+                seen += 1;
+                if seen > 100 {
+                    return Err("备份中的目标层级过深".to_string());
+                }
+                current = backup
+                    .goals
+                    .iter()
+                    .find(|item| item.id == id)
+                    .and_then(|item| item.parent_id.clone());
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -202,7 +246,9 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
 pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSummary, String> {
     validate(backup)?;
     let tx = conn.transaction().map_err(|error| format!("恢复失败：{error}"))?;
-    tx.execute("DELETE FROM board_set_boards", [])
+    tx.execute("DELETE FROM goal_cards", [])
+        .and_then(|_| tx.execute("DELETE FROM goals", []))
+        .and_then(|_| tx.execute("DELETE FROM board_set_boards", []))
         .and_then(|_| tx.execute("DELETE FROM board_sets", []))
         .and_then(|_| tx.execute("DELETE FROM card_dependencies", []))
         .and_then(|_| tx.execute("DELETE FROM cards", []))
@@ -272,6 +318,36 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
             ],
         )
         .map_err(|error| format!("写入任务「{}」失败：{error}", card.title))?;
+    }
+
+    for goal in &backup.goals {
+        tx.execute(
+            "INSERT INTO goals (id, title, description, scope, status, start_date, due_date, \
+             manual_progress, parent_id, position, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                &goal.id,
+                &goal.title,
+                &goal.description,
+                goal.scope.as_str(),
+                goal.status.as_str(),
+                &goal.start_date,
+                &goal.due_date,
+                goal.manual_progress,
+                &goal.parent_id,
+                goal.position,
+                &goal.created_at,
+                &goal.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入目标「{}」失败：{error}", goal.title))?;
+        for (position, card_id) in goal.card_ids.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO goal_cards (goal_id, card_id, position) VALUES (?1, ?2, ?3)",
+                params![&goal.id, card_id, position as i64],
+            )
+            .map_err(|error| format!("写入目标关联任务失败：{error}"))?;
+        }
     }
 
     for board_set in &backup.board_sets {
@@ -463,6 +539,7 @@ mod tests {
             inbox: Vec::new(),
             dependencies: Vec::new(),
             board_sets: Vec::new(),
+            goals: Vec::new(),
         };
         let summary = restore(&mut conn, &empty).expect("恢复空备份");
         assert_eq!(summary.cards, 0);
@@ -565,5 +642,51 @@ mod tests {
         assert_eq!(snapshot.board_sets.len(), 1);
         assert_eq!(snapshot.board_sets[0].id, board_set.id);
         assert_eq!(snapshot.board_sets[0].board_ids, vec![board_id]);
+    }
+
+    #[test]
+    fn goals_round_trip_through_backup() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        seed(&mut conn);
+        let mut snapshot = repo::get_snapshot(&conn).expect("快照");
+        if snapshot.cards.is_empty() {
+            let board = &snapshot.boards[0];
+            let list = &snapshot.lists[0];
+            let card = repo::create_card(
+                &mut conn,
+                NewCardInput {
+                    board_id: board.id.clone(),
+                    list_id: list.id.clone(),
+                    title: "目标任务".to_string(),
+                    ..Default::default()
+                },
+            )
+            .expect("创建任务");
+            snapshot.cards.push(card);
+        }
+        let card_id = snapshot.cards[0].id.clone();
+        let goal = repo::create_goal(
+            &mut conn,
+            NewGoalInput {
+                title: "目标".to_string(),
+                description: Some("备份".to_string()),
+                scope: Some(GoalScope::Company),
+                status: None,
+                start_date: None,
+                due_date: None,
+                manual_progress: Some(30),
+                parent_id: None,
+                card_ids: Some(vec![card_id.clone()]),
+            },
+        )
+        .expect("创建目标");
+        let backup = build(&conn).expect("构建备份");
+        assert_eq!(backup.summary().goals, 1);
+        let restored = restore(&mut conn, &backup).expect("恢复备份");
+        assert_eq!(restored.goals, 1);
+        let snapshot = repo::get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.goals.len(), 1);
+        assert_eq!(snapshot.goals[0].id, goal.id);
+        assert_eq!(snapshot.goals[0].card_ids, vec![card_id]);
     }
 }
