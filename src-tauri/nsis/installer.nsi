@@ -306,16 +306,20 @@ Function PageReinstall
     !endif
     ${NSD_OnClick} $R3 PageReinstallUpdateSelection
 
-    ; Check the first radio button if this the first time
-    ; we enter this page or if the second button wasn't
-    ; selected the last time we were on this page
-    ${If} $ReinstallPageCheck <> 2
+    ; 默认选项：
+    ; - 升级：默认「不卸载，直接覆盖安装」，保留旧安装目录与数据
+    ; - 同版本：默认「重新安装」
+    ; - 降级：默认卸载旧版本
+    ${If} $R0 = 1
+      SendMessage $R3 ${BM_SETCHECK} ${BST_CHECKED} 0
+      ${NSD_SetFocus} $R3
+    ${ElseIf} $ReinstallPageCheck <> 2
       SendMessage $R2 ${BM_SETCHECK} ${BST_CHECKED} 0
+      ${NSD_SetFocus} $R2
     ${Else}
       SendMessage $R3 ${BM_SETCHECK} ${BST_CHECKED} 0
+      ${NSD_SetFocus} $R3
     ${EndIf}
-
-    ${NSD_SetFocus} $R2
     nsDialogs::Show
   ${EndIf}
 FunctionEnd
@@ -945,8 +949,9 @@ SectionEnd
 Function RestorePreviousInstallLocation
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
   StrCmp $4 "" restore_done 0
-  ; 只沿用「正式目录」下的旧安装，避免历史临时安装目录（如 C:\Temp\...）影响默认安装位置
-  StrCmp $4 "$APPDATA\Tideline" 0 restore_done
+  ; 旧版本安装目录存在时，直接沿用（支持用户自定义安装路径），
+  ; 下次安装 / 升级默认覆盖到同一目录，而不是回到固定默认路径。
+  IfFileExists "$4\${MAINBINARYNAME}.exe" 0 restore_done
     StrCpy $INSTDIR $4
   restore_done:
 FunctionEnd
