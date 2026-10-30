@@ -58,6 +58,7 @@ const validBackup = () =>
     cards: [card(), card({ id: 'c_2', deletedAt: '2026-02-01T00:00:00.000Z' })],
     inbox,
     dependencies: [{ cardId: 'c_2', dependsOnCardId: 'c_1' }],
+    boardSets: [],
   });
 
 describe('backup helpers', () => {
@@ -70,6 +71,7 @@ describe('backup helpers', () => {
       trashed: 1,
       inbox: 1,
       dependencies: 1,
+      boardSets: 0,
     });
   });
 

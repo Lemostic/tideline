@@ -18,12 +18,12 @@ const WORKSPACE_NAV: NavEntry[] = [
   { to: '/templates', label: '模板中心', icon: 'layout-grid' },
   { to: '/trash', label: '回收站', icon: 'trash' },
   { to: '/dashboard', label: '仪表盘', icon: 'chart' },
+  { to: '/board-sets', label: '看板集', icon: 'layers' },
   { to: '/data', label: '数据备份', icon: 'database' },
   { to: '/settings', label: '设置', icon: 'sliders' },
 ];
 
 const VIP_NAV: NavEntry[] = [
-  { to: '/board-sets', label: '看板集', icon: 'layers', vip: true },
   { to: '/goals', label: '目标', icon: 'target', vip: true },
 ];
 

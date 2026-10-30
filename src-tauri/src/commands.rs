@@ -139,6 +139,28 @@ pub fn set_card_dependencies(
 }
 
 // ---------------------------------------------------------------------------
+// 看板集（V0.5.4）
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn create_board_set(db: State<'_, Db>, input: NewBoardSetInput) -> CmdResult<BoardSet> {
+    let mut conn = db.lock()?;
+    repo::create_board_set(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn update_board_set(db: State<'_, Db>, input: UpdateBoardSetInput) -> CmdResult<BoardSet> {
+    let mut conn = db.lock()?;
+    repo::update_board_set(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn delete_board_set(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_board_set(&mut conn, input)
+}
+
+// ---------------------------------------------------------------------------
 // 备份 / 恢复（V0.4）
 // ---------------------------------------------------------------------------
 

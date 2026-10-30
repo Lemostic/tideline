@@ -147,6 +147,19 @@ pub struct CardDependency {
     pub depends_on_card_id: String,
 }
 
+/// 看板集（V0.5.4）：把多个看板聚合成一张跨看板汇总表。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardSet {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    /// 成员看板 id，顺序即展示顺序；看板删除后由外键级联移除。
+    pub board_ids: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// 启动时一次性拉取的全量快照。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -158,6 +171,9 @@ pub struct Snapshot {
     /// 任务依赖边（V0.4），只包含仍存在的任务。
     #[serde(default)]
     pub dependencies: Vec<CardDependency>,
+    /// 看板集（V0.5.4）。
+    #[serde(default)]
+    pub board_sets: Vec<BoardSet>,
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +195,9 @@ pub struct BackupFile {
     /// V0.4 新增；旧备份没有该字段时按空依赖处理。
     #[serde(default)]
     pub dependencies: Vec<CardDependency>,
+    /// V0.5.4 新增；旧备份没有该字段时按空看板集处理。
+    #[serde(default)]
+    pub board_sets: Vec<BoardSet>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -191,6 +210,8 @@ pub struct BackupSummary {
     pub inbox: usize,
     #[serde(default)]
     pub dependencies: usize,
+    #[serde(default)]
+    pub board_sets: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -369,6 +390,35 @@ pub struct SetDependenciesInput {
 #[serde(rename_all = "camelCase")]
 pub struct ChangeDataDirInput {
     pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewBoardSetInput {
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub board_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardSetPatch {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// 传数组时整体替换成员看板。
+    #[serde(default)]
+    pub board_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateBoardSetInput {
+    pub id: String,
+    pub patch: BoardSetPatch,
 }
 
 // ---------------------------------------------------------------------------

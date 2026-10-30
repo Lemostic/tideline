@@ -22,6 +22,8 @@ import type {
   BackupSummary,
   Board,
   BoardPatch,
+  BoardSet,
+  BoardSetPatch,
   Card,
   CardDependency,
   CardPatch,
@@ -32,6 +34,7 @@ import type {
   ListPatch,
   MoveCardInput,
   NewBoardInput,
+  NewBoardSetInput,
   NewCardInput,
   NewListInput,
   Snapshot,
@@ -73,6 +76,10 @@ export interface TidelineApi {
   changeDataDirectory(path: string): Promise<StorageInfo>;
   /** 恢复默认应用数据目录 */
   resetDataDirectory(): Promise<StorageInfo>;
+  /** 看板集（V0.5.4） */
+  createBoardSet(input: NewBoardSetInput): Promise<BoardSet>;
+  updateBoardSet(input: { id: string; patch: BoardSetPatch }): Promise<BoardSet>;
+  deleteBoardSet(input: IdInput): Promise<void>;
 }
 
 export function isTauri(): boolean {
@@ -108,6 +115,9 @@ const tauriApi: TidelineApi = {
   changeDataDirectory: (path) =>
     invoke<StorageInfo>('change_data_directory', { input: { path } }),
   resetDataDirectory: () => invoke<StorageInfo>('reset_data_directory'),
+  createBoardSet: (input) => invoke<BoardSet>('create_board_set', { input }),
+  updateBoardSet: (input) => invoke<BoardSet>('update_board_set', { input }),
+  deleteBoardSet: (input) => invoke<void>('delete_board_set', { input }),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
@@ -143,11 +153,13 @@ function normalizeCard(raw: Card): Card {
 
 function loadLocalDb(): LocalDb {
   if (typeof localStorage === 'undefined') {
-    return { boards: [], lists: [], cards: [], inbox: [], dependencies: [] };
+    return { boards: [], lists: [], cards: [], inbox: [], dependencies: [], boardSets: [] };
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { boards: [], lists: [], cards: [], inbox: [], dependencies: [] };
+    if (!raw) {
+      return { boards: [], lists: [], cards: [], inbox: [], dependencies: [], boardSets: [] };
+    }
     const parsed = JSON.parse(raw) as Partial<LocalDb>;
     return {
       boards: Array.isArray(parsed.boards) ? parsed.boards : [],
@@ -162,9 +174,24 @@ function loadLocalDb(): LocalDb {
               typeof item.dependsOnCardId === 'string',
           )
         : [],
+      boardSets: Array.isArray(parsed.boardSets)
+        ? parsed.boardSets
+            .filter(
+              (item): item is BoardSet =>
+                Boolean(item) &&
+                typeof item.id === 'string' &&
+                typeof item.title === 'string' &&
+                Array.isArray(item.boardIds),
+            )
+            .map((item) => ({
+              ...item,
+              description: typeof item.description === 'string' ? item.description : '',
+              boardIds: item.boardIds.filter((id): id is string => typeof id === 'string'),
+            }))
+        : [],
     };
   } catch {
-    return { boards: [], lists: [], cards: [], inbox: [], dependencies: [] };
+    return { boards: [], lists: [], cards: [], inbox: [], dependencies: [], boardSets: [] };
   }
 }
 
@@ -215,6 +242,22 @@ function requireCard(db: LocalDb, id: string): Card {
   return card;
 }
 
+function requireBoardSet(db: LocalDb, id: string): BoardSet {
+  const set = db.boardSets.find((item) => item.id === id);
+  if (!set) throw new Error(`看板集不存在：${id}`);
+  return set;
+}
+
+function normalizeBoardSetBoardIds(db: LocalDb, boardIds: string[]): string[] {
+  const unique: string[] = [];
+  for (const id of boardIds) {
+    if (unique.includes(id)) continue;
+    requireBoard(db, id);
+    unique.push(id);
+  }
+  return unique;
+}
+
 /** 删除任务时同步清理依赖边（两个方向），避免引用已不存在的任务。 */
 function pruneDependencies(db: LocalDb, removedCardIds: Set<string>): void {
   if (removedCardIds.size === 0) {
@@ -259,6 +302,9 @@ const localApi: TidelineApi = {
       dependencies: [...db.dependencies].sort((a, b) =>
         `${a.cardId}:${a.dependsOnCardId}`.localeCompare(`${b.cardId}:${b.dependsOnCardId}`),
       ),
+      boardSets: [...db.boardSets].sort((a, b) =>
+        a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+      ),
     };
   },
 
@@ -296,6 +342,15 @@ const localApi: TidelineApi = {
     const removedListIds = new Set(db.lists.filter((l) => l.boardId === id).map((l) => l.id));
     db.lists = db.lists.filter((l) => l.boardId !== id);
     db.cards = db.cards.filter((c) => !removedListIds.has(c.listId) && c.boardId !== id);
+    db.boardSets = db.boardSets.map((set) =>
+      set.boardIds.includes(id)
+        ? {
+            ...set,
+            boardIds: set.boardIds.filter((boardId) => boardId !== id),
+            updatedAt: nowISO(),
+          }
+        : set,
+    );
     pruneDependencies(db, removedCardIds);
     saveLocalDb(db);
   },
@@ -593,6 +648,7 @@ const localApi: TidelineApi = {
       cards: backup.cards,
       inbox: backup.inbox,
       dependencies: backup.dependencies,
+      boardSets: backup.boardSets,
     });
     return summarizeBackup(backup);
   },
@@ -617,6 +673,41 @@ const localApi: TidelineApi = {
 
   async resetDataDirectory() {
     throw new Error('浏览器开发模式不支持自定义数据目录，请在桌面端设置');
+  },
+
+  async createBoardSet(input) {
+    const db = loadLocalDb();
+    const now = nowISO();
+    const set: BoardSet = {
+      id: createId('s'),
+      title: input.title.trim() || '未命名看板集',
+      description: input.description?.trim() ?? '',
+      boardIds: normalizeBoardSetBoardIds(db, input.boardIds ?? []),
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.boardSets.push(set);
+    saveLocalDb(db);
+    return set;
+  },
+
+  async updateBoardSet({ id, patch }) {
+    const db = loadLocalDb();
+    const set = requireBoardSet(db, id);
+    if (patch.title !== undefined) set.title = patch.title.trim() || '未命名看板集';
+    if (patch.description !== undefined) set.description = patch.description;
+    if (patch.boardIds !== undefined) {
+      set.boardIds = normalizeBoardSetBoardIds(db, patch.boardIds);
+    }
+    set.updatedAt = nowISO();
+    saveLocalDb(db);
+    return set;
+  },
+
+  async deleteBoardSet({ id }) {
+    const db = loadLocalDb();
+    db.boardSets = db.boardSets.filter((set) => set.id !== id);
+    saveLocalDb(db);
   },
 };
 

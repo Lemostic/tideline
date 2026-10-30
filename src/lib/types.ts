@@ -82,6 +82,8 @@ export interface Snapshot {
   inbox: InboxItem[];
   /** 任务依赖边（V0.4）：cardId 依赖 dependsOnCardId */
   dependencies: CardDependency[];
+  /** 看板集（V0.5.4）：多板汇总 */
+  boardSets: BoardSet[];
 }
 
 /** 任务依赖（V0.4）：`cardId` 被 `dependsOnCardId` 阻塞 */
@@ -89,6 +91,25 @@ export interface CardDependency {
   cardId: string;
   dependsOnCardId: string;
 }
+
+/** 看板集（V0.5.4）：把多个看板聚合成一张跨看板汇总表 */
+export interface BoardSet {
+  id: string;
+  title: string;
+  description: string;
+  /** 成员看板 id，顺序即展示顺序 */
+  boardIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewBoardSetInput {
+  title: string;
+  description?: string;
+  boardIds?: string[];
+}
+
+export type BoardSetPatch = Partial<Pick<BoardSet, 'title' | 'description' | 'boardIds'>>;
 
 export type BoardPatch = Partial<
   Pick<Board, 'title' | 'description' | 'color' | 'starred'>
@@ -195,6 +216,8 @@ export interface BackupFile {
   inbox: InboxItem[];
   /** V0.4 新增；旧备份没有该字段时按空依赖处理 */
   dependencies: CardDependency[];
+  /** V0.5.4 新增；旧备份没有该字段时按空看板集处理 */
+  boardSets: BoardSet[];
 }
 
 export interface BackupSummary {
@@ -204,6 +227,7 @@ export interface BackupSummary {
   trashed: number;
   inbox: number;
   dependencies: number;
+  boardSets: number;
 }
 
 export interface BackupExport {
@@ -222,8 +246,8 @@ export interface StorageInfo {
   editable: boolean;
 }
 
-/** 仪表盘 / 看板集 / 目标：保留菜单入口与功能占位 */
-export type VipFeature = 'dashboard' | 'board-sets' | 'goals';
+/** 目标：保留菜单入口与功能占位 */
+export type VipFeature = 'goals';
 
 /** 看板内可切换的视图，V0.2 起看板 / 表格 / 甘特已实现，日历待 V0.3 */
 export type BoardView = 'board' | 'table' | 'gantt' | 'calendar';

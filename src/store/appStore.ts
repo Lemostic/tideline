@@ -13,12 +13,15 @@ import { toDateKey } from '@/lib/date';
 import type {
   Board,
   BoardPatch,
+  BoardSet,
+  BoardSetPatch,
   Card,
   CardPatch,
   InboxItem,
   List,
   ListPatch,
   NewBoardInput,
+  NewBoardSetInput,
   NewCardInput,
   Snapshot,
 } from '@/lib/types';
@@ -29,6 +32,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   cards: [],
   inbox: [],
   dependencies: [],
+  boardSets: [],
 };
 const SEED_FLAG = 'tideline.seeded';
 
@@ -53,6 +57,10 @@ export interface AppState {
   updateBoard: (id: string, patch: BoardPatch) => Promise<void>;
   deleteBoard: (id: string) => Promise<void>;
   toggleStar: (id: string) => Promise<void>;
+
+  createBoardSet: (input: NewBoardSetInput) => Promise<BoardSet>;
+  updateBoardSet: (id: string, patch: BoardSetPatch) => Promise<void>;
+  deleteBoardSet: (id: string) => Promise<void>;
 
   createList: (boardId: string, title: string) => Promise<List>;
   updateList: (id: string, patch: ListPatch) => Promise<void>;
@@ -167,9 +175,54 @@ export const useAppStore = create<AppState>((set, get) => {
               dependencies: state.snapshot.dependencies.filter(
                 (d) => !removedCardIds.has(d.cardId) && !removedCardIds.has(d.dependsOnCardId),
               ),
+              boardSets: state.snapshot.boardSets.map((set) =>
+                set.boardIds.includes(id)
+                  ? { ...set, boardIds: set.boardIds.filter((boardId) => boardId !== id) }
+                  : set,
+              ),
             },
           };
         });
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    createBoardSet: async (input) => {
+      try {
+        const boardSet = await api.createBoardSet(input);
+        set((state) => ({
+          snapshot: { ...state.snapshot, boardSets: [...state.snapshot.boardSets, boardSet] },
+        }));
+        return boardSet;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateBoardSet: async (id, patch) => {
+      try {
+        const boardSet = await api.updateBoardSet({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            boardSets: state.snapshot.boardSets.map((item) => (item.id === id ? boardSet : item)),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteBoardSet: async (id) => {
+      try {
+        await api.deleteBoardSet({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            boardSets: state.snapshot.boardSets.filter((item) => item.id !== id),
+          },
+        }));
       } catch (error) {
         fail(error);
       }

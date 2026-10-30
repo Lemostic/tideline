@@ -336,6 +336,7 @@ pub fn get_snapshot(conn: &Connection) -> DbResult<Snapshot> {
             row_to_inbox,
         )?,
         dependencies: get_dependencies(conn)?,
+        board_sets: get_board_sets(conn)?,
     })
 }
 
@@ -368,6 +369,166 @@ pub fn get_dependencies(conn: &Connection) -> DbResult<Vec<CardDependency>> {
         })
         .map_err(db_err)?;
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+}
+
+// ---------------------------------------------------------------------------
+// 看板集（V0.5.4）
+// ---------------------------------------------------------------------------
+
+const BOARD_SET_COLUMNS: &str = "id, title, description, created_at, updated_at";
+
+fn row_to_board_set(row: &Row<'_>) -> rusqlite::Result<BoardSet> {
+    Ok(BoardSet {
+        id: row.get("id")?,
+        title: row.get("title")?,
+        description: row.get("description")?,
+        board_ids: Vec::new(),
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn load_board_set_members(
+    conn: &Connection,
+    set_id: &str,
+) -> DbResult<Vec<String>> {
+    let mut statement = conn
+        .prepare(
+            "SELECT board_id FROM board_set_boards WHERE set_id = ?1 \
+             ORDER BY position ASC, board_id ASC",
+        )
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([set_id], |row| row.get::<_, String>(0))
+        .map_err(db_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+}
+
+/// 校验并去重看板 id；返回去重后的顺序。不存在的看板直接报错。
+fn normalized_board_ids(conn: &Connection, board_ids: &[String]) -> DbResult<Vec<String>> {
+    let mut unique = Vec::new();
+    for id in board_ids {
+        if unique.contains(id) {
+            continue;
+        }
+        let exists: Option<i64> = conn
+            .query_row("SELECT 1 FROM boards WHERE id = ?1", [id], |row| row.get(0))
+            .optional()
+            .map_err(db_err)?;
+        if exists.is_none() {
+            return Err(format!("看板不存在：{id}"));
+        }
+        unique.push(id.clone());
+    }
+    Ok(unique)
+}
+
+fn write_board_set_members(
+    conn: &Connection,
+    set_id: &str,
+    board_ids: &[String],
+) -> DbResult<()> {
+    for (position, board_id) in board_ids.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO board_set_boards (set_id, board_id, position) VALUES (?1, ?2, ?3)",
+            params![set_id, board_id, position as i64],
+        )
+        .map_err(db_err)?;
+    }
+    Ok(())
+}
+
+pub fn get_board_sets(conn: &Connection) -> DbResult<Vec<BoardSet>> {
+    let mut sets = collect_rows(
+        conn,
+        &format!(
+            "SELECT {BOARD_SET_COLUMNS} FROM board_sets \
+             ORDER BY created_at ASC, id ASC"
+        ),
+        row_to_board_set,
+    )?;
+    for set in &mut sets {
+        set.board_ids = load_board_set_members(conn, &set.id)?;
+    }
+    Ok(sets)
+}
+
+fn get_board_set(conn: &Connection, id: &str) -> DbResult<BoardSet> {
+    let mut set = conn
+        .query_row(
+            &format!("SELECT {BOARD_SET_COLUMNS} FROM board_sets WHERE id = ?1"),
+            [id],
+            row_to_board_set,
+        )
+        .optional()
+        .map_err(db_err)?
+        .ok_or_else(|| format!("看板集不存在：{id}"))?;
+    set.board_ids = load_board_set_members(conn, id)?;
+    Ok(set)
+}
+
+pub fn create_board_set(conn: &mut Connection, input: NewBoardSetInput) -> DbResult<BoardSet> {
+    let tx = conn.transaction().map_err(db_err)?;
+    let board_ids = normalized_board_ids(&tx, &input.board_ids)?;
+    let now = now_iso();
+    let set = BoardSet {
+        id: create_id("s"),
+        title: fallback_trimmed(&input.title, "未命名看板集"),
+        description: trimmed_or_empty(input.description),
+        board_ids,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    tx.execute(
+        "INSERT INTO board_sets (id, title, description, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![&set.id, &set.title, &set.description, &set.created_at, &set.updated_at],
+    )
+    .map_err(db_err)?;
+    write_board_set_members(&tx, &set.id, &set.board_ids)?;
+    tx.commit().map_err(db_err)?;
+    Ok(set)
+}
+
+pub fn update_board_set(conn: &mut Connection, input: UpdateBoardSetInput) -> DbResult<BoardSet> {
+    let tx = conn.transaction().map_err(db_err)?;
+    let mut set = get_board_set(&tx, &input.id)?;
+    let mut replace_members = input.patch.board_ids.is_some();
+    if let Some(title) = input.patch.title {
+        set.title = if title.trim().is_empty() {
+            "未命名看板集".to_string()
+        } else {
+            title.trim().to_string()
+        };
+    }
+    if let Some(description) = input.patch.description {
+        set.description = description;
+    }
+    if let Some(board_ids) = input.patch.board_ids {
+        set.board_ids = normalized_board_ids(&tx, &board_ids)?;
+        replace_members = true;
+    }
+    set.updated_at = now_iso();
+    tx.execute(
+        "UPDATE board_sets SET title = ?1, description = ?2, updated_at = ?3 WHERE id = ?4",
+        params![&set.title, &set.description, &set.updated_at, &set.id],
+    )
+    .map_err(db_err)?;
+    if replace_members {
+        tx.execute("DELETE FROM board_set_boards WHERE set_id = ?1", [&set.id])
+            .map_err(db_err)?;
+        write_board_set_members(&tx, &set.id, &set.board_ids)?;
+    }
+    tx.commit().map_err(db_err)?;
+    Ok(set)
+}
+
+pub fn delete_board_set(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    let tx = conn.transaction().map_err(db_err)?;
+    tx.execute("DELETE FROM board_sets WHERE id = ?1", [&input.id])
+        .map_err(db_err)?;
+    tx.commit().map_err(db_err)?;
+    Ok(())
 }
 
 /// 判断从 `from` 出发沿依赖边是否可达 `target`（用于拒绝循环依赖）。
@@ -2370,5 +2531,65 @@ mod tests {
         )
         .expect_err("循环依赖");
         assert!(err.contains("循环"), "错误：{err}");
+    }
+
+    #[test]
+    fn board_sets_create_update_delete_and_board_membership() {
+        let mut conn = memory_db();
+        let first = new_board(&mut conn, "看板一");
+        let second = new_board(&mut conn, "看板二");
+
+        let created = create_board_set(
+            &mut conn,
+            NewBoardSetInput {
+                title: "  产品总览  ".to_string(),
+                description: Some("跨看板".to_string()),
+                board_ids: vec![second.id.clone(), first.id.clone(), second.id.clone()],
+            },
+        )
+        .expect("创建看板集");
+        assert_eq!(created.title, "产品总览");
+        assert_eq!(created.board_ids, vec![second.id.clone(), first.id.clone()]);
+        assert_eq!(get_board_sets(&conn).expect("看板集").len(), 1);
+
+        let updated = update_board_set(
+            &mut conn,
+            UpdateBoardSetInput {
+                id: created.id.clone(),
+                patch: BoardSetPatch {
+                    title: Some("新标题".to_string()),
+                    description: Some("新描述".to_string()),
+                    board_ids: Some(vec![first.id.clone()]),
+                },
+            },
+        )
+        .expect("更新看板集");
+        assert_eq!(updated.title, "新标题");
+        assert_eq!(updated.description, "新描述");
+        assert_eq!(updated.board_ids, vec![first.id.clone()]);
+
+        // 删除成员看板时，看板集保留但成员被级联移除。
+        delete_board(&mut conn, id_input(&first.id)).expect("删除看板");
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.board_sets.len(), 1);
+        assert!(snapshot.board_sets[0].board_ids.is_empty());
+
+        delete_board_set(&mut conn, id_input(&created.id)).expect("删除看板集");
+        assert!(get_board_sets(&conn).expect("看板集").is_empty());
+    }
+
+    #[test]
+    fn board_sets_reject_unknown_board() {
+        let mut conn = memory_db();
+        let err = create_board_set(
+            &mut conn,
+            NewBoardSetInput {
+                title: "坏集".to_string(),
+                description: None,
+                board_ids: vec!["b_missing".to_string()],
+            },
+        )
+        .expect_err("不存在的看板应拒绝");
+        assert!(err.contains("不存在"), "错误：{err}");
     }
 }

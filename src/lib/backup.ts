@@ -9,6 +9,7 @@ import type {
   BackupFile,
   BackupSummary,
   Board,
+  BoardSet,
   Card,
   CardDependency,
   InboxItem,
@@ -26,10 +27,14 @@ export interface BackupData {
   cards: Card[];
   inbox: InboxItem[];
   dependencies: CardDependency[];
+  boardSets: BoardSet[];
 }
 
 export function summarizeBackup(
-  backup: Pick<BackupFile, 'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies'>,
+  backup: Pick<
+    BackupFile,
+    'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets'
+  >,
 ): BackupSummary {
   return {
     boards: backup.boards.length,
@@ -38,10 +43,11 @@ export function summarizeBackup(
     trashed: backup.cards.filter((card) => card.deletedAt !== null).length,
     inbox: backup.inbox.length,
     dependencies: backup.dependencies.length,
+    boardSets: backup.boardSets.length,
   };
 }
 
-/** 用当前全量数据（含回收站与依赖）生成备份对象。 */
+/** 用当前全量数据（含回收站、依赖与看板集）生成备份对象。 */
 export function createBackup(data: BackupData): BackupFile {
   return {
     app: BACKUP_APP,
@@ -52,6 +58,7 @@ export function createBackup(data: BackupData): BackupFile {
     cards: data.cards,
     inbox: data.inbox,
     dependencies: data.dependencies,
+    boardSets: data.boardSets,
   };
 }
 
@@ -201,6 +208,43 @@ export function parseBackup(text: string): BackupFile {
     inboxIds.add(id);
   }
 
+  // 看板集是 V0.5.4 新增的；旧备份没有该字段时按空数组处理。
+  const rawBoardSets =
+    raw.boardSets === undefined ? [] : requireArray(raw.boardSets, 'boardSets');
+  const boardSets: BoardSet[] = [];
+  const boardSetIds = new Set<string>();
+  for (const item of rawBoardSets) {
+    if (!isRecord(item)) throw new Error('备份中的看板集格式不正确');
+    const id = requireString(item.id, 'boardSets[].id');
+    if (boardSetIds.has(id)) throw new Error(`备份中存在重复的看板集 id：${id}`);
+    boardSetIds.add(id);
+    const title = requireString(item.title, 'boardSets[].title');
+    const memberIds = requireArray(item.boardIds, 'boardSets[].boardIds');
+    const seenMembers = new Set<string>();
+    const normalizedMembers: string[] = [];
+    for (const member of memberIds) {
+      if (typeof member !== 'string' || member.trim() === '') {
+        throw new Error(`看板集「${title}」的成员看板 id 不正确`);
+      }
+      if (seenMembers.has(member)) throw new Error(`看板集「${title}」中存在重复的看板`);
+      if (!boardIds.has(member)) {
+        throw new Error(`看板集「${title}」引用了不存在的看板`);
+      }
+      seenMembers.add(member);
+      normalizedMembers.push(member);
+    }
+    boardSets.push({
+      id,
+      title,
+      description: typeof item.description === 'string' ? item.description : '',
+      boardIds: normalizedMembers,
+      createdAt:
+        typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt:
+        typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
   return {
     app: BACKUP_APP,
     formatVersion: BACKUP_FORMAT_VERSION,
@@ -210,5 +254,6 @@ export function parseBackup(text: string): BackupFile {
     cards,
     inbox,
     dependencies,
+    boardSets,
   };
 }

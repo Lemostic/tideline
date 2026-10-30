@@ -30,6 +30,7 @@ pub fn build(conn: &Connection) -> Result<BackupFile, String> {
         cards: repo::get_all_cards(conn)?,
         inbox: snapshot.inbox,
         dependencies: repo::get_dependencies(conn)?,
+        board_sets: repo::get_board_sets(conn)?,
     })
 }
 
@@ -42,6 +43,7 @@ impl BackupFile {
             trashed: self.cards.iter().filter(|card| card.deleted_at.is_some()).count(),
             inbox: self.inbox.len(),
             dependencies: self.dependencies.len(),
+            board_sets: self.board_sets.len(),
         }
     }
 }
@@ -174,6 +176,25 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         }
     }
 
+    let mut set_ids = HashSet::new();
+    for set in &backup.board_sets {
+        if set.id.trim().is_empty() {
+            return Err("备份中存在空的看板集 id".to_string());
+        }
+        if !set_ids.insert(set.id.as_str()) {
+            return Err(format!("备份中存在重复的看板集 id：{}", set.id));
+        }
+        let mut members = HashSet::new();
+        for board_id in &set.board_ids {
+            if !members.insert(board_id.as_str()) {
+                return Err(format!("看板集「{}」中存在重复的看板", set.title));
+            }
+            if !board_ids.contains(board_id.as_str()) {
+                return Err(format!("看板集「{}」引用了不存在的看板", set.title));
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -181,7 +202,9 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
 pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSummary, String> {
     validate(backup)?;
     let tx = conn.transaction().map_err(|error| format!("恢复失败：{error}"))?;
-    tx.execute("DELETE FROM card_dependencies", [])
+    tx.execute("DELETE FROM board_set_boards", [])
+        .and_then(|_| tx.execute("DELETE FROM board_sets", []))
+        .and_then(|_| tx.execute("DELETE FROM card_dependencies", []))
         .and_then(|_| tx.execute("DELETE FROM cards", []))
         .and_then(|_| tx.execute("DELETE FROM lists", []))
         .and_then(|_| tx.execute("DELETE FROM boards", []))
@@ -249,6 +272,28 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
             ],
         )
         .map_err(|error| format!("写入任务「{}」失败：{error}", card.title))?;
+    }
+
+    for board_set in &backup.board_sets {
+        tx.execute(
+            "INSERT INTO board_sets (id, title, description, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                &board_set.id,
+                &board_set.title,
+                &board_set.description,
+                &board_set.created_at,
+                &board_set.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入看板集「{}」失败：{error}", board_set.title))?;
+        for (position, board_id) in board_set.board_ids.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO board_set_boards (set_id, board_id, position) VALUES (?1, ?2, ?3)",
+                params![&board_set.id, board_id, position as i64],
+            )
+            .map_err(|error| format!("写入看板集成员失败：{error}"))?;
+        }
     }
 
     for item in &backup.inbox {
@@ -417,6 +462,7 @@ mod tests {
             cards: Vec::new(),
             inbox: Vec::new(),
             dependencies: Vec::new(),
+            board_sets: Vec::new(),
         };
         let summary = restore(&mut conn, &empty).expect("恢复空备份");
         assert_eq!(summary.cards, 0);
@@ -493,5 +539,31 @@ mod tests {
         });
         let error = validate(&backup).expect_err("应拒绝不存在的依赖");
         assert!(error.contains("不存在"), "错误：{error}");
+    }
+
+    #[test]
+    fn board_sets_round_trip_through_backup() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        seed(&mut conn);
+        let snapshot = repo::get_snapshot(&conn).expect("快照");
+        let board_id = snapshot.boards[0].id.clone();
+        let board_set = repo::create_board_set(
+            &mut conn,
+            NewBoardSetInput {
+                title: "汇总".to_string(),
+                description: Some("跨看板".to_string()),
+                board_ids: vec![board_id.clone()],
+            },
+        )
+        .expect("创建看板集");
+
+        let backup = build(&conn).expect("构建备份");
+        assert_eq!(backup.summary().board_sets, 1);
+        let restored = restore(&mut conn, &backup).expect("恢复备份");
+        assert_eq!(restored.board_sets, 1);
+        let snapshot = repo::get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.board_sets.len(), 1);
+        assert_eq!(snapshot.board_sets[0].id, board_set.id);
+        assert_eq!(snapshot.board_sets[0].board_ids, vec![board_id]);
     }
 }

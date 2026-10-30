@@ -25,6 +25,12 @@ export function TopBar() {
 
   const boardId = pathname.startsWith('/board/') ? pathname.slice('/board/'.length) : null;
   const board = boardId ? snapshot.boards.find((item) => item.id === boardId) : undefined;
+  const boardSetId = pathname.startsWith('/board-sets/')
+    ? pathname.slice('/board-sets/'.length)
+    : null;
+  const boardSet = boardSetId
+    ? snapshot.boardSets.find((item) => item.id === boardSetId)
+    : undefined;
   const crumb = board ? (
     <>
       <button className="btn btn-icon" onClick={() => navigate('/')} aria-label="返回首页">
@@ -33,6 +39,15 @@ export function TopBar() {
       <span>首页</span>
       <Icon name="chevron-right" size={12} />
       <strong>{board.title}</strong>
+    </>
+  ) : boardSet ? (
+    <>
+      <button className="btn btn-icon" onClick={() => navigate('/board-sets')} aria-label="返回看板集">
+        <Icon name="arrow-left" size={15} />
+      </button>
+      <span>看板集</span>
+      <Icon name="chevron-right" size={12} />
+      <strong>{boardSet.title}</strong>
     </>
   ) : (
     <>

@@ -7,6 +7,8 @@ import { Sidebar } from '@/components/Sidebar';
 import { TaskDrawer } from '@/components/TaskDrawer';
 import { TopBar } from '@/components/TopBar';
 import { BoardPage } from '@/pages/BoardPage';
+import { BoardSetDetailPage } from '@/pages/BoardSetDetailPage';
+import { BoardSetsPage } from '@/pages/BoardSetsPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { DataPage } from '@/pages/DataPage';
 import { HomePage } from '@/pages/HomePage';
@@ -78,7 +80,8 @@ export default function App() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/board/:boardId" element={<BoardPage />} />
-              <Route path="/board-sets" element={<VipFeaturePage feature="board-sets" />} />
+              <Route path="/board-sets" element={<BoardSetsPage />} />
+              <Route path="/board-sets/:setId" element={<BoardSetDetailPage />} />
               <Route path="/goals" element={<VipFeaturePage feature="goals" />} />
               <Route path="*" element={<HomePage />} />
             </Routes>
