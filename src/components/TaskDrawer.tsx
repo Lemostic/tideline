@@ -23,7 +23,7 @@ const MAX_LABEL_LENGTH = 12;
 type DescriptionMode = 'edit' | 'preview';
 
 /**
- * 任务详情抽屉：看板视图 / 我的任务 / 搜索栏共用。
+ * 任务详情弹窗：看板视图 / 我的任务 / 搜索栏共用，居中显示并保持 4:3 比例。
  * 字段改动采用「失焦或按钮点击时保存」，不做输入级防抖，保证本地写入干脆可靠。
  * 子任务、标签、开始日期是 V0.2 新增字段，全部即时写回本地快照。
  */
@@ -263,9 +263,18 @@ export function TaskDrawer() {
   };
 
   return (
-    <>
-      <div className="drawer-overlay" onMouseDown={closeCard} />
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label="任务详情">
+    <div
+      className="task-modal-overlay"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) closeCard();
+      }}
+    >
+      <aside
+        className="drawer drawer-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="任务详情"
+      >
         <div className="drawer-head">
           <div className="drawer-head-title">
             <span
@@ -843,6 +852,6 @@ export function TaskDrawer() {
           <span>修改会自动保存到本机 · 删除可在回收站恢复</span>
         </div>
       </aside>
-    </>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * 任务详情抽屉增强样式（子任务/进度、标签、Markdown 描述、开始日期）。
+ * 任务详情样式（子任务/进度、标签、Markdown 描述、开始日期）与居中弹窗布局。
  * 只使用 td- 前缀的新类名，不改动 base.css 里的抽屉基础样式。
  */
 
@@ -744,4 +744,95 @@
 .card-accent-swatch.active {
   border-color: #fff;
   box-shadow: 0 0 0 2px var(--ink-2);
+}
+
+/* ============================================================
+ * 任务详情居中弹窗（替代右侧抽屉）
+ * 4:3 比例；宽高受视口约束，内部 body 独立滚动，
+ * 头/脚固定，任何字段都不参与 flex 压缩。
+ * ============================================================ */
+.task-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(12px, 3vh, 28px);
+  background: rgba(20, 32, 27, 0.34);
+  backdrop-filter: blur(2px);
+  animation: fade-in 140ms var(--ease);
+}
+
+.drawer.drawer-modal {
+  position: relative;
+  inset: auto;
+  z-index: 121;
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, calc(100vw - 40px), calc((100vh - 56px) * 4 / 3));
+  height: auto;
+  aspect-ratio: 4 / 3;
+  max-height: calc(100vh - 56px);
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 24px 80px rgba(20, 32, 27, 0.24), 0 2px 8px rgba(20, 32, 27, 0.08);
+  animation: task-modal-in 160ms var(--ease);
+}
+
+.drawer.drawer-modal .drawer-head {
+  flex: 0 0 auto;
+  padding: 15px 22px;
+}
+
+.drawer.drawer-modal .drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 22px 24px;
+  gap: 20px;
+  scrollbar-gutter: stable;
+}
+
+/* 保证所有内容按自然高度展示，只让 body 滚动，不被 flex 压扁 */
+.drawer.drawer-modal .drawer-body > * {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.drawer.drawer-modal .drawer-foot {
+  flex: 0 0 auto;
+  padding: 12px 22px;
+  background: var(--surface);
+}
+
+@keyframes task-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 640px) {
+  .task-modal-overlay {
+    padding: 8px;
+  }
+
+  .drawer.drawer-modal {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    aspect-ratio: 3 / 4;
+    border-radius: 14px;
+  }
+
+  .drawer.drawer-modal .drawer-body {
+    padding: 16px;
+  }
 }
