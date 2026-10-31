@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "icon": "tauri icon ./branding/icon.png --output ./src-tauri/icons",
+    "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1",
     "tauri": "tauri"
   },
   "dependencies": {
