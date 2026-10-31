@@ -17,6 +17,7 @@ import { InboxPage } from '@/pages/InboxPage';
 import { MyTasksPage } from '@/pages/MyTasksPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TeamPage } from '@/pages/TeamPage';
+import { ProjectDetailPage } from '@/pages/ProjectDetailPage';
 import { TemplatesPage } from '@/pages/TemplatesPage';
 import { TrashPage } from '@/pages/TrashPage';
 import { WorkbenchPage } from '@/pages/WorkbenchPage';
@@ -88,6 +89,7 @@ export default function App() {
               <Route path="/goals" element={<GoalsPage />} />
               <Route path="/goals/:goalId" element={<GoalDetailPage />} />
               <Route path="/team" element={<TeamPage />} />
+              <Route path="/team/:projectId" element={<ProjectDetailPage />} />
               <Route path="*" element={<WorkbenchPage />} />
             </Routes>
           </div>

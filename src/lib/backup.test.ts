@@ -65,6 +65,9 @@ const validBackup = () =>
     teamMembers: [],
     overtimeRecords: [],
     performanceRecords: [],
+    projects: [],
+    projectMetaFields: [],
+    projectRoles: [],
   });
 
 describe('backup helpers', () => {
@@ -82,6 +85,9 @@ describe('backup helpers', () => {
       teamMembers: 0,
       overtimeRecords: 0,
       performanceRecords: 0,
+      projects: 0,
+      projectMetaFields: 0,
+      projectRoles: 0,
     });
   });
 

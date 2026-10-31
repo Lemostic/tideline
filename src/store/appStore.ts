@@ -28,11 +28,20 @@ import type {
   NewGoalInput,
   NewOvertimeInput,
   NewPerformanceInput,
+  NewProjectInput,
+  NewProjectMetaInput,
+  NewProjectRoleInput,
   NewTeamMemberInput,
   OvertimePatch,
   OvertimeRecord,
   PerformancePatch,
   PerformanceRecord,
+  Project,
+  ProjectMetaField,
+  ProjectMetaPatch,
+  ProjectPatch,
+  ProjectRole,
+  ProjectRolePatch,
   Snapshot,
   TeamMember,
   TeamMemberPatch,
@@ -49,6 +58,9 @@ const EMPTY_SNAPSHOT: Snapshot = {
   teamMembers: [],
   overtimeRecords: [],
   performanceRecords: [],
+  projects: [],
+  projectMetaFields: [],
+  projectRoles: [],
 };
 const SEED_FLAG = 'tideline.seeded';
 
@@ -91,6 +103,16 @@ export interface AppState {
   createPerformance: (input: NewPerformanceInput) => Promise<PerformanceRecord>;
   updatePerformance: (id: string, patch: PerformancePatch) => Promise<void>;
   deletePerformance: (id: string) => Promise<void>;
+
+  createProject: (input: NewProjectInput) => Promise<Project>;
+  updateProject: (id: string, patch: ProjectPatch) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
+  createProjectMeta: (input: NewProjectMetaInput) => Promise<ProjectMetaField>;
+  updateProjectMeta: (id: string, patch: ProjectMetaPatch) => Promise<void>;
+  deleteProjectMeta: (id: string) => Promise<void>;
+  createProjectRole: (input: NewProjectRoleInput) => Promise<ProjectRole>;
+  updateProjectRole: (id: string, patch: ProjectRolePatch) => Promise<void>;
+  deleteProjectRole: (id: string) => Promise<void>;
 
   createList: (boardId: string, title: string) => Promise<List>;
   updateList: (id: string, patch: ListPatch) => Promise<void>;
@@ -217,6 +239,9 @@ export const useAppStore = create<AppState>((set, get) => {
               teamMembers: state.snapshot.teamMembers,
               overtimeRecords: state.snapshot.overtimeRecords,
               performanceRecords: state.snapshot.performanceRecords,
+              projects: state.snapshot.projects,
+              projectMetaFields: state.snapshot.projectMetaFields,
+              projectRoles: state.snapshot.projectRoles,
             },
           };
         });
@@ -443,6 +468,145 @@ export const useAppStore = create<AppState>((set, get) => {
             performanceRecords: state.snapshot.performanceRecords.filter(
               (item) => item.id !== id,
             ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    createProject: async (input) => {
+      try {
+        const project = await api.createProject(input);
+        await get().reloadSnapshot();
+        return project;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateProject: async (id, patch) => {
+      try {
+        const project = await api.updateProject({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            projects: state.snapshot.projects.map((item) => (item.id === id ? project : item)),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteProject: async (id) => {
+      try {
+        await api.deleteProject({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            projects: state.snapshot.projects.filter((item) => item.id !== id),
+            projectRoles: state.snapshot.projectRoles.filter((role) => role.projectId !== id),
+            projectMetaFields: state.snapshot.projectMetaFields.filter(
+              (field) => field.projectId !== id,
+            ),
+            teamMembers: state.snapshot.teamMembers.filter((member) => member.projectId !== id),
+            overtimeRecords: state.snapshot.overtimeRecords.filter(
+              (record) => record.projectId !== id,
+            ),
+            performanceRecords: state.snapshot.performanceRecords.filter(
+              (record) => record.projectId !== id,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    createProjectMeta: async (input) => {
+      try {
+        const field = await api.createProjectMeta(input);
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            projectMetaFields: [...state.snapshot.projectMetaFields, field],
+          },
+        }));
+        return field;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateProjectMeta: async (id, patch) => {
+      try {
+        const field = await api.updateProjectMeta({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            projectMetaFields: state.snapshot.projectMetaFields.map((item) =>
+              item.id === id ? field : item,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteProjectMeta: async (id) => {
+      try {
+        await api.deleteProjectMeta({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            projectMetaFields: state.snapshot.projectMetaFields.filter((item) => item.id !== id),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    createProjectRole: async (input) => {
+      try {
+        const role = await api.createProjectRole(input);
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            projectRoles: [...state.snapshot.projectRoles, role],
+          },
+        }));
+        return role;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateProjectRole: async (id, patch) => {
+      try {
+        const role = await api.updateProjectRole({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            projectRoles: state.snapshot.projectRoles.map((item) =>
+              item.id === id ? role : item,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteProjectRole: async (id) => {
+      try {
+        await api.deleteProjectRole({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            projectRoles: state.snapshot.projectRoles.filter((item) => item.id !== id),
           },
         }));
       } catch (error) {

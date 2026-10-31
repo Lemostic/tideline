@@ -345,6 +345,9 @@ pub fn get_snapshot(conn: &Connection) -> DbResult<Snapshot> {
         team_members: get_team_members(conn)?,
         overtime_records: get_overtime_records(conn)?,
         performance_records: get_performance_records(conn)?,
+        projects: get_projects(conn)?,
+        project_meta_fields: get_all_project_meta(conn)?,
+        project_roles: get_all_project_roles(conn)?,
     })
 }
 
@@ -805,7 +808,406 @@ pub fn delete_goal(conn: &mut Connection, input: IdInput) -> DbResult<()> {
 }
 
 // ---------------------------------------------------------------------------
-// 项目组成员 / 加班 / 绩效（V0.8）
+// 项目 / 自定义元数据 / 自定义角色（V0.9）
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PROJECT_ROLES: &[(&str, &str)] = &[
+    ("开发", "#2f6fd0"),
+    ("测试", "#9a6512"),
+    ("需求", "#0f766e"),
+    ("设计", "#5a48c9"),
+    ("其他", "#64748b"),
+];
+
+fn row_to_project(row: &Row<'_>) -> rusqlite::Result<Project> {
+    Ok(Project {
+        id: row.get("id")?,
+        name: row.get("name")?,
+        description: row.get("description")?,
+        color: row.get("color")?,
+        status: ProjectStatus::from_db(row.get::<_, String>("status")?.as_str()),
+        starred: row.get::<_, i64>("starred")? != 0,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn row_to_project_meta(row: &Row<'_>) -> rusqlite::Result<ProjectMetaField> {
+    Ok(ProjectMetaField {
+        id: row.get("id")?,
+        project_id: row.get("project_id")?,
+        name: row.get("name")?,
+        value: row.get("value")?,
+        position: row.get("position")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn row_to_project_role(row: &Row<'_>) -> rusqlite::Result<ProjectRole> {
+    Ok(ProjectRole {
+        id: row.get("id")?,
+        project_id: row.get("project_id")?,
+        name: row.get("name")?,
+        color: row.get("color")?,
+        position: row.get("position")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+pub fn get_projects(conn: &Connection) -> DbResult<Vec<Project>> {
+    collect_rows(
+        conn,
+        "SELECT id, name, description, color, status, starred, created_at, updated_at \
+         FROM projects ORDER BY starred DESC, status ASC, updated_at DESC, name ASC",
+        row_to_project,
+    )
+}
+
+fn get_project(conn: &Connection, id: &str) -> DbResult<Project> {
+    conn.query_row(
+        "SELECT id, name, description, color, status, starred, created_at, updated_at \
+         FROM projects WHERE id = ?1",
+        [id],
+        row_to_project,
+    )
+    .optional()
+    .map_err(db_err)?
+    .ok_or_else(|| format!("项目不存在：{id}"))
+}
+
+fn validate_project_color(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        "#0f766e".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+pub fn create_project(conn: &mut Connection, input: NewProjectInput) -> DbResult<Project> {
+    let now = now_iso();
+    let project = Project {
+        id: create_id("p"),
+        name: fallback_trimmed(&input.name, "未命名项目"),
+        description: input.description.unwrap_or_default(),
+        color: validate_project_color(input.color.as_deref().unwrap_or("")),
+        status: ProjectStatus::Active,
+        starred: input.starred.unwrap_or(false),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    };
+    let tx = conn.transaction().map_err(db_err)?;
+    tx.execute(
+        "INSERT INTO projects \
+         (id, name, description, color, status, starred, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?6)",
+        params![
+            &project.id,
+            &project.name,
+            &project.description,
+            &project.color,
+            project.starred as i64,
+            &project.created_at,
+        ],
+    )
+    .map_err(db_err)?;
+    for (position, (name, color)) in DEFAULT_PROJECT_ROLES.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO project_roles \
+             (id, project_id, name, color, position, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            params![
+                create_id("pr"),
+                &project.id,
+                name,
+                color,
+                position as i64,
+                &now,
+            ],
+        )
+        .map_err(db_err)?;
+    }
+    tx.commit().map_err(db_err)?;
+    Ok(project)
+}
+
+pub fn update_project(conn: &mut Connection, input: UpdateProjectInput) -> DbResult<Project> {
+    let mut project = get_project(conn, &input.id)?;
+    if let Some(name) = input.patch.name {
+        project.name = fallback_trimmed(&name, "未命名项目");
+    }
+    if let Some(description) = input.patch.description {
+        project.description = description;
+    }
+    if let Some(color) = input.patch.color {
+        project.color = validate_project_color(&color);
+    }
+    if let Some(status) = input.patch.status {
+        project.status = status;
+    }
+    if let Some(starred) = input.patch.starred {
+        project.starred = starred;
+    }
+    project.updated_at = now_iso();
+    conn.execute(
+        "UPDATE projects SET name = ?1, description = ?2, color = ?3, status = ?4, \
+         starred = ?5, updated_at = ?6 WHERE id = ?7",
+        params![
+            &project.name,
+            &project.description,
+            &project.color,
+            project.status.as_str(),
+            project.starred as i64,
+            &project.updated_at,
+            &project.id,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(project)
+}
+
+/// 删除项目：旧库的 project_id 列没有外键，因此显式清理所有项目内数据。
+pub fn delete_project(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    let tx = conn.transaction().map_err(db_err)?;
+    tx.execute("DELETE FROM performance_records WHERE project_id = ?1", [&input.id])
+        .map_err(db_err)?;
+    tx.execute("DELETE FROM overtime_records WHERE project_id = ?1", [&input.id])
+        .map_err(db_err)?;
+    tx.execute("DELETE FROM team_members WHERE project_id = ?1", [&input.id])
+        .map_err(db_err)?;
+    tx.execute("DELETE FROM project_meta_fields WHERE project_id = ?1", [&input.id])
+        .map_err(db_err)?;
+    tx.execute("DELETE FROM project_roles WHERE project_id = ?1", [&input.id])
+        .map_err(db_err)?;
+    tx.execute("DELETE FROM projects WHERE id = ?1", [&input.id])
+        .map_err(db_err)?;
+    tx.commit().map_err(db_err)?;
+    Ok(())
+}
+
+pub fn get_project_meta_fields(
+    conn: &Connection,
+    project_id: &str,
+) -> DbResult<Vec<ProjectMetaField>> {
+    let mut statement = conn
+        .prepare(
+            "SELECT id, project_id, name, value, position, created_at, updated_at \
+             FROM project_meta_fields WHERE project_id = ?1 ORDER BY position ASC, created_at ASC",
+        )
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([project_id], row_to_project_meta)
+        .map_err(db_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+}
+
+pub fn get_all_project_meta(conn: &Connection) -> DbResult<Vec<ProjectMetaField>> {
+    collect_rows(
+        conn,
+        "SELECT id, project_id, name, value, position, created_at, updated_at \
+         FROM project_meta_fields ORDER BY project_id ASC, position ASC, created_at ASC",
+        row_to_project_meta,
+    )
+}
+
+pub fn get_all_project_roles(conn: &Connection) -> DbResult<Vec<ProjectRole>> {
+    collect_rows(
+        conn,
+        "SELECT id, project_id, name, color, position, created_at, updated_at \
+         FROM project_roles ORDER BY project_id ASC, position ASC, created_at ASC",
+        row_to_project_role,
+    )
+}
+
+pub fn create_project_meta(
+    conn: &mut Connection,
+    input: NewProjectMetaInput,
+) -> DbResult<ProjectMetaField> {
+    let _project = get_project(conn, &input.project_id)?;
+    let now = now_iso();
+    let position: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM project_meta_fields WHERE project_id = ?1",
+            [&input.project_id],
+            |row| row.get(0),
+        )
+        .map_err(db_err)?;
+    let field = ProjectMetaField {
+        id: create_id("pm"),
+        project_id: input.project_id,
+        name: fallback_trimmed(&input.name, "未命名字段"),
+        value: input.value.unwrap_or_default(),
+        position,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    conn.execute(
+        "INSERT INTO project_meta_fields \
+         (id, project_id, name, value, position, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            &field.id,
+            &field.project_id,
+            &field.name,
+            &field.value,
+            field.position,
+            &field.created_at,
+            &field.updated_at,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(field)
+}
+
+pub fn update_project_meta(
+    conn: &mut Connection,
+    input: UpdateProjectMetaInput,
+) -> DbResult<ProjectMetaField> {
+    let mut field: ProjectMetaField = conn
+        .query_row(
+            "SELECT id, project_id, name, value, position, created_at, updated_at \
+             FROM project_meta_fields WHERE id = ?1",
+            [&input.id],
+            row_to_project_meta,
+        )
+        .optional()
+        .map_err(db_err)?
+        .ok_or_else(|| format!("项目元数据不存在：{}", input.id))?;
+    if let Some(name) = input.patch.name {
+        field.name = fallback_trimmed(&name, "未命名字段");
+    }
+    if let Some(value) = input.patch.value {
+        field.value = value;
+    }
+    field.updated_at = now_iso();
+    conn.execute(
+        "UPDATE project_meta_fields SET name = ?1, value = ?2, updated_at = ?3 WHERE id = ?4",
+        params![&field.name, &field.value, &field.updated_at, &field.id],
+    )
+    .map_err(db_err)?;
+    Ok(field)
+}
+
+pub fn delete_project_meta(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    conn.execute("DELETE FROM project_meta_fields WHERE id = ?1", [&input.id])
+        .map_err(db_err)?;
+    Ok(())
+}
+
+pub fn get_project_roles(conn: &Connection, project_id: &str) -> DbResult<Vec<ProjectRole>> {
+    let mut statement = conn
+        .prepare(
+            "SELECT id, project_id, name, color, position, created_at, updated_at \
+             FROM project_roles WHERE project_id = ?1 ORDER BY position ASC, created_at ASC",
+        )
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([project_id], row_to_project_role)
+        .map_err(db_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+}
+
+fn get_project_role(conn: &Connection, id: &str) -> DbResult<ProjectRole> {
+    conn.query_row(
+        "SELECT id, project_id, name, color, position, created_at, updated_at \
+         FROM project_roles WHERE id = ?1",
+        [id],
+        row_to_project_role,
+    )
+    .optional()
+    .map_err(db_err)?
+    .ok_or_else(|| format!("项目角色不存在：{id}"))
+}
+
+fn require_project_role(conn: &Connection, project_id: &str, role_id: &str) -> DbResult<()> {
+    let role = get_project_role(conn, role_id)?;
+    if role.project_id != project_id {
+        return Err("角色不属于该项目".to_string());
+    }
+    Ok(())
+}
+
+pub fn create_project_role(
+    conn: &mut Connection,
+    input: NewProjectRoleInput,
+) -> DbResult<ProjectRole> {
+    let _project = get_project(conn, &input.project_id)?;
+    let now = now_iso();
+    let position: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM project_roles WHERE project_id = ?1",
+            [&input.project_id],
+            |row| row.get(0),
+        )
+        .map_err(db_err)?;
+    let role = ProjectRole {
+        id: create_id("pr"),
+        project_id: input.project_id,
+        name: fallback_trimmed(&input.name, "未命名角色"),
+        color: validate_project_color(input.color.as_deref().unwrap_or("#64748b")),
+        position,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    conn.execute(
+        "INSERT INTO project_roles \
+         (id, project_id, name, color, position, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            &role.id,
+            &role.project_id,
+            &role.name,
+            &role.color,
+            role.position,
+            &role.created_at,
+            &role.updated_at,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(role)
+}
+
+pub fn update_project_role(
+    conn: &mut Connection,
+    input: UpdateProjectRoleInput,
+) -> DbResult<ProjectRole> {
+    let mut role = get_project_role(conn, &input.id)?;
+    if let Some(name) = input.patch.name {
+        role.name = fallback_trimmed(&name, "未命名角色");
+    }
+    if let Some(color) = input.patch.color {
+        role.color = validate_project_color(&color);
+    }
+    role.updated_at = now_iso();
+    conn.execute(
+        "UPDATE project_roles SET name = ?1, color = ?2, updated_at = ?3 WHERE id = ?4",
+        params![&role.name, &role.color, &role.updated_at, &role.id],
+    )
+    .map_err(db_err)?;
+    Ok(role)
+}
+
+pub fn delete_project_role(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    let role = get_project_role(conn, &input.id)?;
+    let used: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM team_members WHERE role_id = ?1",
+            [&role.id],
+            |row| row.get(0),
+        )
+        .map_err(db_err)?;
+    if used > 0 {
+        return Err("该角色仍被项目成员使用，请先调整成员角色".to_string());
+    }
+    conn.execute("DELETE FROM project_roles WHERE id = ?1", [&role.id])
+        .map_err(db_err)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 项目组成员 / 加班 / 绩效（V0.8，V0.9 起按项目隔离）
 // ---------------------------------------------------------------------------
 
 fn today_key() -> String {
@@ -821,22 +1223,15 @@ fn normalize_date(value: &str) -> String {
     }
 }
 
-fn require_team_member(conn: &Connection, id: &str) -> DbResult<()> {
-    let exists: Option<i64> = conn
-        .query_row("SELECT 1 FROM team_members WHERE id = ?1", [id], |row| {
-            row.get(0)
-        })
-        .optional()
-        .map_err(db_err)?;
-    if exists.is_none() {
-        return Err(format!("项目成员不存在：{id}"));
-    }
-    Ok(())
+fn require_team_member(conn: &Connection, id: &str) -> DbResult<TeamMember> {
+    get_team_member(conn, id)
 }
 
 fn row_to_team_member(row: &Row<'_>) -> rusqlite::Result<TeamMember> {
     Ok(TeamMember {
         id: row.get("id")?,
+        project_id: row.get::<_, Option<String>>("project_id")?.unwrap_or_default(),
+        role_id: row.get::<_, Option<String>>("role_id")?.unwrap_or_default(),
         name: row.get("name")?,
         role: MemberRole::from_db(row.get::<_, String>("role")?.as_str()),
         status: MemberStatus::from_db(row.get::<_, String>("status")?.as_str()),
@@ -851,6 +1246,7 @@ fn row_to_team_member(row: &Row<'_>) -> rusqlite::Result<TeamMember> {
 fn row_to_overtime(row: &Row<'_>) -> rusqlite::Result<OvertimeRecord> {
     Ok(OvertimeRecord {
         id: row.get("id")?,
+        project_id: row.get::<_, Option<String>>("project_id")?.unwrap_or_default(),
         member_id: row.get("member_id")?,
         date: row.get("date")?,
         hours: row.get("hours")?,
@@ -864,6 +1260,7 @@ fn row_to_overtime(row: &Row<'_>) -> rusqlite::Result<OvertimeRecord> {
 fn row_to_performance(row: &Row<'_>) -> rusqlite::Result<PerformanceRecord> {
     Ok(PerformanceRecord {
         id: row.get("id")?,
+        project_id: row.get::<_, Option<String>>("project_id")?.unwrap_or_default(),
         member_id: row.get("member_id")?,
         date: row.get("date")?,
         points: row.get("points")?,
@@ -877,16 +1274,17 @@ fn row_to_performance(row: &Row<'_>) -> rusqlite::Result<PerformanceRecord> {
 pub fn get_team_members(conn: &Connection) -> DbResult<Vec<TeamMember>> {
     collect_rows(
         conn,
-        "SELECT id, name, role, status, joined_at, released_at, note, created_at, updated_at \
-         FROM team_members ORDER BY status ASC, joined_at ASC, name ASC",
+        "SELECT id, project_id, role_id, name, role, status, joined_at, released_at, note, \
+         created_at, updated_at FROM team_members \
+         ORDER BY project_id ASC, status ASC, joined_at ASC, name ASC",
         row_to_team_member,
     )
 }
 
 fn get_team_member(conn: &Connection, id: &str) -> DbResult<TeamMember> {
     conn.query_row(
-        "SELECT id, name, role, status, joined_at, released_at, note, created_at, updated_at \
-         FROM team_members WHERE id = ?1",
+        "SELECT id, project_id, role_id, name, role, status, joined_at, released_at, note, \
+         created_at, updated_at FROM team_members WHERE id = ?1",
         [id],
         row_to_team_member,
     )
@@ -899,11 +1297,15 @@ pub fn create_team_member(
     conn: &mut Connection,
     input: NewTeamMemberInput,
 ) -> DbResult<TeamMember> {
+    let _project = get_project(conn, &input.project_id)?;
+    require_project_role(conn, &input.project_id, &input.role_id)?;
     let now = now_iso();
     let member = TeamMember {
         id: create_id("m"),
+        project_id: input.project_id,
+        role_id: input.role_id,
         name: fallback_trimmed(&input.name, "未命名成员"),
-        role: input.role,
+        role: MemberRole::Other,
         status: MemberStatus::Active,
         joined_at: input
             .joined_at
@@ -916,12 +1318,14 @@ pub fn create_team_member(
     };
     conn.execute(
         "INSERT INTO team_members \
-         (id, name, role, status, joined_at, released_at, note, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         (id, project_id, role_id, name, role, status, joined_at, released_at, note, \
+          created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, 'other', ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             &member.id,
+            &member.project_id,
+            &member.role_id,
             &member.name,
-            member.role.as_str(),
             member.status.as_str(),
             &member.joined_at,
             &member.released_at,
@@ -942,8 +1346,9 @@ pub fn update_team_member(
     if let Some(name) = input.patch.name {
         member.name = fallback_trimmed(&name, "未命名成员");
     }
-    if let Some(role) = input.patch.role {
-        member.role = role;
+    if let Some(role_id) = input.patch.role_id {
+        require_project_role(conn, &member.project_id, &role_id)?;
+        member.role_id = role_id;
     }
     if let Some(status) = input.patch.status {
         member.status = status;
@@ -967,11 +1372,11 @@ pub fn update_team_member(
     }
     member.updated_at = now_iso();
     conn.execute(
-        "UPDATE team_members SET name = ?1, role = ?2, status = ?3, joined_at = ?4, \
+        "UPDATE team_members SET name = ?1, role_id = ?2, status = ?3, joined_at = ?4, \
          released_at = ?5, note = ?6, updated_at = ?7 WHERE id = ?8",
         params![
             &member.name,
-            member.role.as_str(),
+            &member.role_id,
             member.status.as_str(),
             &member.joined_at,
             &member.released_at,
@@ -993,7 +1398,7 @@ pub fn delete_team_member(conn: &mut Connection, input: IdInput) -> DbResult<()>
 pub fn get_overtime_records(conn: &Connection) -> DbResult<Vec<OvertimeRecord>> {
     collect_rows(
         conn,
-        "SELECT id, member_id, date, hours, status, note, created_at, updated_at \
+        "SELECT id, project_id, member_id, date, hours, status, note, created_at, updated_at \
          FROM overtime_records ORDER BY date DESC, created_at DESC",
         row_to_overtime,
     )
@@ -1001,7 +1406,7 @@ pub fn get_overtime_records(conn: &Connection) -> DbResult<Vec<OvertimeRecord>> 
 
 fn get_overtime(conn: &Connection, id: &str) -> DbResult<OvertimeRecord> {
     conn.query_row(
-        "SELECT id, member_id, date, hours, status, note, created_at, updated_at \
+        "SELECT id, project_id, member_id, date, hours, status, note, created_at, updated_at \
          FROM overtime_records WHERE id = ?1",
         [id],
         row_to_overtime,
@@ -1015,13 +1420,14 @@ pub fn create_overtime(
     conn: &mut Connection,
     input: NewOvertimeInput,
 ) -> DbResult<OvertimeRecord> {
-    require_team_member(conn, &input.member_id)?;
+    let member = require_team_member(conn, &input.member_id)?;
     if !input.hours.is_finite() || input.hours <= 0.0 {
         return Err("加班时长必须大于 0".to_string());
     }
     let now = now_iso();
     let record = OvertimeRecord {
         id: create_id("ot"),
+        project_id: member.project_id,
         member_id: input.member_id,
         date: normalize_date(&input.date),
         hours: (input.hours * 10.0).round() / 10.0,
@@ -1032,10 +1438,11 @@ pub fn create_overtime(
     };
     conn.execute(
         "INSERT INTO overtime_records \
-         (id, member_id, date, hours, status, note, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         (id, project_id, member_id, date, hours, status, note, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             &record.id,
+            &record.project_id,
             &record.member_id,
             &record.date,
             record.hours,
@@ -1055,7 +1462,8 @@ pub fn update_overtime(
 ) -> DbResult<OvertimeRecord> {
     let mut record = get_overtime(conn, &input.id)?;
     if let Some(member_id) = input.patch.member_id {
-        require_team_member(conn, &member_id)?;
+        let member = require_team_member(conn, &member_id)?;
+        record.project_id = member.project_id;
         record.member_id = member_id;
     }
     if let Some(date) = input.patch.date {
@@ -1077,9 +1485,10 @@ pub fn update_overtime(
     }
     record.updated_at = now_iso();
     conn.execute(
-        "UPDATE overtime_records SET member_id = ?1, date = ?2, hours = ?3, status = ?4, \
-         note = ?5, updated_at = ?6 WHERE id = ?7",
+        "UPDATE overtime_records SET project_id = ?1, member_id = ?2, date = ?3, hours = ?4, \
+         status = ?5, note = ?6, updated_at = ?7 WHERE id = ?8",
         params![
+            &record.project_id,
             &record.member_id,
             &record.date,
             record.hours,
@@ -1102,7 +1511,7 @@ pub fn delete_overtime(conn: &mut Connection, input: IdInput) -> DbResult<()> {
 pub fn get_performance_records(conn: &Connection) -> DbResult<Vec<PerformanceRecord>> {
     collect_rows(
         conn,
-        "SELECT id, member_id, date, points, reason, category, note, created_at \
+        "SELECT id, project_id, member_id, date, points, reason, category, note, created_at \
          FROM performance_records ORDER BY date DESC, created_at DESC",
         row_to_performance,
     )
@@ -1110,7 +1519,7 @@ pub fn get_performance_records(conn: &Connection) -> DbResult<Vec<PerformanceRec
 
 fn get_performance(conn: &Connection, id: &str) -> DbResult<PerformanceRecord> {
     conn.query_row(
-        "SELECT id, member_id, date, points, reason, category, note, created_at \
+        "SELECT id, project_id, member_id, date, points, reason, category, note, created_at \
          FROM performance_records WHERE id = ?1",
         [id],
         row_to_performance,
@@ -1124,12 +1533,13 @@ pub fn create_performance(
     conn: &mut Connection,
     input: NewPerformanceInput,
 ) -> DbResult<PerformanceRecord> {
-    require_team_member(conn, &input.member_id)?;
+    let member = require_team_member(conn, &input.member_id)?;
     if input.points == 0 {
         return Err("绩效分值不能为 0".to_string());
     }
     let record = PerformanceRecord {
         id: create_id("pf"),
+        project_id: member.project_id,
         member_id: input.member_id,
         date: normalize_date(&input.date),
         points: input.points.clamp(-100, 100),
@@ -1140,10 +1550,11 @@ pub fn create_performance(
     };
     conn.execute(
         "INSERT INTO performance_records \
-         (id, member_id, date, points, reason, category, note, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         (id, project_id, member_id, date, points, reason, category, note, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             &record.id,
+            &record.project_id,
             &record.member_id,
             &record.date,
             record.points,
@@ -1163,7 +1574,8 @@ pub fn update_performance(
 ) -> DbResult<PerformanceRecord> {
     let mut record = get_performance(conn, &input.id)?;
     if let Some(member_id) = input.patch.member_id {
-        require_team_member(conn, &member_id)?;
+        let member = require_team_member(conn, &member_id)?;
+        record.project_id = member.project_id;
         record.member_id = member_id;
     }
     if let Some(date) = input.patch.date {
@@ -1187,9 +1599,10 @@ pub fn update_performance(
         record.note = note;
     }
     conn.execute(
-        "UPDATE performance_records SET member_id = ?1, date = ?2, points = ?3, \
-         reason = ?4, category = ?5, note = ?6 WHERE id = ?7",
+        "UPDATE performance_records SET project_id = ?1, member_id = ?2, date = ?3, \
+         points = ?4, reason = ?5, category = ?6, note = ?7 WHERE id = ?8",
         params![
+            &record.project_id,
             &record.member_id,
             &record.date,
             record.points,
@@ -3417,13 +3830,109 @@ mod tests {
     }
 
     #[test]
-    fn team_members_overtime_and_performance_cascade() {
+    fn project_roles_meta_and_isolation() {
         let mut conn = memory_db();
+        let first = create_project(
+            &mut conn,
+            NewProjectInput {
+                name: "项目A".to_string(),
+                description: Some("描述".to_string()),
+                color: Some("#2f6fd0".to_string()),
+                starred: Some(true),
+            },
+        )
+        .expect("创建项目A");
+        let second = create_project(
+            &mut conn,
+            NewProjectInput {
+                name: "项目B".to_string(),
+                description: None,
+                color: None,
+                starred: None,
+            },
+        )
+        .expect("创建项目B");
+        assert_eq!(get_project_roles(&conn, &first.id).expect("角色").len(), 5);
+
+        let role = create_project_role(
+            &mut conn,
+            NewProjectRoleInput {
+                project_id: first.id.clone(),
+                name: "产品".to_string(),
+                color: Some("#b84a62".to_string()),
+            },
+        )
+        .expect("创建自定义角色");
+        let meta = create_project_meta(
+            &mut conn,
+            NewProjectMetaInput {
+                project_id: first.id.clone(),
+                name: "客户".to_string(),
+                value: Some("某集团".to_string()),
+            },
+        )
+        .expect("创建元数据");
+        assert_eq!(meta.name, "客户");
+
         let member = create_team_member(
             &mut conn,
             NewTeamMemberInput {
+                project_id: first.id.clone(),
+                role_id: role.id.clone(),
                 name: "张三".to_string(),
-                role: MemberRole::Dev,
+                joined_at: Some("2026-10-01".to_string()),
+                note: None,
+            },
+        )
+        .expect("创建成员");
+        let cross_project_role = get_project_roles(&conn, &second.id).expect("项目B角色");
+        let err = create_team_member(
+            &mut conn,
+            NewTeamMemberInput {
+                project_id: first.id.clone(),
+                role_id: cross_project_role[0].id.clone(),
+                name: "李四".to_string(),
+                joined_at: None,
+                note: None,
+            },
+        )
+        .expect_err("跨项目角色应拒绝");
+        assert!(err.contains("角色不属于该项目"), "错误：{err}");
+
+        let delete_err = delete_project_role(&mut conn, id_input(&role.id)).expect_err("使用中角色应拒绝删除");
+        assert!(delete_err.contains("仍被项目成员使用"), "错误：{delete_err}");
+
+        delete_project(&mut conn, id_input(&second.id)).expect("删除项目B");
+        assert!(get_project(&conn, &second.id).is_err());
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.projects.len(), 1);
+        assert_eq!(snapshot.team_members.len(), 1);
+        assert_eq!(snapshot.team_members[0].project_id, first.id);
+        assert_eq!(snapshot.team_members[0].role_id, role.id);
+        assert_eq!(snapshot.project_meta_fields[0].project_id, first.id);
+        assert_eq!(snapshot.team_members[0].id, member.id);
+    }
+
+    #[test]
+    fn team_members_overtime_and_performance_cascade() {
+        let mut conn = memory_db();
+        let project = create_project(
+            &mut conn,
+            NewProjectInput {
+                name: "项目A".to_string(),
+                description: None,
+                color: None,
+                starred: None,
+            },
+        )
+        .expect("创建项目");
+        let roles = get_project_roles(&conn, &project.id).expect("项目角色");
+        let member = create_team_member(
+            &mut conn,
+            NewTeamMemberInput {
+                project_id: project.id.clone(),
+                role_id: roles[0].id.clone(),
+                name: "张三".to_string(),
                 joined_at: Some("2026-10-01".to_string()),
                 note: Some("后端".to_string()),
             },

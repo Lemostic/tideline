@@ -96,6 +96,10 @@ export interface Snapshot {
   teamMembers: TeamMember[];
   overtimeRecords: OvertimeRecord[];
   performanceRecords: PerformanceRecord[];
+  /** 项目（V0.9） */
+  projects: Project[];
+  projectMetaFields: ProjectMetaField[];
+  projectRoles: ProjectRole[];
 }
 
 /** 任务依赖（V0.4）：`cardId` 被 `dependsOnCardId` 阻塞 */
@@ -172,15 +176,52 @@ export type GoalPatch = Partial<
   >
 >;
 
-/** 项目组角色（V0.8） */
+/** 项目组角色（V0.8 旧枚举，仅兼容旧备份；新 UI 使用项目自定义角色） */
 export type MemberRole = 'dev' | 'test' | 'requirements' | 'design' | 'other';
 export type MemberStatus = 'active' | 'released';
 export type OvertimeStatus = 'planned' | 'done';
 export type PerformanceCategory = 'delivery' | 'quality' | 'collaboration' | 'other';
 
-export interface TeamMember {
+export interface Project {
   id: string;
   name: string;
+  description: string;
+  /** 项目卡片强调色，十六进制 */
+  color: string;
+  status: 'active' | 'archived';
+  starred: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectMetaField {
+  id: string;
+  projectId: string;
+  name: string;
+  value: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectRole {
+  id: string;
+  projectId: string;
+  name: string;
+  color: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamMember {
+  id: string;
+  /** 所属项目（V0.9） */
+  projectId: string;
+  /** 项目自定义角色 id（V0.9） */
+  roleId: string;
+  name: string;
+  /** 旧版枚举角色，仅兼容旧备份 */
   role: MemberRole;
   status: MemberStatus;
   joinedAt: string;
@@ -192,6 +233,7 @@ export interface TeamMember {
 
 export interface OvertimeRecord {
   id: string;
+  projectId: string;
   memberId: string;
   date: string;
   hours: number;
@@ -203,6 +245,7 @@ export interface OvertimeRecord {
 
 export interface PerformanceRecord {
   id: string;
+  projectId: string;
   memberId: string;
   date: string;
   /** 正数加分，负数减分 */
@@ -214,15 +257,43 @@ export interface PerformanceRecord {
 }
 
 export interface NewTeamMemberInput {
+  projectId: string;
+  roleId: string;
   name: string;
-  role: MemberRole;
   joinedAt?: string;
   note?: string;
 }
 
 export type TeamMemberPatch = Partial<
-  Pick<TeamMember, 'name' | 'role' | 'status' | 'joinedAt' | 'releasedAt' | 'note'>
+  Pick<TeamMember, 'name' | 'roleId' | 'status' | 'joinedAt' | 'releasedAt' | 'note'>
 >;
+
+export interface NewProjectInput {
+  name: string;
+  description?: string;
+  color?: string;
+  starred?: boolean;
+}
+
+export type ProjectPatch = Partial<
+  Pick<Project, 'name' | 'description' | 'color' | 'status' | 'starred'>
+>;
+
+export interface NewProjectMetaInput {
+  projectId: string;
+  name: string;
+  value?: string;
+}
+
+export type ProjectMetaPatch = Partial<Pick<ProjectMetaField, 'name' | 'value'>>;
+
+export interface NewProjectRoleInput {
+  projectId: string;
+  name: string;
+  color?: string;
+}
+
+export type ProjectRolePatch = Partial<Pick<ProjectRole, 'name' | 'color'>>;
 
 export interface NewOvertimeInput {
   memberId: string;
@@ -366,6 +437,10 @@ export interface BackupFile {
   teamMembers: TeamMember[];
   overtimeRecords: OvertimeRecord[];
   performanceRecords: PerformanceRecord[];
+  /** V0.9 新增；旧备份没有该字段时按空项目处理，恢复时兼容迁移 */
+  projects: Project[];
+  projectMetaFields: ProjectMetaField[];
+  projectRoles: ProjectRole[];
 }
 
 export interface BackupSummary {
@@ -380,6 +455,9 @@ export interface BackupSummary {
   teamMembers: number;
   overtimeRecords: number;
   performanceRecords: number;
+  projects: number;
+  projectMetaFields: number;
+  projectRoles: number;
 }
 
 export interface BackupExport {

@@ -18,6 +18,11 @@ const SECTION_LABELS: Record<string, string> = {
   '/team': '项目组',
 };
 
+function sectionLabelFor(pathname: string): string | undefined {
+  if (pathname.startsWith('/team')) return '项目组';
+  return SECTION_LABELS[pathname];
+}
+
 export function TopBar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -66,7 +71,7 @@ export function TopBar() {
   ) : (
     <>
       <Icon name="layout-grid" size={14} />
-      <strong>{SECTION_LABELS[pathname] ?? '潮线'}</strong>
+      <strong>{sectionLabelFor(pathname) ?? '潮线'}</strong>
     </>
   );
 

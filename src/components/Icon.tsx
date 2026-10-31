@@ -226,6 +226,13 @@ const ICONS: Record<string, ReactNode> = {
   folder: (
     <path d="M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2z" />
   ),
+  archive: (
+    <>
+      <rect x="3" y="4" width="18" height="5" rx="1.2" />
+      <path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9" />
+      <path d="M10 13h4" />
+    </>
+  ),
   'file-text': (
     <>
       <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />

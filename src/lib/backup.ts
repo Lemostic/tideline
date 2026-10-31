@@ -17,6 +17,9 @@ import type {
   List,
   OvertimeRecord,
   PerformanceRecord,
+  Project,
+  ProjectMetaField,
+  ProjectRole,
   TeamMember,
 } from './types';
 
@@ -36,13 +39,17 @@ export interface BackupData {
   teamMembers: TeamMember[];
   overtimeRecords: OvertimeRecord[];
   performanceRecords: PerformanceRecord[];
+  projects: Project[];
+  projectMetaFields: ProjectMetaField[];
+  projectRoles: ProjectRole[];
 }
 
 export function summarizeBackup(
   backup: Pick<
     BackupFile,
     'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets' | 'goals' |
-      'teamMembers' | 'overtimeRecords' | 'performanceRecords'
+      'teamMembers' | 'overtimeRecords' | 'performanceRecords' | 'projects' |
+      'projectMetaFields' | 'projectRoles'
   >,
 ): BackupSummary {
   return {
@@ -57,6 +64,9 @@ export function summarizeBackup(
     teamMembers: backup.teamMembers.length,
     overtimeRecords: backup.overtimeRecords.length,
     performanceRecords: backup.performanceRecords.length,
+    projects: backup.projects.length,
+    projectMetaFields: backup.projectMetaFields.length,
+    projectRoles: backup.projectRoles.length,
   };
 }
 
@@ -76,6 +86,9 @@ export function createBackup(data: BackupData): BackupFile {
     teamMembers: data.teamMembers,
     overtimeRecords: data.overtimeRecords,
     performanceRecords: data.performanceRecords,
+    projects: data.projects,
+    projectMetaFields: data.projectMetaFields,
+    projectRoles: data.projectRoles,
   };
 }
 
@@ -336,9 +349,128 @@ export function parseBackup(text: string): BackupFile {
     }
   }
 
-  // 项目组是 V0.8 新增的；旧备份按空数组处理。
-  const rawTeamMembers =
+  // 项目是 V0.9 新增的；旧备份按空数组处理，并在有旧团队数据时补默认项目。
+  const rawProjects = raw.projects === undefined ? [] : requireArray(raw.projects, 'projects');
+  const projects: Project[] = [];
+  const projectIds = new Set<string>();
+  for (const item of rawProjects) {
+    if (!isRecord(item)) throw new Error('备份中的项目格式不正确');
+    const id = requireString(item.id, 'projects[].id');
+    if (projectIds.has(id)) throw new Error(`备份中存在重复的项目 id：${id}`);
+    projectIds.add(id);
+    projects.push({
+      id,
+      name: requireString(item.name, 'projects[].name'),
+      description: typeof item.description === 'string' ? item.description : '',
+      color: typeof item.color === 'string' ? item.color : '#0f766e',
+      status: item.status === 'archived' ? 'archived' : 'active',
+      starred: Boolean(item.starred),
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
+  const rawProjectRoles =
+    raw.projectRoles === undefined ? [] : requireArray(raw.projectRoles, 'projectRoles');
+  const projectRoles: ProjectRole[] = [];
+  const roleIds = new Set<string>();
+  for (const item of rawProjectRoles) {
+    if (!isRecord(item)) throw new Error('备份中的项目角色格式不正确');
+    const id = requireString(item.id, 'projectRoles[].id');
+    if (roleIds.has(id)) throw new Error(`备份中存在重复的项目角色 id：${id}`);
+    roleIds.add(id);
+    const projectId = requireString(item.projectId, 'projectRoles[].projectId');
+    if (!projectIds.has(projectId)) throw new Error('项目角色引用了不存在的项目');
+    projectRoles.push({
+      id,
+      projectId,
+      name: requireString(item.name, 'projectRoles[].name'),
+      color: typeof item.color === 'string' ? item.color : '#64748b',
+      position: typeof item.position === 'number' ? item.position : projectRoles.length,
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
+  const rawProjectMeta =
+    raw.projectMetaFields === undefined
+      ? []
+      : requireArray(raw.projectMetaFields, 'projectMetaFields');
+  const projectMetaFields: ProjectMetaField[] = [];
+  const metaIds = new Set<string>();
+  for (const item of rawProjectMeta) {
+    if (!isRecord(item)) throw new Error('备份中的项目元数据格式不正确');
+    const id = requireString(item.id, 'projectMetaFields[].id');
+    if (metaIds.has(id)) throw new Error(`备份中存在重复的项目元数据 id：${id}`);
+    metaIds.add(id);
+    const projectId = requireString(item.projectId, 'projectMetaFields[].projectId');
+    if (!projectIds.has(projectId)) throw new Error('项目元数据引用了不存在的项目');
+    projectMetaFields.push({
+      id,
+      projectId,
+      name: requireString(item.name, 'projectMetaFields[].name'),
+      value: typeof item.value === 'string' ? item.value : '',
+      position: typeof item.position === 'number' ? item.position : projectMetaFields.length,
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
+  // 旧备份没有项目：为旧团队数据补一个默认项目与默认角色。
+  const legacyMembersRaw =
     raw.teamMembers === undefined ? [] : requireArray(raw.teamMembers, 'teamMembers');
+  let fallbackProjectId = projects[0]?.id ?? '';
+  if (projects.length === 0 && legacyMembersRaw.length > 0) {
+    const now = new Date().toISOString();
+    fallbackProjectId = 'p_default';
+    projects.push({
+      id: fallbackProjectId,
+      name: '默认项目',
+      description: '由旧版项目组数据自动迁移',
+      color: '#0f766e',
+      status: 'active',
+      starred: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    projectIds.add(fallbackProjectId);
+    [
+      ['开发', '#2f6fd0'],
+      ['测试', '#9a6512'],
+      ['需求', '#0f766e'],
+      ['设计', '#5a48c9'],
+      ['其他', '#64748b'],
+    ].forEach(([name, color], index) => {
+      projectRoles.push({
+        id: `pr_default_${index}`,
+        projectId: fallbackProjectId,
+        name,
+        color,
+        position: index,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+  }
+
+  const legacyRoleName = (role: unknown): string => {
+    if (role === 'dev') return '开发';
+    if (role === 'test') return '测试';
+    if (role === 'requirements') return '需求';
+    if (role === 'design') return '设计';
+    return '其他';
+  };
+  const findRoleForMember = (projectId: string, roleId: unknown, legacyRole: unknown) => {
+    const preferredName = legacyRoleName(legacyRole);
+    return (
+      projectRoles.find((role) => role.id === roleId && role.projectId === projectId) ??
+      projectRoles.find((role) => role.projectId === projectId && role.name === preferredName) ??
+      projectRoles.find((role) => role.projectId === projectId)
+    );
+  };
+
+  // 项目组是 V0.8 新增的；旧备份按空数组处理。
+  const rawTeamMembers = legacyMembersRaw;
   const teamMembers: TeamMember[] = [];
   const memberIds = new Set<string>();
   for (const item of rawTeamMembers) {
@@ -346,10 +478,19 @@ export function parseBackup(text: string): BackupFile {
     const id = requireString(item.id, 'teamMembers[].id');
     if (memberIds.has(id)) throw new Error(`备份中存在重复的项目成员 id：${id}`);
     memberIds.add(id);
-    const name = requireString(item.name, 'teamMembers[].name');
+    const memberName = requireString(item.name, 'teamMembers[].name');
+    const projectId =
+      typeof item.projectId === 'string' && projectIds.has(item.projectId)
+        ? item.projectId
+        : fallbackProjectId;
+    if (!projectId) throw new Error('项目成员没有归属项目');
+    const role = findRoleForMember(projectId, item.roleId, item.role);
+    if (!role) throw new Error(`项目成员「${memberName}」没有可用角色`);
     teamMembers.push({
       id,
-      name,
+      projectId,
+      roleId: role.id,
+      name: memberName,
       role:
         item.role === 'dev' || item.role === 'test' || item.role === 'requirements' || item.role === 'design'
           ? item.role
@@ -363,6 +504,8 @@ export function parseBackup(text: string): BackupFile {
     });
   }
 
+  const memberProjectById = new Map(teamMembers.map((member) => [member.id, member.projectId]));
+
   const rawOvertime =
     raw.overtimeRecords === undefined ? [] : requireArray(raw.overtimeRecords, 'overtimeRecords');
   const overtimeRecords: OvertimeRecord[] = [];
@@ -374,10 +517,16 @@ export function parseBackup(text: string): BackupFile {
     overtimeIds.add(id);
     const memberId = requireString(item.memberId, 'overtimeRecords[].memberId');
     if (!memberIds.has(memberId)) throw new Error('加班记录引用了不存在的项目成员');
+    const projectId =
+      typeof item.projectId === 'string' && projectIds.has(item.projectId)
+        ? item.projectId
+        : (memberProjectById.get(memberId) ?? fallbackProjectId);
+    if (!projectIds.has(projectId)) throw new Error('加班记录引用了不存在的项目');
     const hours = typeof item.hours === 'number' ? item.hours : 0;
     if (!Number.isFinite(hours) || hours <= 0) throw new Error('备份中的加班时长无效');
     overtimeRecords.push({
       id,
+      projectId,
       memberId,
       date: requireString(item.date, 'overtimeRecords[].date'),
       hours,
@@ -401,10 +550,16 @@ export function parseBackup(text: string): BackupFile {
     performanceIds.add(id);
     const memberId = requireString(item.memberId, 'performanceRecords[].memberId');
     if (!memberIds.has(memberId)) throw new Error('绩效记录引用了不存在的项目成员');
+    const projectId =
+      typeof item.projectId === 'string' && projectIds.has(item.projectId)
+        ? item.projectId
+        : (memberProjectById.get(memberId) ?? fallbackProjectId);
+    if (!projectIds.has(projectId)) throw new Error('绩效记录引用了不存在的项目');
     const points = typeof item.points === 'number' ? Math.round(item.points) : 0;
     if (points === 0) throw new Error('备份中的绩效分值不能为 0');
     performanceRecords.push({
       id,
+      projectId,
       memberId,
       date: requireString(item.date, 'performanceRecords[].date'),
       points,
@@ -432,5 +587,8 @@ export function parseBackup(text: string): BackupFile {
     teamMembers,
     overtimeRecords,
     performanceRecords,
+    projects,
+    projectMetaFields,
+    projectRoles,
   };
 }

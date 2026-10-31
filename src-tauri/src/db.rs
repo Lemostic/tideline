@@ -170,8 +170,41 @@ CREATE TABLE IF NOT EXISTS goal_cards (
     PRIMARY KEY (goal_id, card_id)
 );
 
+CREATE TABLE IF NOT EXISTS projects (
+    id          TEXT PRIMARY KEY NOT NULL,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    color       TEXT NOT NULL DEFAULT '#0f766e',
+    status      TEXT NOT NULL DEFAULT 'active',
+    starred     INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_meta_fields (
+    id         TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    value      TEXT NOT NULL DEFAULT '',
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_roles (
+    id         TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    color      TEXT NOT NULL DEFAULT '#64748b',
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS team_members (
     id          TEXT PRIMARY KEY NOT NULL,
+    project_id  TEXT REFERENCES projects (id) ON DELETE CASCADE,
+    role_id     TEXT REFERENCES project_roles (id) ON DELETE SET NULL,
     name        TEXT NOT NULL,
     role        TEXT NOT NULL DEFAULT 'other',
     status      TEXT NOT NULL DEFAULT 'active',
@@ -184,6 +217,7 @@ CREATE TABLE IF NOT EXISTS team_members (
 
 CREATE TABLE IF NOT EXISTS overtime_records (
     id         TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT REFERENCES projects (id) ON DELETE CASCADE,
     member_id  TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
     date       TEXT NOT NULL,
     hours      REAL NOT NULL DEFAULT 0,
@@ -195,6 +229,7 @@ CREATE TABLE IF NOT EXISTS overtime_records (
 
 CREATE TABLE IF NOT EXISTS performance_records (
     id         TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT REFERENCES projects (id) ON DELETE CASCADE,
     member_id  TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
     date       TEXT NOT NULL,
     points     INTEGER NOT NULL DEFAULT 0,
@@ -213,6 +248,9 @@ CREATE INDEX IF NOT EXISTS idx_card_dependencies_depends_on ON card_dependencies
 CREATE INDEX IF NOT EXISTS idx_board_set_boards_board ON board_set_boards (board_id);
 CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals (parent_id);
 CREATE INDEX IF NOT EXISTS idx_goal_cards_card ON goal_cards (card_id);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects (status);
+CREATE INDEX IF NOT EXISTS idx_project_meta_project ON project_meta_fields (project_id, position);
+CREATE INDEX IF NOT EXISTS idx_project_roles_project ON project_roles (project_id, position);
 CREATE INDEX IF NOT EXISTS idx_team_members_status ON team_members (status);
 CREATE INDEX IF NOT EXISTS idx_overtime_member_date ON overtime_records (member_id, date);
 CREATE INDEX IF NOT EXISTS idx_performance_member_date ON performance_records (member_id, date);
@@ -249,7 +287,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -302,91 +340,153 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
             format!("迁移 lists.{column} 失败（请先备份数据库后重试）：{error}")
         })?;
     }
+    for (table, column, statement) in [
+        (
+            "team_members",
+            "project_id",
+            "ALTER TABLE team_members ADD COLUMN project_id TEXT",
+        ),
+        (
+            "team_members",
+            "role_id",
+            "ALTER TABLE team_members ADD COLUMN role_id TEXT",
+        ),
+        (
+            "overtime_records",
+            "project_id",
+            "ALTER TABLE overtime_records ADD COLUMN project_id TEXT",
+        ),
+        (
+            "performance_records",
+            "project_id",
+            "ALTER TABLE performance_records ADD COLUMN project_id TEXT",
+        ),
+    ] {
+        let existing_columns = table_columns(connection, table)?;
+        if existing_columns.iter().any(|name| name == column) {
+            continue;
+        }
+        connection.execute_batch(statement).map_err(|error| {
+            format!("迁移 {table}.{column} 失败（请先备份数据库后重试）：{error}")
+        })?;
+    }
     connection
         .execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_cards_deleted_at ON cards (deleted_at);             CREATE TABLE IF NOT EXISTS card_dependencies (
-                 card_id            TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
-                 depends_on_card_id TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
-                 PRIMARY KEY (card_id, depends_on_card_id)
-             );
-             CREATE INDEX IF NOT EXISTS idx_card_dependencies_depends_on
-                 ON card_dependencies (depends_on_card_id);
-             CREATE TABLE IF NOT EXISTS board_sets (
-                 id          TEXT PRIMARY KEY NOT NULL,
-                 title       TEXT NOT NULL,
-                 description TEXT NOT NULL DEFAULT '',
-                 created_at  TEXT NOT NULL,
-                 updated_at  TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS board_set_boards (
-                 set_id   TEXT NOT NULL REFERENCES board_sets (id) ON DELETE CASCADE,
-                 board_id TEXT NOT NULL REFERENCES boards (id) ON DELETE CASCADE,
-                 position INTEGER NOT NULL DEFAULT 0,
-                 PRIMARY KEY (set_id, board_id)
-             );
-             CREATE INDEX IF NOT EXISTS idx_board_set_boards_board
-                 ON board_set_boards (board_id);
-             CREATE TABLE IF NOT EXISTS goals (
-                 id              TEXT PRIMARY KEY NOT NULL,
-                 title           TEXT NOT NULL,
-                 description     TEXT NOT NULL DEFAULT '',
-                 scope           TEXT NOT NULL DEFAULT 'team',
-                 status          TEXT NOT NULL DEFAULT 'active',
-                 start_date      TEXT,
-                 due_date        TEXT,
-                 manual_progress INTEGER NOT NULL DEFAULT 0,
-                 parent_id       TEXT REFERENCES goals (id) ON DELETE SET NULL,
-                 position        INTEGER NOT NULL DEFAULT 0,
-                 created_at      TEXT NOT NULL,
-                 updated_at      TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS goal_cards (
-                 goal_id  TEXT NOT NULL REFERENCES goals (id) ON DELETE CASCADE,
-                 card_id  TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
-                 position INTEGER NOT NULL DEFAULT 0,
-                 PRIMARY KEY (goal_id, card_id)
-             );
-             CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals (parent_id);
-             CREATE INDEX IF NOT EXISTS idx_goal_cards_card ON goal_cards (card_id);
-             CREATE TABLE IF NOT EXISTS team_members (
+            "CREATE TABLE IF NOT EXISTS projects (
                  id          TEXT PRIMARY KEY NOT NULL,
                  name        TEXT NOT NULL,
-                 role        TEXT NOT NULL DEFAULT 'other',
+                 description TEXT NOT NULL DEFAULT '',
+                 color       TEXT NOT NULL DEFAULT '#0f766e',
                  status      TEXT NOT NULL DEFAULT 'active',
-                 joined_at   TEXT NOT NULL,
-                 released_at TEXT,
-                 note        TEXT NOT NULL DEFAULT '',
+                 starred     INTEGER NOT NULL DEFAULT 0,
                  created_at  TEXT NOT NULL,
                  updated_at  TEXT NOT NULL
              );
-             CREATE TABLE IF NOT EXISTS overtime_records (
+             CREATE TABLE IF NOT EXISTS project_meta_fields (
                  id         TEXT PRIMARY KEY NOT NULL,
-                 member_id  TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
-                 date       TEXT NOT NULL,
-                 hours      REAL NOT NULL DEFAULT 0,
-                 status     TEXT NOT NULL DEFAULT 'planned',
-                 note       TEXT NOT NULL DEFAULT '',
+                 project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+                 name       TEXT NOT NULL,
+                 value      TEXT NOT NULL DEFAULT '',
+                 position   INTEGER NOT NULL DEFAULT 0,
                  created_at TEXT NOT NULL,
                  updated_at TEXT NOT NULL
              );
-             CREATE TABLE IF NOT EXISTS performance_records (
+             CREATE TABLE IF NOT EXISTS project_roles (
                  id         TEXT PRIMARY KEY NOT NULL,
-                 member_id  TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
-                 date       TEXT NOT NULL,
-                 points     INTEGER NOT NULL DEFAULT 0,
-                 reason     TEXT NOT NULL,
-                 category   TEXT NOT NULL DEFAULT 'other',
-                 note       TEXT NOT NULL DEFAULT '',
-                 created_at TEXT NOT NULL
+                 project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+                 name       TEXT NOT NULL,
+                 color      TEXT NOT NULL DEFAULT '#64748b',
+                 position   INTEGER NOT NULL DEFAULT 0,
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL
              );
-             CREATE INDEX IF NOT EXISTS idx_team_members_status ON team_members (status);
-             CREATE INDEX IF NOT EXISTS idx_overtime_member_date ON overtime_records (member_id, date);
-             CREATE INDEX IF NOT EXISTS idx_performance_member_date ON performance_records (member_id, date);",
+             CREATE INDEX IF NOT EXISTS idx_projects_status ON projects (status);
+             CREATE INDEX IF NOT EXISTS idx_project_meta_project ON project_meta_fields (project_id, position);
+             CREATE INDEX IF NOT EXISTS idx_project_roles_project ON project_roles (project_id, position);
+             CREATE INDEX IF NOT EXISTS idx_team_members_project ON team_members (project_id);
+             CREATE INDEX IF NOT EXISTS idx_overtime_project_date ON overtime_records (project_id, date);
+             CREATE INDEX IF NOT EXISTS idx_performance_project_date ON performance_records (project_id, date);
+             CREATE INDEX IF NOT EXISTS idx_cards_deleted_at ON cards (deleted_at);
+             CREATE INDEX IF NOT EXISTS idx_card_dependencies_depends_on ON card_dependencies (depends_on_card_id);
+             CREATE INDEX IF NOT EXISTS idx_board_set_boards_board ON board_set_boards (board_id);
+             CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals (parent_id);
+             CREATE INDEX IF NOT EXISTS idx_goal_cards_card ON goal_cards (card_id);",
         )
-        .map_err(|error| format!("创建任务依赖/看板集/目标/项目组表失败：{error}"))?;
+        .map_err(|error| format!("创建项目/角色/元数据表失败：{error}"))?;
+    migrate_legacy_team_projects(connection)?;
     connection
         .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|error| format!("写入 user_version 失败：{error}"))?;
+    Ok(())
+}
+
+/// V0.8 → V0.9：旧团队数据没有项目维度。若存在旧成员，则创建一个「默认项目」，
+/// 补默认角色与成员归属、加班/绩效归属，保证升级不丢历史记录。
+fn migrate_legacy_team_projects(connection: &Connection) -> Result<(), String> {
+    let missing: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM team_members WHERE project_id IS NULL OR project_id = ''",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("检查旧项目成员失败：{error}"))?;
+    if missing == 0 {
+        return Ok(());
+    }
+    let stamp: String = connection
+        .query_row(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("读取迁移时间失败：{error}"))?;
+    let default_project = "p_default";
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO projects \
+             (id, name, description, color, status, starred, created_at, updated_at) \
+             VALUES (?1, '默认项目', '由 V0.8 项目组数据自动迁移', '#0f766e', 'active', 0, ?2, ?2)",
+            rusqlite::params![default_project, &stamp],
+        )
+        .map_err(|error| format!("创建默认项目失败：{error}"))?;
+    let roles = [
+        ("pr_default_dev", "开发", "#2f6fd0"),
+        ("pr_default_test", "测试", "#9a6512"),
+        ("pr_default_requirements", "需求", "#0f766e"),
+        ("pr_default_design", "设计", "#5a48c9"),
+        ("pr_default_other", "其他", "#64748b"),
+    ];
+    for (id, name, color) in roles {
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO project_roles \
+                 (id, project_id, name, color, position, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)",
+                rusqlite::params![id, default_project, name, color, &stamp],
+            )
+            .map_err(|error| format!("创建默认角色失败：{error}"))?;
+    }
+    connection
+        .execute_batch(
+            "UPDATE team_members SET project_id = 'p_default' \
+                 WHERE project_id IS NULL OR project_id = '';
+             UPDATE team_members SET role_id = CASE role
+                 WHEN 'dev' THEN 'pr_default_dev'
+                 WHEN 'test' THEN 'pr_default_test'
+                 WHEN 'requirements' THEN 'pr_default_requirements'
+                 WHEN 'design' THEN 'pr_default_design'
+                 ELSE 'pr_default_other' END
+                 WHERE role_id IS NULL OR role_id = '';
+             UPDATE overtime_records SET project_id = COALESCE(
+                 (SELECT project_id FROM team_members WHERE team_members.id = overtime_records.member_id),
+                 'p_default')
+                 WHERE project_id IS NULL OR project_id = '';
+             UPDATE performance_records SET project_id = COALESCE(
+                 (SELECT project_id FROM team_members WHERE team_members.id = performance_records.member_id),
+                 'p_default')
+                 WHERE project_id IS NULL OR project_id = '';",
+        )
+        .map_err(|error| format!("迁移旧项目成员归属失败：{error}"))?;
     Ok(())
 }
 
@@ -726,5 +826,44 @@ CREATE TABLE cards (
         assert_eq!(count, 1);
         drop(connection);
         remove_db_files(&path);
+    }
+
+    #[test]
+    fn v08_team_member_moves_into_default_project() {
+        let connection = open_in_memory().expect("内存库");
+        connection
+            .execute(
+                "INSERT INTO team_members \
+                 (id, name, role, status, joined_at, released_at, note, created_at, updated_at) \
+                 VALUES ('m_old', '旧成员', 'dev', 'active', '2026-09-01', NULL, '', \
+                         '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')",
+                [],
+            )
+            .expect("插入 V0.8 成员");
+        migrate_legacy_team_projects(&connection).expect("迁移旧项目组");
+        let project_id: String = connection
+            .query_row(
+                "SELECT project_id FROM team_members WHERE id = 'm_old'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("读取项目归属");
+        assert_eq!(project_id, "p_default");
+        let role_id: String = connection
+            .query_row(
+                "SELECT role_id FROM team_members WHERE id = 'm_old'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("读取角色");
+        assert_eq!(role_id, "pr_default_dev");
+        let role_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM project_roles WHERE project_id = 'p_default'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("默认角色数");
+        assert_eq!(role_count, 5);
     }
 }

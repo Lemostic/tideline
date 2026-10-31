@@ -225,6 +225,72 @@ pub fn set_autostart(enabled: bool) -> CmdResult<AutoStartInfo> {
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
+pub fn create_project(db: State<'_, Db>, input: NewProjectInput) -> CmdResult<Project> {
+    let mut conn = db.lock()?;
+    repo::create_project(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn update_project(db: State<'_, Db>, input: UpdateProjectInput) -> CmdResult<Project> {
+    let mut conn = db.lock()?;
+    repo::update_project(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn delete_project(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_project(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn create_project_meta(
+    db: State<'_, Db>,
+    input: NewProjectMetaInput,
+) -> CmdResult<ProjectMetaField> {
+    let mut conn = db.lock()?;
+    repo::create_project_meta(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn update_project_meta(
+    db: State<'_, Db>,
+    input: UpdateProjectMetaInput,
+) -> CmdResult<ProjectMetaField> {
+    let mut conn = db.lock()?;
+    repo::update_project_meta(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn delete_project_meta(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_project_meta(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn create_project_role(
+    db: State<'_, Db>,
+    input: NewProjectRoleInput,
+) -> CmdResult<ProjectRole> {
+    let mut conn = db.lock()?;
+    repo::create_project_role(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn update_project_role(
+    db: State<'_, Db>,
+    input: UpdateProjectRoleInput,
+) -> CmdResult<ProjectRole> {
+    let mut conn = db.lock()?;
+    repo::update_project_role(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn delete_project_role(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_project_role(&mut conn, input)
+}
+
+#[tauri::command]
 pub fn create_team_member(
     db: State<'_, Db>,
     input: NewTeamMemberInput,

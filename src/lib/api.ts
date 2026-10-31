@@ -47,6 +47,9 @@ import type {
   NewListInput,
   NewOvertimeInput,
   NewPerformanceInput,
+  NewProjectInput,
+  NewProjectMetaInput,
+  NewProjectRoleInput,
   NewTeamMemberInput,
   OvertimePatch,
   OvertimeRecord,
@@ -54,6 +57,12 @@ import type {
   PerformanceCategory,
   PerformancePatch,
   PerformanceRecord,
+  Project,
+  ProjectMetaField,
+  ProjectMetaPatch,
+  ProjectPatch,
+  ProjectRole,
+  ProjectRolePatch,
   Snapshot,
   StorageInfo,
   Subtask,
@@ -118,6 +127,16 @@ export interface TidelineApi {
   createPerformance(input: NewPerformanceInput): Promise<PerformanceRecord>;
   updatePerformance(input: { id: string; patch: PerformancePatch }): Promise<PerformanceRecord>;
   deletePerformance(input: IdInput): Promise<void>;
+  /** 项目（V0.9） */
+  createProject(input: NewProjectInput): Promise<Project>;
+  updateProject(input: { id: string; patch: ProjectPatch }): Promise<Project>;
+  deleteProject(input: IdInput): Promise<void>;
+  createProjectMeta(input: NewProjectMetaInput): Promise<ProjectMetaField>;
+  updateProjectMeta(input: { id: string; patch: ProjectMetaPatch }): Promise<ProjectMetaField>;
+  deleteProjectMeta(input: IdInput): Promise<void>;
+  createProjectRole(input: NewProjectRoleInput): Promise<ProjectRole>;
+  updateProjectRole(input: { id: string; patch: ProjectRolePatch }): Promise<ProjectRole>;
+  deleteProjectRole(input: IdInput): Promise<void>;
 }
 
 export function isTauri(): boolean {
@@ -171,10 +190,27 @@ const tauriApi: TidelineApi = {
   createPerformance: (input) => invoke<PerformanceRecord>('create_performance', { input }),
   updatePerformance: (input) => invoke<PerformanceRecord>('update_performance', { input }),
   deletePerformance: (input) => invoke<void>('delete_performance', { input }),
+  createProject: (input) => invoke<Project>('create_project', { input }),
+  updateProject: (input) => invoke<Project>('update_project', { input }),
+  deleteProject: (input) => invoke<void>('delete_project', { input }),
+  createProjectMeta: (input) => invoke<ProjectMetaField>('create_project_meta', { input }),
+  updateProjectMeta: (input) => invoke<ProjectMetaField>('update_project_meta', { input }),
+  deleteProjectMeta: (input) => invoke<void>('delete_project_meta', { input }),
+  createProjectRole: (input) => invoke<ProjectRole>('create_project_role', { input }),
+  updateProjectRole: (input) => invoke<ProjectRole>('update_project_role', { input }),
+  deleteProjectRole: (input) => invoke<void>('delete_project_role', { input }),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
 const STORAGE_KEY = 'tideline.db.v1';
+
+const DEFAULT_PROJECT_ROLES: ReadonlyArray<{ name: string; color: string }> = [
+  { name: '开发', color: '#2f6fd0' },
+  { name: '测试', color: '#9a6512' },
+  { name: '需求', color: '#0f766e' },
+  { name: '设计', color: '#5a48c9' },
+  { name: '其他', color: '#64748b' },
+];
 
 interface LocalDb extends Snapshot {}
 
@@ -251,6 +287,9 @@ function loadLocalDb(): LocalDb {
       teamMembers: [],
       overtimeRecords: [],
       performanceRecords: [],
+      projects: [],
+      projectMetaFields: [],
+      projectRoles: [],
     };
   }
   try {
@@ -267,6 +306,9 @@ function loadLocalDb(): LocalDb {
         teamMembers: [],
         overtimeRecords: [],
         performanceRecords: [],
+        projects: [],
+        projectMetaFields: [],
+        projectRoles: [],
       };
     }
     const parsed = JSON.parse(raw) as Partial<LocalDb>;
@@ -335,6 +377,8 @@ function loadLocalDb(): LocalDb {
             )
             .map((item) => ({
               ...item,
+              projectId: typeof item.projectId === 'string' ? item.projectId : '',
+              roleId: typeof item.roleId === 'string' ? item.roleId : '',
               role: normalizeMemberRole(item.role),
               status: normalizeMemberStatus(item.status),
               joinedAt: typeof item.joinedAt === 'string' ? item.joinedAt : '',
@@ -350,6 +394,7 @@ function loadLocalDb(): LocalDb {
             )
             .map((item) => ({
               ...item,
+              projectId: typeof item.projectId === 'string' ? item.projectId : '',
               date: typeof item.date === 'string' ? item.date : '',
               hours: typeof item.hours === 'number' ? item.hours : 0,
               status: normalizeOvertimeStatus(item.status),
@@ -364,11 +409,52 @@ function loadLocalDb(): LocalDb {
             )
             .map((item) => ({
               ...item,
+              projectId: typeof item.projectId === 'string' ? item.projectId : '',
               date: typeof item.date === 'string' ? item.date : '',
               points: typeof item.points === 'number' ? item.points : 0,
               reason: typeof item.reason === 'string' ? item.reason : '',
               category: normalizePerformanceCategory(item.category),
               note: typeof item.note === 'string' ? item.note : '',
+            }))
+        : [],
+      projects: Array.isArray(parsed.projects)
+        ? parsed.projects
+            .filter(
+              (item): item is Project =>
+                Boolean(item) && typeof item.id === 'string' && typeof item.name === 'string',
+            )
+            .map((item) => ({
+              ...item,
+              description: typeof item.description === 'string' ? item.description : '',
+              color: typeof item.color === 'string' ? item.color : '#0f766e',
+              status: item.status === 'archived' ? 'archived' : 'active',
+              starred: Boolean(item.starred),
+            }))
+        : [],
+      projectMetaFields: Array.isArray(parsed.projectMetaFields)
+        ? parsed.projectMetaFields
+            .filter(
+              (item): item is ProjectMetaField =>
+                Boolean(item) && typeof item.id === 'string' && typeof item.projectId === 'string',
+            )
+            .map((item) => ({
+              ...item,
+              name: typeof item.name === 'string' ? item.name : '',
+              value: typeof item.value === 'string' ? item.value : '',
+              position: typeof item.position === 'number' ? item.position : 0,
+            }))
+        : [],
+      projectRoles: Array.isArray(parsed.projectRoles)
+        ? parsed.projectRoles
+            .filter(
+              (item): item is ProjectRole =>
+                Boolean(item) && typeof item.id === 'string' && typeof item.projectId === 'string',
+            )
+            .map((item) => ({
+              ...item,
+              name: typeof item.name === 'string' ? item.name : '',
+              color: typeof item.color === 'string' ? item.color : '#64748b',
+              position: typeof item.position === 'number' ? item.position : 0,
             }))
         : [],
     };
@@ -384,6 +470,9 @@ function loadLocalDb(): LocalDb {
       teamMembers: [],
       overtimeRecords: [],
       performanceRecords: [],
+      projects: [],
+      projectMetaFields: [],
+      projectRoles: [],
     };
   }
 }
@@ -466,6 +555,18 @@ function requireTeamMember(db: LocalDb, id: string): TeamMember {
   const member = db.teamMembers.find((item) => item.id === id);
   if (!member) throw new Error(`项目成员不存在：${id}`);
   return member;
+}
+
+function requireProject(db: LocalDb, id: string): Project {
+  const project = db.projects.find((item) => item.id === id);
+  if (!project) throw new Error(`项目不存在：${id}`);
+  return project;
+}
+
+function requireProjectRole(db: LocalDb, projectId: string, roleId: string): ProjectRole {
+  const role = db.projectRoles.find((item) => item.id === roleId);
+  if (!role || role.projectId !== projectId) throw new Error('角色不属于该项目');
+  return role;
 }
 
 function normalizeGoalCardIds(db: LocalDb, cardIds: string[]): string[] {
@@ -563,6 +664,18 @@ const localApi: TidelineApi = {
       overtimeRecords: [...db.overtimeRecords].sort((a, b) => b.date.localeCompare(a.date)),
       performanceRecords: [...db.performanceRecords].sort((a, b) =>
         b.date.localeCompare(a.date),
+      ),
+      projects: [...db.projects].sort(
+        (a, b) =>
+          Number(b.starred) - Number(a.starred) ||
+          a.status.localeCompare(b.status) ||
+          b.updatedAt.localeCompare(a.updatedAt),
+      ),
+      projectMetaFields: [...db.projectMetaFields].sort(
+        (a, b) => a.projectId.localeCompare(b.projectId) || a.position - b.position,
+      ),
+      projectRoles: [...db.projectRoles].sort(
+        (a, b) => a.projectId.localeCompare(b.projectId) || a.position - b.position,
       ),
     };
   },
@@ -927,6 +1040,9 @@ const localApi: TidelineApi = {
       teamMembers: backup.teamMembers,
       overtimeRecords: backup.overtimeRecords,
       performanceRecords: backup.performanceRecords,
+      projects: backup.projects,
+      projectMetaFields: backup.projectMetaFields,
+      projectRoles: backup.projectRoles,
     });
     return summarizeBackup(backup);
   },
@@ -1052,11 +1168,15 @@ const localApi: TidelineApi = {
 
   async createTeamMember(input) {
     const db = loadLocalDb();
+    requireProject(db, input.projectId);
+    requireProjectRole(db, input.projectId, input.roleId);
     const now = nowISO();
     const member: TeamMember = {
       id: createId('m'),
+      projectId: input.projectId,
+      roleId: input.roleId,
       name: input.name.trim() || '未命名成员',
-      role: normalizeMemberRole(input.role),
+      role: 'other',
       status: 'active',
       joinedAt: input.joinedAt?.trim() || todayLocalDate(),
       releasedAt: null,
@@ -1073,7 +1193,10 @@ const localApi: TidelineApi = {
     const db = loadLocalDb();
     const member = requireTeamMember(db, id);
     if (patch.name !== undefined) member.name = patch.name.trim() || '未命名成员';
-    if (patch.role !== undefined) member.role = normalizeMemberRole(patch.role);
+    if (patch.roleId !== undefined) {
+      requireProjectRole(db, member.projectId, patch.roleId);
+      member.roleId = patch.roleId;
+    }
     if (patch.status !== undefined) member.status = normalizeMemberStatus(patch.status);
     if (patch.joinedAt !== undefined && patch.joinedAt.trim()) member.joinedAt = patch.joinedAt;
     if (patch.releasedAt !== undefined) member.releasedAt = patch.releasedAt || null;
@@ -1097,13 +1220,14 @@ const localApi: TidelineApi = {
 
   async createOvertime(input) {
     const db = loadLocalDb();
-    requireTeamMember(db, input.memberId);
+    const member = requireTeamMember(db, input.memberId);
     if (!Number.isFinite(input.hours) || input.hours <= 0) {
       throw new Error('加班时长必须大于 0');
     }
     const now = nowISO();
     const record: OvertimeRecord = {
       id: createId('ot'),
+      projectId: member.projectId,
       memberId: input.memberId,
       date: input.date || todayLocalDate(),
       hours: Math.round(input.hours * 10) / 10,
@@ -1122,7 +1246,8 @@ const localApi: TidelineApi = {
     const record = db.overtimeRecords.find((item) => item.id === id);
     if (!record) throw new Error(`加班记录不存在：${id}`);
     if (patch.memberId !== undefined) {
-      requireTeamMember(db, patch.memberId);
+      const member = requireTeamMember(db, patch.memberId);
+      record.projectId = member.projectId;
       record.memberId = patch.memberId;
     }
     if (patch.date !== undefined && patch.date.trim()) record.date = patch.date;
@@ -1147,12 +1272,13 @@ const localApi: TidelineApi = {
 
   async createPerformance(input) {
     const db = loadLocalDb();
-    requireTeamMember(db, input.memberId);
+    const member = requireTeamMember(db, input.memberId);
     if (!Number.isFinite(input.points) || input.points === 0) {
       throw new Error('绩效分值不能为 0');
     }
     const record: PerformanceRecord = {
       id: createId('pf'),
+      projectId: member.projectId,
       memberId: input.memberId,
       date: input.date || todayLocalDate(),
       points: Math.max(-100, Math.min(100, Math.round(input.points))),
@@ -1171,7 +1297,8 @@ const localApi: TidelineApi = {
     const record = db.performanceRecords.find((item) => item.id === id);
     if (!record) throw new Error(`绩效记录不存在：${id}`);
     if (patch.memberId !== undefined) {
-      requireTeamMember(db, patch.memberId);
+      const member = requireTeamMember(db, patch.memberId);
+      record.projectId = member.projectId;
       record.memberId = patch.memberId;
     }
     if (patch.date !== undefined && patch.date.trim()) record.date = patch.date;
@@ -1191,6 +1318,134 @@ const localApi: TidelineApi = {
   async deletePerformance({ id }) {
     const db = loadLocalDb();
     db.performanceRecords = db.performanceRecords.filter((record) => record.id !== id);
+    saveLocalDb(db);
+  },
+
+  async createProject(input) {
+    const db = loadLocalDb();
+    const now = nowISO();
+    const project: Project = {
+      id: createId('p'),
+      name: input.name.trim() || '未命名项目',
+      description: input.description ?? '',
+      color: input.color?.trim() || '#0f766e',
+      status: 'active',
+      starred: input.starred ?? false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.projects.push(project);
+    DEFAULT_PROJECT_ROLES.forEach((role, position) => {
+      db.projectRoles.push({
+        id: createId('pr'),
+        projectId: project.id,
+        name: role.name,
+        color: role.color,
+        position,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    saveLocalDb(db);
+    return project;
+  },
+
+  async updateProject({ id, patch }) {
+    const db = loadLocalDb();
+    const project = requireProject(db, id);
+    if (patch.name !== undefined) project.name = patch.name.trim() || '未命名项目';
+    if (patch.description !== undefined) project.description = patch.description;
+    if (patch.color !== undefined) project.color = patch.color.trim() || '#0f766e';
+    if (patch.status !== undefined) project.status = patch.status;
+    if (patch.starred !== undefined) project.starred = patch.starred;
+    project.updatedAt = nowISO();
+    saveLocalDb(db);
+    return project;
+  },
+
+  async deleteProject({ id }) {
+    const db = loadLocalDb();
+    db.projects = db.projects.filter((project) => project.id !== id);
+    db.projectRoles = db.projectRoles.filter((role) => role.projectId !== id);
+    db.projectMetaFields = db.projectMetaFields.filter((field) => field.projectId !== id);
+    db.teamMembers = db.teamMembers.filter((member) => member.projectId !== id);
+    db.overtimeRecords = db.overtimeRecords.filter((record) => record.projectId !== id);
+    db.performanceRecords = db.performanceRecords.filter((record) => record.projectId !== id);
+    saveLocalDb(db);
+  },
+
+  async createProjectMeta(input) {
+    const db = loadLocalDb();
+    requireProject(db, input.projectId);
+    const now = nowISO();
+    const field: ProjectMetaField = {
+      id: createId('pm'),
+      projectId: input.projectId,
+      name: input.name.trim() || '未命名字段',
+      value: input.value ?? '',
+      position: db.projectMetaFields.filter((item) => item.projectId === input.projectId).length,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.projectMetaFields.push(field);
+    saveLocalDb(db);
+    return field;
+  },
+
+  async updateProjectMeta({ id, patch }) {
+    const db = loadLocalDb();
+    const field = db.projectMetaFields.find((item) => item.id === id);
+    if (!field) throw new Error(`项目元数据不存在：${id}`);
+    if (patch.name !== undefined) field.name = patch.name.trim() || '未命名字段';
+    if (patch.value !== undefined) field.value = patch.value;
+    field.updatedAt = nowISO();
+    saveLocalDb(db);
+    return field;
+  },
+
+  async deleteProjectMeta({ id }) {
+    const db = loadLocalDb();
+    db.projectMetaFields = db.projectMetaFields.filter((item) => item.id !== id);
+    saveLocalDb(db);
+  },
+
+  async createProjectRole(input) {
+    const db = loadLocalDb();
+    requireProject(db, input.projectId);
+    const now = nowISO();
+    const role: ProjectRole = {
+      id: createId('pr'),
+      projectId: input.projectId,
+      name: input.name.trim() || '未命名角色',
+      color: input.color?.trim() || '#64748b',
+      position: db.projectRoles.filter((item) => item.projectId === input.projectId).length,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.projectRoles.push(role);
+    saveLocalDb(db);
+    return role;
+  },
+
+  async updateProjectRole({ id, patch }) {
+    const db = loadLocalDb();
+    const role = db.projectRoles.find((item) => item.id === id);
+    if (!role) throw new Error(`项目角色不存在：${id}`);
+    if (patch.name !== undefined) role.name = patch.name.trim() || '未命名角色';
+    if (patch.color !== undefined) role.color = patch.color.trim() || '#64748b';
+    role.updatedAt = nowISO();
+    saveLocalDb(db);
+    return role;
+  },
+
+  async deleteProjectRole({ id }) {
+    const db = loadLocalDb();
+    const role = db.projectRoles.find((item) => item.id === id);
+    if (!role) throw new Error(`项目角色不存在：${id}`);
+    if (db.teamMembers.some((member) => member.roleId === id)) {
+      throw new Error('该角色仍被项目成员使用，请先调整成员角色');
+    }
+    db.projectRoles = db.projectRoles.filter((item) => item.id !== id);
     saveLocalDb(db);
   },
 

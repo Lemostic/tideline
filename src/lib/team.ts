@@ -1,22 +1,22 @@
 import type {
-  MemberRole,
   OvertimeRecord,
   PerformanceCategory,
   PerformanceRecord,
+  Project,
+  ProjectMetaField,
+  ProjectRole,
   TeamMember,
 } from './types';
 
-export const MEMBER_ROLE_META: ReadonlyArray<{
-  key: MemberRole;
-  label: string;
-  short: string;
-}> = [
-  { key: 'dev', label: '开发', short: '研' },
-  { key: 'test', label: '测试', short: '测' },
-  { key: 'requirements', label: '需求', short: '需' },
-  { key: 'design', label: '设计', short: '设' },
-  { key: 'other', label: '其他', short: '他' },
-];
+export const PROJECT_COLORS = [
+  '#0f766e',
+  '#2f6fd0',
+  '#9a6512',
+  '#5a48c9',
+  '#b84a62',
+  '#3f7d4e',
+  '#64748b',
+] as const;
 
 export const PERFORMANCE_CATEGORY_META: ReadonlyArray<{
   key: PerformanceCategory;
@@ -27,10 +27,6 @@ export const PERFORMANCE_CATEGORY_META: ReadonlyArray<{
   { key: 'collaboration', label: '协作' },
   { key: 'other', label: '其他' },
 ];
-
-export function memberRoleLabel(role: MemberRole): string {
-  return MEMBER_ROLE_META.find((item) => item.key === role)?.label ?? '其他';
-}
 
 export function performanceCategoryLabel(category: PerformanceCategory): string {
   return PERFORMANCE_CATEGORY_META.find((item) => item.key === category)?.label ?? '其他';
@@ -96,4 +92,66 @@ export function activeMembers(members: TeamMember[]): TeamMember[] {
 
 export function releasedMembers(members: TeamMember[]): TeamMember[] {
   return members.filter((member) => member.status === 'released');
+}
+
+export function projectMembers(members: TeamMember[], projectId: string): TeamMember[] {
+  return members.filter((member) => member.projectId === projectId);
+}
+
+export function projectOvertime(records: OvertimeRecord[], projectId: string): OvertimeRecord[] {
+  return records.filter((record) => record.projectId === projectId);
+}
+
+export function projectPerformance(
+  records: PerformanceRecord[],
+  projectId: string,
+): PerformanceRecord[] {
+  return records.filter((record) => record.projectId === projectId);
+}
+
+export function projectMeta(
+  fields: ProjectMetaField[],
+  projectId: string,
+): ProjectMetaField[] {
+  return fields
+    .filter((field) => field.projectId === projectId)
+    .sort((a, b) => a.position - b.position);
+}
+
+export function projectRolesOf(roles: ProjectRole[], projectId: string): ProjectRole[] {
+  return roles
+    .filter((role) => role.projectId === projectId)
+    .sort((a, b) => a.position - b.position);
+}
+
+export function roleName(roles: ProjectRole[], roleId: string): string {
+  return roles.find((role) => role.id === roleId)?.name ?? '未分配角色';
+}
+
+export function roleColor(roles: ProjectRole[], roleId: string): string {
+  return roles.find((role) => role.id === roleId)?.color ?? '#64748b';
+}
+
+export function projectOvertimeHours(records: OvertimeRecord[], projectId: string, month?: string) {
+  return (month
+    ? records.filter((record) => record.projectId === projectId && record.date.startsWith(month))
+    : records.filter((record) => record.projectId === projectId)
+  ).reduce((sum, record) => sum + record.hours, 0);
+}
+
+export function projectPerformanceNet(
+  records: PerformanceRecord[],
+  projectId: string,
+  month?: string,
+): number {
+  return records
+    .filter(
+      (record) =>
+        record.projectId === projectId && (!month || record.date.startsWith(month)),
+    )
+    .reduce((sum, record) => sum + record.points, 0);
+}
+
+export function activeProjectCount(projects: Project[]): number {
+  return projects.filter((project) => project.status === 'active').length;
 }

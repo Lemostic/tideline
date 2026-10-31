@@ -35,6 +35,9 @@ pub fn build(conn: &Connection) -> Result<BackupFile, String> {
         team_members: repo::get_team_members(conn)?,
         overtime_records: repo::get_overtime_records(conn)?,
         performance_records: repo::get_performance_records(conn)?,
+        projects: repo::get_projects(conn)?,
+        project_meta_fields: repo::get_all_project_meta(conn)?,
+        project_roles: repo::get_all_project_roles(conn)?,
     })
 }
 
@@ -52,6 +55,9 @@ impl BackupFile {
             team_members: self.team_members.len(),
             overtime_records: self.overtime_records.len(),
             performance_records: self.performance_records.len(),
+            projects: self.projects.len(),
+            project_meta_fields: self.project_meta_fields.len(),
+            project_roles: self.project_roles.len(),
         }
     }
 }
@@ -87,6 +93,113 @@ fn dependency_graph_has_cycle(edges: &HashMap<String, Vec<String>>) -> bool {
         }
     }
     false
+}
+
+/// 兼容 V0.8 旧备份：旧备份只有团队人员/加班/绩效，没有项目、角色与项目归属。
+/// 恢复前先补一个默认项目与默认角色，并把旧记录归入默认项目。
+fn normalize_legacy_backup(backup: &mut BackupFile) {
+    let has_legacy_team = !backup.team_members.is_empty()
+        || !backup.overtime_records.is_empty()
+        || !backup.performance_records.is_empty();
+    if backup.projects.is_empty() && has_legacy_team {
+        let default_project_id = "p_default".to_string();
+        backup.projects.push(Project {
+            id: default_project_id,
+            name: "默认项目".to_string(),
+            description: "由 V0.8 项目组数据自动迁移".to_string(),
+            color: "#0f766e".to_string(),
+            status: ProjectStatus::Active,
+            starred: false,
+            created_at: backup.exported_at.clone(),
+            updated_at: backup.exported_at.clone(),
+        });
+    }
+    if backup.projects.is_empty() {
+        return;
+    }
+    let fallback_project_id = backup.projects[0].id.clone();
+    let default_roles = [
+        ("开发", "#2f6fd0"),
+        ("测试", "#9a6512"),
+        ("需求", "#0f766e"),
+        ("设计", "#5a48c9"),
+        ("其他", "#64748b"),
+    ];
+    let role_for_legacy = |role: MemberRole| -> &'static str {
+        match role {
+            MemberRole::Dev => "开发",
+            MemberRole::Test => "测试",
+            MemberRole::Requirements => "需求",
+            MemberRole::Design => "设计",
+            MemberRole::Other => "其他",
+        }
+    };
+
+    for member in &mut backup.team_members {
+        if member.project_id.trim().is_empty()
+            || !backup.projects.iter().any(|project| project.id == member.project_id)
+        {
+            member.project_id = fallback_project_id.clone();
+        }
+        let has_roles = backup
+            .project_roles
+            .iter()
+            .any(|role| role.project_id == member.project_id);
+        if !has_roles {
+            for (index, (name, color)) in default_roles.iter().enumerate() {
+                backup.project_roles.push(ProjectRole {
+                    id: format!("pr_mig_{}_{}", member.project_id, index),
+                    project_id: member.project_id.clone(),
+                    name: name.to_string(),
+                    color: color.to_string(),
+                    position: index as i64,
+                    created_at: backup.exported_at.clone(),
+                    updated_at: backup.exported_at.clone(),
+                });
+            }
+        }
+        let role_still_valid = backup.project_roles.iter().any(|role| {
+            role.id == member.role_id && role.project_id == member.project_id
+        });
+        if !role_still_valid {
+            let legacy_name = role_for_legacy(member.role);
+            let replacement = backup
+                .project_roles
+                .iter()
+                .find(|role| {
+                    role.project_id == member.project_id && role.name == legacy_name
+                })
+                .or_else(|| {
+                    backup
+                        .project_roles
+                        .iter()
+                        .find(|role| role.project_id == member.project_id)
+                });
+            member.role_id = replacement.map(|role| role.id.clone()).unwrap_or_default();
+        }
+    }
+
+    let member_projects: HashMap<String, String> = backup
+        .team_members
+        .iter()
+        .map(|member| (member.id.clone(), member.project_id.clone()))
+        .collect();
+    for record in &mut backup.overtime_records {
+        if record.project_id.trim().is_empty() {
+            record.project_id = member_projects
+                .get(&record.member_id)
+                .cloned()
+                .unwrap_or_else(|| fallback_project_id.clone());
+        }
+    }
+    for record in &mut backup.performance_records {
+        if record.project_id.trim().is_empty() {
+            record.project_id = member_projects
+                .get(&record.member_id)
+                .cloned()
+                .unwrap_or_else(|| fallback_project_id.clone());
+        }
+    }
 }
 
 /// 备份文件结构 / 引用完整性校验。导入前必须先调用，避免半套数据写进库。
@@ -245,6 +358,45 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         }
     }
 
+    let mut project_ids = HashSet::new();
+    for project in &backup.projects {
+        if project.id.trim().is_empty() {
+            return Err("备份中存在空的项目 id".to_string());
+        }
+        if !project_ids.insert(project.id.as_str()) {
+            return Err(format!("备份中存在重复的项目 id：{}", project.id));
+        }
+        if project.name.trim().is_empty() {
+            return Err("备份中存在未命名项目".to_string());
+        }
+    }
+
+    let mut project_roles: HashMap<String, String> = HashMap::new();
+    for role in &backup.project_roles {
+        if role.id.trim().is_empty() {
+            return Err("备份中存在空的项目角色 id".to_string());
+        }
+        if project_roles.insert(role.id.clone(), role.project_id.clone()).is_some() {
+            return Err(format!("备份中存在重复的项目角色 id：{}", role.id));
+        }
+        if !project_ids.contains(role.project_id.as_str()) {
+            return Err("项目角色引用了不存在的项目".to_string());
+        }
+    }
+
+    let mut meta_ids = HashSet::new();
+    for field in &backup.project_meta_fields {
+        if field.id.trim().is_empty() {
+            return Err("备份中存在空的项目元数据 id".to_string());
+        }
+        if !meta_ids.insert(field.id.as_str()) {
+            return Err(format!("备份中存在重复的项目元数据 id：{}", field.id));
+        }
+        if !project_ids.contains(field.project_id.as_str()) {
+            return Err("项目元数据引用了不存在的项目".to_string());
+        }
+    }
+
     let mut member_ids = HashSet::new();
     for member in &backup.team_members {
         if member.id.trim().is_empty() {
@@ -255,6 +407,13 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         }
         if member.name.trim().is_empty() {
             return Err("备份中存在未命名的项目成员".to_string());
+        }
+        if !project_ids.contains(member.project_id.as_str()) {
+            return Err("项目成员引用了不存在的项目".to_string());
+        }
+        match project_roles.get(&member.role_id) {
+            Some(project_id) if project_id == &member.project_id => {}
+            _ => return Err("项目成员引用了不属于该项目的角色".to_string()),
         }
     }
 
@@ -268,6 +427,9 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         }
         if !member_ids.contains(record.member_id.as_str()) {
             return Err("加班记录引用了不存在的项目成员".to_string());
+        }
+        if !project_ids.contains(record.project_id.as_str()) {
+            return Err("加班记录引用了不存在的项目".to_string());
         }
         if !record.hours.is_finite() || record.hours <= 0.0 {
             return Err("备份中的加班时长无效".to_string());
@@ -285,6 +447,9 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         if !member_ids.contains(record.member_id.as_str()) {
             return Err("绩效记录引用了不存在的项目成员".to_string());
         }
+        if !project_ids.contains(record.project_id.as_str()) {
+            return Err("绩效记录引用了不存在的项目".to_string());
+        }
         if record.points == 0 {
             return Err("备份中的绩效分值不能为 0".to_string());
         }
@@ -295,6 +460,9 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
 
 /// 用备份替换当前库：单事务内先清空四张表，再按原 id 全量写回。
 pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSummary, String> {
+    let mut normalized = backup.clone();
+    normalize_legacy_backup(&mut normalized);
+    let backup = &normalized;
     validate(backup)?;
     let tx = conn.transaction().map_err(|error| format!("恢复失败：{error}"))?;
     tx.execute("DELETE FROM goal_cards", [])
@@ -302,6 +470,9 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
         .and_then(|_| tx.execute("DELETE FROM performance_records", []))
         .and_then(|_| tx.execute("DELETE FROM overtime_records", []))
         .and_then(|_| tx.execute("DELETE FROM team_members", []))
+        .and_then(|_| tx.execute("DELETE FROM project_meta_fields", []))
+        .and_then(|_| tx.execute("DELETE FROM project_roles", []))
+        .and_then(|_| tx.execute("DELETE FROM projects", []))
         .and_then(|_| tx.execute("DELETE FROM board_set_boards", []))
         .and_then(|_| tx.execute("DELETE FROM board_sets", []))
         .and_then(|_| tx.execute("DELETE FROM card_dependencies", []))
@@ -310,6 +481,61 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
         .and_then(|_| tx.execute("DELETE FROM boards", []))
         .and_then(|_| tx.execute("DELETE FROM inbox_items", []))
         .map_err(|error| format!("清理旧数据失败：{error}"))?;
+
+    for project in &backup.projects {
+        tx.execute(
+            "INSERT INTO projects \
+             (id, name, description, color, status, starred, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &project.id,
+                &project.name,
+                &project.description,
+                &project.color,
+                project.status.as_str(),
+                project.starred as i64,
+                &project.created_at,
+                &project.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入项目「{}」失败：{error}", project.name))?;
+    }
+
+    for role in &backup.project_roles {
+        tx.execute(
+            "INSERT INTO project_roles \
+             (id, project_id, name, color, position, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                &role.id,
+                &role.project_id,
+                &role.name,
+                &role.color,
+                role.position,
+                &role.created_at,
+                &role.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入项目角色「{}」失败：{error}", role.name))?;
+    }
+
+    for field in &backup.project_meta_fields {
+        tx.execute(
+            "INSERT INTO project_meta_fields \
+             (id, project_id, name, value, position, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                &field.id,
+                &field.project_id,
+                &field.name,
+                &field.value,
+                field.position,
+                &field.created_at,
+                &field.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入项目元数据「{}」失败：{error}", field.name))?;
+    }
 
     for board in &backup.boards {
         tx.execute(
@@ -432,10 +658,13 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
     for member in &backup.team_members {
         tx.execute(
             "INSERT INTO team_members \
-             (id, name, role, status, joined_at, released_at, note, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (id, project_id, role_id, name, role, status, joined_at, released_at, note, \
+              created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 &member.id,
+                &member.project_id,
+                &member.role_id,
                 &member.name,
                 member.role.as_str(),
                 member.status.as_str(),
@@ -452,10 +681,11 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
     for record in &backup.overtime_records {
         tx.execute(
             "INSERT INTO overtime_records \
-             (id, member_id, date, hours, status, note, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (id, project_id, member_id, date, hours, status, note, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 &record.id,
+                &record.project_id,
                 &record.member_id,
                 &record.date,
                 record.hours,
@@ -471,10 +701,11 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
     for record in &backup.performance_records {
         tx.execute(
             "INSERT INTO performance_records \
-             (id, member_id, date, points, reason, category, note, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (id, project_id, member_id, date, points, reason, category, note, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 &record.id,
+                &record.project_id,
                 &record.member_id,
                 &record.date,
                 record.points,
@@ -661,6 +892,9 @@ mod tests {
             team_members: Vec::new(),
             overtime_records: Vec::new(),
             performance_records: Vec::new(),
+            projects: Vec::new(),
+            project_meta_fields: Vec::new(),
+            project_roles: Vec::new(),
         };
         let summary = restore(&mut conn, &empty).expect("恢复空备份");
         assert_eq!(summary.cards, 0);
@@ -816,11 +1050,23 @@ mod tests {
     fn team_resources_round_trip_through_backup() {
         let mut conn = db::open_in_memory().expect("内存库");
         seed(&mut conn);
+        let project = repo::create_project(
+            &mut conn,
+            NewProjectInput {
+                name: "项目A".to_string(),
+                description: Some("备份项目".to_string()),
+                color: Some("#2f6fd0".to_string()),
+                starred: Some(true),
+            },
+        )
+        .expect("创建项目");
+        let roles = repo::get_project_roles(&conn, &project.id).expect("项目角色");
         let member = repo::create_team_member(
             &mut conn,
             NewTeamMemberInput {
+                project_id: project.id.clone(),
+                role_id: roles[0].id.clone(),
                 name: "张三".to_string(),
-                role: MemberRole::Dev,
                 joined_at: Some("2026-10-01".to_string()),
                 note: None,
             },

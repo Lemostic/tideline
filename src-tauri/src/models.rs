@@ -354,12 +354,83 @@ impl PerformanceCategory {
     }
 }
 
-/// 项目组成员（V0.8）：在组 / 已释放，入组与释放日期用于资源盘点。
+/// 项目状态（V0.9）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectStatus {
+    Active,
+    Archived,
+}
+
+impl ProjectStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Archived => "archived",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "archived" => Self::Archived,
+            _ => Self::Active,
+        }
+    }
+}
+
+/// 项目（V0.9）：本地可建多个项目，像看板一样维护名称、描述、颜色、星标与状态。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub color: String,
+    pub status: ProjectStatus,
+    pub starred: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 项目自定义元数据字段（V0.9）：每个项目可添加任意名称/值。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMetaField {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub value: String,
+    pub position: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 项目自定义角色（V0.9）：每个项目可维护自己的角色名称与颜色。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRole {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub color: String,
+    pub position: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 项目组成员（V0.8 / V0.9）：归属某个项目，使用该项目的自定义角色。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamMember {
     pub id: String,
+    /// V0.9 新增；旧备份没有时由恢复逻辑归入默认项目。
+    #[serde(default)]
+    pub project_id: String,
+    /// 自定义角色 id；旧备份没有时按旧枚举角色映射到默认角色。
+    #[serde(default)]
+    pub role_id: String,
     pub name: String,
+    /// 旧版枚举角色，仅用于旧数据迁移/旧备份兼容，新 UI 使用 role_id。
     pub role: MemberRole,
     pub status: MemberStatus,
     pub joined_at: String,
@@ -374,6 +445,9 @@ pub struct TeamMember {
 #[serde(rename_all = "camelCase")]
 pub struct OvertimeRecord {
     pub id: String,
+    /// V0.9 新增，按项目隔离统计。
+    #[serde(default)]
+    pub project_id: String,
     pub member_id: String,
     pub date: String,
     pub hours: f64,
@@ -388,6 +462,9 @@ pub struct OvertimeRecord {
 #[serde(rename_all = "camelCase")]
 pub struct PerformanceRecord {
     pub id: String,
+    /// V0.9 新增，按项目隔离统计。
+    #[serde(default)]
+    pub project_id: String,
     pub member_id: String,
     pub date: String,
     pub points: i64,
@@ -414,15 +491,22 @@ pub struct Snapshot {
     /// 目标（V0.6）。
     #[serde(default)]
     pub goals: Vec<Goal>,
-    /// 项目组成员（V0.8）。
+    /// 项目组成员（V0.8 / V0.9）。
     #[serde(default)]
     pub team_members: Vec<TeamMember>,
-    /// 周末加班记录（V0.8）。
+    /// 周末加班记录（V0.8 / V0.9）。
     #[serde(default)]
     pub overtime_records: Vec<OvertimeRecord>,
-    /// 绩效加减分（V0.8）。
+    /// 绩效加减分（V0.8 / V0.9）。
     #[serde(default)]
     pub performance_records: Vec<PerformanceRecord>,
+    /// 项目（V0.9）。
+    #[serde(default)]
+    pub projects: Vec<Project>,
+    #[serde(default)]
+    pub project_meta_fields: Vec<ProjectMetaField>,
+    #[serde(default)]
+    pub project_roles: Vec<ProjectRole>,
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +541,13 @@ pub struct BackupFile {
     pub overtime_records: Vec<OvertimeRecord>,
     #[serde(default)]
     pub performance_records: Vec<PerformanceRecord>,
+    /// V0.9 新增。
+    #[serde(default)]
+    pub projects: Vec<Project>,
+    #[serde(default)]
+    pub project_meta_fields: Vec<ProjectMetaField>,
+    #[serde(default)]
+    pub project_roles: Vec<ProjectRole>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -479,6 +570,12 @@ pub struct BackupSummary {
     pub overtime_records: usize,
     #[serde(default)]
     pub performance_records: usize,
+    #[serde(default)]
+    pub projects: usize,
+    #[serde(default)]
+    pub project_meta_fields: usize,
+    #[serde(default)]
+    pub project_roles: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -755,9 +852,94 @@ pub struct UpdateGoalInput {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NewTeamMemberInput {
+pub struct NewProjectInput {
     pub name: String,
-    pub role: MemberRole,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub starred: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub status: Option<ProjectStatus>,
+    #[serde(default)]
+    pub starred: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProjectInput {
+    pub id: String,
+    pub patch: ProjectPatch,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewProjectMetaInput {
+    pub project_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMetaPatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProjectMetaInput {
+    pub id: String,
+    pub patch: ProjectMetaPatch,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewProjectRoleInput {
+    pub project_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRolePatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProjectRoleInput {
+    pub id: String,
+    pub patch: ProjectRolePatch,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTeamMemberInput {
+    pub project_id: String,
+    pub role_id: String,
+    pub name: String,
     #[serde(default)]
     pub joined_at: Option<String>,
     #[serde(default)]
@@ -770,7 +952,7 @@ pub struct TeamMemberPatch {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
-    pub role: Option<MemberRole>,
+    pub role_id: Option<String>,
     #[serde(default)]
     pub status: Option<MemberStatus>,
     #[serde(default)]
