@@ -1,5 +1,6 @@
 import {
   Fragment,
+  useLayoutEffect,
   useEffect,
   useMemo,
   useRef,
@@ -21,7 +22,8 @@ import {
   todayKey,
 } from '@/lib/date';
 import { PRIORITY_META, boardColorValue, type Card, type CardPatch, type List } from '@/lib/types';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore, useSnapshot } from '@/store/appStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
 import type { BoardViewProps } from './TableView';
 import './gantt.css';
@@ -55,6 +57,27 @@ interface BarInfo extends BarSpan {
 interface ScheduledGroup {
   list: List;
   bars: BarInfo[];
+}
+
+interface DependencyPath {
+  key: string;
+  d: string;
+  arrow: string;
+  done: boolean;
+}
+
+function cardProgress(card: Card): number {
+  if (card.completed) return 100;
+  if (card.subtasks.length === 0) return 0;
+  const done = card.subtasks.filter((subtask) => subtask.done).length;
+  return Math.round((done / card.subtasks.length) * 100);
+}
+
+function spanMeta(bar: BarInfo): string {
+  if (bar.milestone) return `${formatMonthDay(bar.startKey)} · 单日`;
+  return `${formatMonthDay(bar.startKey)} – ${formatMonthDay(bar.endKey)} · ${
+    diffDays(bar.startKey, bar.endKey) + 1
+  } 天`;
 }
 
 interface DragState {
@@ -129,6 +152,11 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const barRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const snapshot = useSnapshot();
+  const showDependencyLines = useSettingsStore((state) => state.showDependencyLines);
+  const [dependencyPaths, setDependencyPaths] = useState<DependencyPath[]>([]);
 
   const dayWidth = ZOOM_WIDTHS[zoom];
   const today = todayKey();
@@ -244,6 +272,80 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
         (listOrder.get(a.listId) ?? 0) - (listOrder.get(b.listId) ?? 0) || a.position - b.position,
     );
   }, [unscheduledCards, lists]);
+
+  const scheduledIds = useMemo(() => new Set(scheduledCards.map((card) => card.id)), [scheduledCards]);
+
+  const ganttDependencies = useMemo(() => {
+    if (!showDependencyLines) return [];
+    return snapshot.dependencies.filter(
+      (dependency) =>
+        scheduledIds.has(dependency.cardId) && scheduledIds.has(dependency.dependsOnCardId),
+    );
+  }, [showDependencyLines, snapshot.dependencies, scheduledIds]);
+
+  useLayoutEffect(() => {
+    if (!showDependencyLines) {
+      setDependencyPaths([]);
+      return;
+    }
+    const grid = gridRef.current;
+    if (!grid) return;
+    let frame = 0;
+
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const gridRect = grid.getBoundingClientRect();
+        const paths: DependencyPath[] = [];
+        for (const dependency of ganttDependencies) {
+          const fromElement = barRefs.current.get(dependency.dependsOnCardId);
+          const toElement = barRefs.current.get(dependency.cardId);
+          if (!fromElement || !toElement) continue;
+          const fromRect = fromElement.getBoundingClientRect();
+          const toRect = toElement.getBoundingClientRect();
+          if (fromRect.width === 0 || toRect.width === 0) continue;
+
+          const startX = fromRect.right - gridRect.left + 2;
+          const startY = fromRect.top - gridRect.top + fromRect.height / 2;
+          const endX = toRect.left - gridRect.left - 2;
+          const endY = toRect.top - gridRect.top + toRect.height / 2;
+          const lineEndX = endX - 7;
+          let d: string;
+          if (endX >= startX + 12) {
+            const bend = Math.max(18, Math.min(60, (endX - startX) * 0.35));
+            d = `M ${startX} ${startY} C ${startX + bend} ${startY}, ${
+              lineEndX - bend
+            } ${endY}, ${lineEndX} ${endY}`;
+          } else {
+            const midY =
+              Math.max(fromRect.bottom, toRect.bottom) - gridRect.top + 7;
+            d = `M ${startX} ${startY} C ${startX + 16} ${startY}, ${startX + 16} ${midY}, ${
+              (startX + lineEndX) / 2
+            } ${midY} S ${lineEndX - 16} ${endY}, ${lineEndX} ${endY}`;
+          }
+          paths.push({
+            key: `${dependency.dependsOnCardId}->${dependency.cardId}`,
+            d,
+            arrow: `M ${endX} ${endY} L ${endX - 7} ${endY - 3.6} L ${endX - 7} ${
+              endY + 3.6
+            } Z`,
+            done: snapshot.cards.find((card) => card.id === dependency.dependsOnCardId)?.completed === true,
+          });
+        }
+        setDependencyPaths(paths);
+      });
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(grid);
+    window.addEventListener('resize', measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [ganttDependencies, showDependencyLines, snapshot.cards, zoom, days.length]);
 
   const setDragState = (next: DragState | null) => {
     dragRef.current = next;
@@ -433,6 +535,7 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
       <div className="gantt-scroll" ref={scrollRef}>
         <div
           className="gantt-grid"
+          ref={gridRef}
           style={
             {
               width: LEFT_WIDTH + timelineWidth,
@@ -486,7 +589,12 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
                           </span>
                         </>
                       ) : (
-                        <span className="gantt-day-num">{date.getDate()}</span>
+                        <>
+                          <span className="gantt-day-weekday">
+                            {formatWeekday(day).replace('周', '')}
+                          </span>
+                          <span className="gantt-day-num">{date.getDate()}</span>
+                        </>
                       )}
                     </div>
                   );
@@ -523,6 +631,8 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
                 const left =
                   startIndex * dayWidth + 2 + (dragging && drag ? drag.deltaDays * dayWidth : 0);
                 const showTitle = width >= (zoom === 'day' ? 74 : 62);
+                const progress = cardProgress(card);
+                const isOverdue = !card.completed && bar.endKey < today;
                 return (
                   <div className="gantt-row gantt-task-row" key={card.id}>
                     <div
@@ -535,18 +645,24 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
                       onKeyDown={(event) => openCardFromKeyboard(event, card.id)}
                     >
                       <span className="gantt-list-dot" style={{ background: accent }} />
-                      <span className="gantt-task-title">{card.title}</span>
-                      {bar.milestone ? (
-                        <span className="gantt-task-badge" title="只有单侧日期，按单日展示">
-                          单日
+                      <span className="gantt-task-main">
+                        <span className="gantt-task-title">{card.title}</span>
+                        <span className={`gantt-task-range${isOverdue ? ' is-overdue' : ''}`}>
+                          {spanMeta(bar)}
                         </span>
-                      ) : null}
+                      </span>
                     </div>
                     <div
                       className="gantt-timeline-cell"
                       style={{ width: timelineWidth }}
                     >
                       <div
+                        ref={(element) => {
+                          if (element) barRefs.current.set(card.id, element);
+                          else barRefs.current.delete(card.id);
+                        }}
+                        data-card-id={card.id}
+                        data-progress={progress}
                         className={[
                           'gantt-bar',
                           bar.milestone ? 'is-milestone' : '',
@@ -568,22 +684,36 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
                           bar.startKey !== bar.endKey
                             ? `（${formatMonthDay(bar.startKey)} – ${formatMonthDay(bar.endKey)}）`
                             : `（${formatMonthDay(bar.startKey)}）`
-                        } · 拖动可平移`}
+                        } · 进度 ${progress}% · 拖动可平移`}
                         onPointerDown={(event) => handleBarPointerDown(event, bar)}
                         onPointerMove={handleBarPointerMove}
                         onPointerUp={handleBarPointerUp}
                         onPointerCancel={handleBarPointerCancel}
                       >
-                        {card.completed ? (
-                          <Icon name="check" size={11} />
-                        ) : bar.milestone ? (
-                          <Icon
-                            name={card.dueDate ? 'flag' : 'clock'}
-                            size={10}
-                            style={{ color: accent }}
-                          />
-                        ) : null}
-                        {showTitle ? <span className="gantt-bar-title">{card.title}</span> : null}
+                        <span
+                          className="gantt-bar-progress"
+                          style={{
+                            width: `${progress}%`,
+                            background: card.completed
+                              ? 'var(--line-strong)'
+                              : hexToRgba(accent, 0.24),
+                          }}
+                        />
+                        <span className="gantt-bar-content">
+                          {card.completed ? (
+                            <Icon name="check" size={11} />
+                          ) : bar.milestone ? (
+                            <Icon
+                              name={card.dueDate ? 'flag' : 'clock'}
+                              size={10}
+                              style={{ color: accent }}
+                            />
+                          ) : null}
+                          {showTitle ? <span className="gantt-bar-title">{card.title}</span> : null}
+                          {progress > 0 && width >= 96 ? (
+                            <span className="gantt-bar-pct">{progress}%</span>
+                          ) : null}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -614,9 +744,9 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
                     onKeyDown={(event) => openCardFromKeyboard(event, card.id)}
                   >
                     <span className="gantt-list-dot" style={{ background: boardAccent }} />
-                    <span className="gantt-task-title">{card.title}</span>
-                    <span className="gantt-task-badge is-plain" title="还没有开始 / 截止日期">
-                      未排期
+                    <span className="gantt-task-main">
+                      <span className="gantt-task-title">{card.title}</span>
+                      <span className="gantt-task-range">未排期 · 点击设置日期</span>
                     </span>
                   </div>
                   <div
@@ -626,6 +756,20 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
                 </div>
               ))}
             </>
+          ) : null}
+
+          {dependencyPaths.length > 0 ? (
+            <svg className="gantt-dependency-layer" aria-hidden="true">
+              {dependencyPaths.map((path) => (
+                <g
+                  key={path.key}
+                  className={`gantt-dependency${path.done ? ' is-done' : ''}`}
+                >
+                  <path className="gantt-dependency-line" d={path.d} />
+                  <path className="gantt-dependency-arrow" d={path.arrow} />
+                </g>
+              ))}
+            </svg>
           ) : null}
 
           {todayInRange ? (
