@@ -5,6 +5,9 @@
 
 use tauri::{AppHandle, State};
 
+use crate::autostart::{
+    get_autostart as read_autostart, set_autostart as write_autostart, AutoStartInfo,
+};
 use crate::backup;
 use crate::db::Db;
 use crate::models::*;
@@ -205,6 +208,16 @@ pub fn open_external(url: String) -> CmdResult<()> {
         return Err("当前平台暂不支持自动打开浏览器".to_string());
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_autostart() -> CmdResult<AutoStartInfo> {
+    read_autostart()
+}
+
+#[tauri::command]
+pub fn set_autostart(enabled: bool) -> CmdResult<AutoStartInfo> {
+    write_autostart(enabled)
 }
 
 #[cfg(test)]

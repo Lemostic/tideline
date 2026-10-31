@@ -18,6 +18,7 @@ import {
 } from './backup';
 import { createId, nowISO } from './ids';
 import type {
+  AutoStartInfo,
   BackupExport,
   BackupSummary,
   Board,
@@ -91,6 +92,9 @@ export interface TidelineApi {
   deleteGoal(input: IdInput): Promise<void>;
   /** 在系统默认浏览器打开发布页（仅允许 GitHub 仓库地址） */
   openExternal(url: string): Promise<void>;
+  /** 开机自动启动状态（V0.7.3） */
+  getAutoStart(): Promise<AutoStartInfo>;
+  setAutoStart(enabled: boolean): Promise<AutoStartInfo>;
 }
 
 export function isTauri(): boolean {
@@ -133,6 +137,8 @@ const tauriApi: TidelineApi = {
   updateGoal: (input) => invoke<Goal>('update_goal', { input }),
   deleteGoal: (input) => invoke<void>('delete_goal', { input }),
   openExternal: (url) => invoke<void>('open_external', { url }),
+  getAutoStart: () => invoke<AutoStartInfo>('get_autostart'),
+  setAutoStart: (enabled) => invoke<AutoStartInfo>('set_autostart', { enabled }),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
@@ -916,6 +922,14 @@ const localApi: TidelineApi = {
       throw new Error('只允许打开发布页链接');
     }
     window.open(url, '_blank', 'noopener,noreferrer');
+  },
+
+  async getAutoStart() {
+    return { supported: false, enabled: false };
+  },
+
+  async setAutoStart() {
+    throw new Error('浏览器开发模式不支持开机自动启动，请使用桌面安装版');
   },
 };
 

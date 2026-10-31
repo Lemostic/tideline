@@ -310,6 +310,13 @@ export interface StorageInfo {
   editable: boolean;
 }
 
+/** 开机自动启动状态（V0.7.3） */
+export interface AutoStartInfo {
+  /** 浏览器开发模式为 false */
+  supported: boolean;
+  enabled: boolean;
+}
+
 /** 看板内可切换的视图，V0.2 起看板 / 表格 / 甘特已实现，日历待 V0.3 */
 export type BoardView = 'board' | 'table' | 'gantt' | 'calendar';
 

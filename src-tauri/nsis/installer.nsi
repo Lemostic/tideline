@@ -1,5 +1,6 @@
 ; 潮线 tideline 自定义 NSIS 模板（基于 Tauri CLI v2.12.4 官方模板）
-; 唯一改动：当前用户安装的默认目录改为 %APPDATA%\Tideline（即 $APPDATA\Tideline）。
+; 当前用户安装默认目录：%LOCALAPPDATA%\Programs\Tideline（不放 Roaming，避免漫游配置同步程序文件）。
+; 旧版本安装在 %APPDATA%\Tideline 或自定义目录时，会通过 InstallDir 注册表沿用旧路径。
 ; 官方模板：https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.4/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
 Unicode true
 ManifestDPIAware true
@@ -551,7 +552,7 @@ Function .onInit
         StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
       ${EndIf}
     !else if "${INSTALLMODE}" == "currentUser"
-      StrCpy $INSTDIR "$APPDATA\Tideline"
+      StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Tideline"
     !endif
 
     Call RestorePreviousInstallLocation

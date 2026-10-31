@@ -6,6 +6,7 @@
 //!
 //! `src-tauri/src/main.rs` 只调用这里的 `run()`。
 
+mod autostart;
 mod backup;
 mod commands;
 mod db;
@@ -59,6 +60,8 @@ pub fn run() {
             commands::update_goal,
             commands::delete_goal,
             commands::open_external,
+            commands::get_autostart,
+            commands::set_autostart,
             commands::export_backup,
             commands::import_backup,
             commands::get_storage_info,

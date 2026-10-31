@@ -5,7 +5,7 @@ import { Modal } from '@/components/Modal';
 import { api } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/date';
 import { RELEASES_PAGE } from '@/lib/update';
-import type { StorageInfo } from '@/lib/types';
+import type { AutoStartInfo, StorageInfo } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUpdateStore } from '@/store/updateStore';
@@ -31,6 +31,9 @@ export function SettingsPage() {
   const checkUpdates = useUpdateStore((state) => state.check);
 
   const [storage, setStorage] = useState<StorageInfo | null>(null);
+  const [autoStart, setAutoStart] = useState<AutoStartInfo | null>(null);
+  const [autoStartBusy, setAutoStartBusy] = useState(false);
+  const [autoStartError, setAutoStartError] = useState<string | null>(null);
   const [pendingStorage, setPendingStorage] = useState<PendingStorage | null>(null);
   const [storageBusy, setStorageBusy] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
@@ -53,6 +56,30 @@ export function SettingsPage() {
       .then(setStorage)
       .catch((error: unknown) => setStorageError(String(error)));
   }, []);
+
+  useEffect(() => {
+    void api
+      .getAutoStart()
+      .then(setAutoStart)
+      .catch((error: unknown) => {
+        setAutoStart({ supported: false, enabled: false });
+        setAutoStartError(error instanceof Error ? error.message : String(error));
+      });
+  }, []);
+
+  const toggleAutoStart = async () => {
+    if (!autoStart?.supported || autoStartBusy) return;
+    setAutoStartBusy(true);
+    setAutoStartError(null);
+    try {
+      const next = await api.setAutoStart(!autoStart.enabled);
+      setAutoStart(next);
+    } catch (error) {
+      setAutoStartError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAutoStartBusy(false);
+    }
+  };
 
   const chooseDirectory = async () => {
     if (!storage?.editable) return;
@@ -170,6 +197,29 @@ export function SettingsPage() {
               <span className="settings-switch-knob" />
             </button>
           </label>
+
+          <label className="settings-row">
+            <span className="settings-row-label">
+              <span>开机自动启动</span>
+              <span className="settings-row-hint">
+                {autoStart?.supported
+                  ? '登录 Windows 后自动打开潮线'
+                  : '仅桌面安装版支持，浏览器开发模式不可用'}
+              </span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoStart?.enabled ?? false}
+              className={`settings-switch${autoStart?.enabled ? ' is-on' : ''}`}
+              onClick={() => void toggleAutoStart()}
+              disabled={!autoStart?.supported || autoStartBusy}
+              aria-label="开机自动启动"
+            >
+              <span className="settings-switch-knob" />
+            </button>
+          </label>
+          {autoStartError ? <p className="settings-row-error">{autoStartError}</p> : null}
         </section>
 
         <section className="settings-card">

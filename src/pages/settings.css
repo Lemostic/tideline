@@ -412,3 +412,16 @@
   flex-wrap: wrap;
   margin-top: 3px;
 }
+
+.settings-switch:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.settings-row-error {
+  margin: 0;
+  padding: 0 0 4px;
+  color: var(--danger);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
