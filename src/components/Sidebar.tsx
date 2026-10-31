@@ -85,15 +85,7 @@ export function Sidebar() {
             <strong>Lemostic</strong>
             <small>本机用户 · 设置</small>
           </span>
-          <span className="sidebar-profile-icon">
-            <Icon name="settings" size={15} />
-          </span>
         </NavLink>
-        <div className="storage-status">
-          <span className="storage-dot" />
-          数据保存在本机
-        </div>
-        <div className="sidebar-version">v{__APP_VERSION__} · 开源免费</div>
       </div>
     </aside>
   );

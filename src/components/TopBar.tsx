@@ -99,10 +99,6 @@ export function TopBar() {
           <Icon name="plus" size={14} />
           新建看板
         </button>
-        <span className="local-pill" title="所有数据只保存在这台设备上">
-          <Icon name="database" size={13} />
-          仅本机
-        </span>
       </div>
     </header>
   );

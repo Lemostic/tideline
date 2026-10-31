@@ -271,32 +271,7 @@ ol {
   gap: 8px;
 }
 
-.storage-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 8px;
-  font-size: 11px;
-  color: var(--muted);
-  user-select: none;
-}
 
-.storage-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 3px rgba(63, 174, 109, 0.12);
-  flex: 0 0 auto;
-}
-
-.sidebar-version {
-  padding: 0 8px;
-  font-size: 10.5px;
-  color: var(--faint);
-  letter-spacing: 0.02em;
-  user-select: none;
-}
 
 /* ---------- 顶栏 ---------- */
 .topbar {
@@ -362,21 +337,6 @@ ol {
   background: var(--surface-sunken);
   border-radius: 4px;
   padding: 1px 5px;
-}
-
-.local-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 999px;
-  background: var(--primary-soft);
-  color: var(--primary-strong);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  user-select: none;
 }
 
 .avatar {
@@ -1567,12 +1527,6 @@ ol {
   .nav-count,
   .vip-tag,
   .sidebar-section,
-  .sidebar-footer,
-  .storage-status,
-  .sidebar-version {
-    display: none;
-  }
-
   .nav-item {
     width: 40px;
     height: 40px;
@@ -1647,6 +1601,10 @@ ol {
 @media (max-width: 820px) {
   .sidebar-footer {
     display: flex;
+    width: 40px;
+    height: auto;
+    flex: 0 0 auto;
+    gap: 6px;
     margin-top: auto;
     padding-top: 8px;
     border-top: 0;
@@ -1725,19 +1683,6 @@ ol {
   white-space: nowrap;
 }
 
-.sidebar-profile-icon {
-  display: grid;
-  flex: 0 0 auto;
-  place-items: center;
-  color: var(--faint);
-  opacity: 0.75;
-}
-
-.sidebar-profile:hover .sidebar-profile-icon,
-.sidebar-profile.is-active .sidebar-profile-icon {
-  color: var(--primary-strong);
-  opacity: 1;
-}
 
 @media (max-width: 820px) {
   .sidebar-profile {
@@ -1749,10 +1694,6 @@ ol {
   }
 
   .sidebar-profile-text,
-  .sidebar-profile-icon {
-    display: none;
-  }
-
   .sidebar-profile-avatar {
     width: 30px;
     height: 30px;
