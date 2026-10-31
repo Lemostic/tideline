@@ -32,8 +32,10 @@ export interface Settings {
   autoCheckUpdates: boolean;
   /** 主题预设或自定义主题 */
   themeId: ThemeId;
-  /** 自定义主题的 5 个基础色，切换预设时也保留 */
+  /** 自定义主题的基础色，切换预设时也保留 */
   customTheme: ThemeBaseColors;
+  /** 默认主题迁移版本：旧版板栗鹅黄默认值一次性升级为雾蓝白 */
+  themeDefaultVersion: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -45,6 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCheckUpdates: false,
   themeId: DEFAULT_THEME_ID,
   customTheme: DEFAULT_CUSTOM_THEME,
+  themeDefaultVersion: 2,
 };
 
 const STORAGE_KEY = 'tideline.settings.v1';
@@ -63,7 +66,13 @@ function normalize(raw: unknown): Settings {
     ? (value.startPage as StartPage)
     : DEFAULT_SETTINGS.startPage;
   const autoCheckUpdates = Boolean(value.autoCheckUpdates);
-  const themeId = normalizeThemeId(value.themeId);
+  const storedThemeId = normalizeThemeId(value.themeId);
+  const previousThemeVersion = Number(value.themeDefaultVersion);
+  const themeId =
+    (!Number.isFinite(previousThemeVersion) || previousThemeVersion < 2) &&
+    storedThemeId === 'chestnut'
+      ? DEFAULT_THEME_ID
+      : storedThemeId;
   const customTheme = normalizeCustomTheme(value.customTheme);
   return {
     defaultView,
@@ -74,6 +83,7 @@ function normalize(raw: unknown): Settings {
     autoCheckUpdates,
     themeId,
     customTheme,
+    themeDefaultVersion: 2,
   };
 }
 

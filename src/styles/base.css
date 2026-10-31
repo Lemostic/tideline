@@ -132,7 +132,7 @@ ol {
   flex-direction: column;
   padding: 14px 10px 10px;
   border-right: 1px solid var(--line);
-  background: var(--bg-app);
+  background: var(--sidebar-bg, var(--bg-app));
   overflow-y: auto;
 }
 

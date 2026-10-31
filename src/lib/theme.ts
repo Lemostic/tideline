@@ -7,6 +7,7 @@
  */
 
 export type ThemeId =
+  | 'mistblue'
   | 'pine'
   | 'chestnut'
   | 'tech'
@@ -24,6 +25,8 @@ export interface ThemeBaseColors {
   background: string;
   surface: string;
   text: string;
+  /** 可选：侧边栏底色；不填时跟随 background */
+  sidebar?: string;
 }
 
 export interface ThemePreset {
@@ -34,6 +37,19 @@ export interface ThemePreset {
 }
 
 export const THEME_PRESETS: ThemePreset[] = [
+  {
+    id: 'mistblue',
+    name: '雾蓝白',
+    description: '冷白背景、纯白卡片与清透蓝，干净通透',
+    colors: {
+      primary: '#2f6fd0',
+      accent: '#e8844f',
+      background: '#f5f6f8',
+      surface: '#ffffff',
+      sidebar: '#ffffff',
+      text: '#171a24',
+    },
+  },
   {
     id: 'chestnut',
     name: '板栗鹅黄',
@@ -148,7 +164,7 @@ export const DEFAULT_CUSTOM_THEME: ThemeBaseColors = {
   ...THEME_PRESETS[0].colors,
 };
 
-export const DEFAULT_THEME_ID: ThemeId = 'chestnut';
+export const DEFAULT_THEME_ID: ThemeId = 'mistblue';
 
 const THEME_IDS: ThemeId[] = [
   ...THEME_PRESETS.map((preset) => preset.id),
@@ -226,6 +242,7 @@ export type ThemePalette = Record<string, string>;
 export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
   const base = normalizeCustomTheme(colors);
   const { primary, accent, background: bg, surface, text: ink } = base;
+  const sidebar = colors.sidebar ? normalizeHex(colors.sidebar, bg) : bg;
   const primaryStrong = mix(primary, '#000000', 0.22);
   const primarySoft = mix(primary, '#ffffff', 0.88);
   const primarySoft2 = mix(primary, '#ffffff', 0.74);
@@ -248,6 +265,7 @@ export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
   return {
     '--bg-app': bg,
     '--bg-app-deep': bgDeep,
+    '--sidebar-bg': sidebar,
     '--surface': surface,
     '--surface-muted': surfaceMuted,
     '--surface-hover': surfaceHover,

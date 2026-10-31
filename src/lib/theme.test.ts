@@ -9,8 +9,9 @@ import {
 } from '@/lib/theme';
 
 describe('theme helpers', () => {
-  it('提供九套内置主题并默认板栗鹅黄', () => {
+  it('提供十套内置主题并默认雾蓝白', () => {
     expect(THEME_PRESETS.map((preset) => preset.name)).toEqual([
+      '雾蓝白',
       '板栗鹅黄',
       '科技蓝',
       '简约白',
@@ -21,10 +22,10 @@ describe('theme helpers', () => {
       '雾紫',
       '竹青',
     ]);
-    expect(normalizeThemeId(undefined)).toBe('chestnut');
+    expect(normalizeThemeId(undefined)).toBe('mistblue');
     expect(normalizeThemeId('tech')).toBe('tech');
     expect(normalizeThemeId('mint')).toBe('mint');
-    expect(normalizeThemeId('unknown')).toBe('chestnut');
+    expect(normalizeThemeId('unknown')).toBe('mistblue');
   });
 
   it('按基础色派生完整主题令牌', () => {
