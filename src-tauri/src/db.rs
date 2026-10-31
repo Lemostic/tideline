@@ -170,6 +170,40 @@ CREATE TABLE IF NOT EXISTS goal_cards (
     PRIMARY KEY (goal_id, card_id)
 );
 
+CREATE TABLE IF NOT EXISTS team_members (
+    id          TEXT PRIMARY KEY NOT NULL,
+    name        TEXT NOT NULL,
+    role        TEXT NOT NULL DEFAULT 'other',
+    status      TEXT NOT NULL DEFAULT 'active',
+    joined_at   TEXT NOT NULL,
+    released_at TEXT,
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS overtime_records (
+    id         TEXT PRIMARY KEY NOT NULL,
+    member_id  TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
+    date       TEXT NOT NULL,
+    hours      REAL NOT NULL DEFAULT 0,
+    status     TEXT NOT NULL DEFAULT 'planned',
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS performance_records (
+    id         TEXT PRIMARY KEY NOT NULL,
+    member_id  TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
+    date       TEXT NOT NULL,
+    points     INTEGER NOT NULL DEFAULT 0,
+    reason     TEXT NOT NULL,
+    category   TEXT NOT NULL DEFAULT 'other',
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_lists_board_position ON lists (board_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_list_position ON cards (list_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_board ON cards (board_id);
@@ -179,6 +213,9 @@ CREATE INDEX IF NOT EXISTS idx_card_dependencies_depends_on ON card_dependencies
 CREATE INDEX IF NOT EXISTS idx_board_set_boards_board ON board_set_boards (board_id);
 CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals (parent_id);
 CREATE INDEX IF NOT EXISTS idx_goal_cards_card ON goal_cards (card_id);
+CREATE INDEX IF NOT EXISTS idx_team_members_status ON team_members (status);
+CREATE INDEX IF NOT EXISTS idx_overtime_member_date ON overtime_records (member_id, date);
+CREATE INDEX IF NOT EXISTS idx_performance_member_date ON performance_records (member_id, date);
 "#;
 
 /// 打开磁盘数据库（生产路径）。
@@ -212,7 +249,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -310,9 +347,43 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
                  PRIMARY KEY (goal_id, card_id)
              );
              CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals (parent_id);
-             CREATE INDEX IF NOT EXISTS idx_goal_cards_card ON goal_cards (card_id);",
+             CREATE INDEX IF NOT EXISTS idx_goal_cards_card ON goal_cards (card_id);
+             CREATE TABLE IF NOT EXISTS team_members (
+                 id          TEXT PRIMARY KEY NOT NULL,
+                 name        TEXT NOT NULL,
+                 role        TEXT NOT NULL DEFAULT 'other',
+                 status      TEXT NOT NULL DEFAULT 'active',
+                 joined_at   TEXT NOT NULL,
+                 released_at TEXT,
+                 note        TEXT NOT NULL DEFAULT '',
+                 created_at  TEXT NOT NULL,
+                 updated_at  TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS overtime_records (
+                 id         TEXT PRIMARY KEY NOT NULL,
+                 member_id  TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
+                 date       TEXT NOT NULL,
+                 hours      REAL NOT NULL DEFAULT 0,
+                 status     TEXT NOT NULL DEFAULT 'planned',
+                 note       TEXT NOT NULL DEFAULT '',
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS performance_records (
+                 id         TEXT PRIMARY KEY NOT NULL,
+                 member_id  TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
+                 date       TEXT NOT NULL,
+                 points     INTEGER NOT NULL DEFAULT 0,
+                 reason     TEXT NOT NULL,
+                 category   TEXT NOT NULL DEFAULT 'other',
+                 note       TEXT NOT NULL DEFAULT '',
+                 created_at TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_team_members_status ON team_members (status);
+             CREATE INDEX IF NOT EXISTS idx_overtime_member_date ON overtime_records (member_id, date);
+             CREATE INDEX IF NOT EXISTS idx_performance_member_date ON performance_records (member_id, date);",
         )
-        .map_err(|error| format!("创建任务依赖/看板集/目标表失败：{error}"))?;
+        .map_err(|error| format!("创建任务依赖/看板集/目标/项目组表失败：{error}"))?;
     connection
         .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|error| format!("写入 user_version 失败：{error}"))?;

@@ -342,6 +342,9 @@ pub fn get_snapshot(conn: &Connection) -> DbResult<Snapshot> {
         dependencies: get_dependencies(conn)?,
         board_sets: get_board_sets(conn)?,
         goals: get_goals(conn)?,
+        team_members: get_team_members(conn)?,
+        overtime_records: get_overtime_records(conn)?,
+        performance_records: get_performance_records(conn)?,
     })
 }
 
@@ -798,6 +801,411 @@ pub fn delete_goal(conn: &mut Connection, input: IdInput) -> DbResult<()> {
     tx.execute("DELETE FROM goals WHERE id = ?1", [&input.id])
         .map_err(db_err)?;
     tx.commit().map_err(db_err)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 项目组成员 / 加班 / 绩效（V0.8）
+// ---------------------------------------------------------------------------
+
+fn today_key() -> String {
+    now_iso()[..10].to_string()
+}
+
+fn normalize_date(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        today_key()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn require_team_member(conn: &Connection, id: &str) -> DbResult<()> {
+    let exists: Option<i64> = conn
+        .query_row("SELECT 1 FROM team_members WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(db_err)?;
+    if exists.is_none() {
+        return Err(format!("项目成员不存在：{id}"));
+    }
+    Ok(())
+}
+
+fn row_to_team_member(row: &Row<'_>) -> rusqlite::Result<TeamMember> {
+    Ok(TeamMember {
+        id: row.get("id")?,
+        name: row.get("name")?,
+        role: MemberRole::from_db(row.get::<_, String>("role")?.as_str()),
+        status: MemberStatus::from_db(row.get::<_, String>("status")?.as_str()),
+        joined_at: row.get("joined_at")?,
+        released_at: row.get("released_at")?,
+        note: row.get("note")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn row_to_overtime(row: &Row<'_>) -> rusqlite::Result<OvertimeRecord> {
+    Ok(OvertimeRecord {
+        id: row.get("id")?,
+        member_id: row.get("member_id")?,
+        date: row.get("date")?,
+        hours: row.get("hours")?,
+        status: OvertimeStatus::from_db(row.get::<_, String>("status")?.as_str()),
+        note: row.get("note")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn row_to_performance(row: &Row<'_>) -> rusqlite::Result<PerformanceRecord> {
+    Ok(PerformanceRecord {
+        id: row.get("id")?,
+        member_id: row.get("member_id")?,
+        date: row.get("date")?,
+        points: row.get("points")?,
+        reason: row.get("reason")?,
+        category: PerformanceCategory::from_db(row.get::<_, String>("category")?.as_str()),
+        note: row.get("note")?,
+        created_at: row.get("created_at")?,
+    })
+}
+
+pub fn get_team_members(conn: &Connection) -> DbResult<Vec<TeamMember>> {
+    collect_rows(
+        conn,
+        "SELECT id, name, role, status, joined_at, released_at, note, created_at, updated_at \
+         FROM team_members ORDER BY status ASC, joined_at ASC, name ASC",
+        row_to_team_member,
+    )
+}
+
+fn get_team_member(conn: &Connection, id: &str) -> DbResult<TeamMember> {
+    conn.query_row(
+        "SELECT id, name, role, status, joined_at, released_at, note, created_at, updated_at \
+         FROM team_members WHERE id = ?1",
+        [id],
+        row_to_team_member,
+    )
+    .optional()
+    .map_err(db_err)?
+    .ok_or_else(|| format!("项目成员不存在：{id}"))
+}
+
+pub fn create_team_member(
+    conn: &mut Connection,
+    input: NewTeamMemberInput,
+) -> DbResult<TeamMember> {
+    let now = now_iso();
+    let member = TeamMember {
+        id: create_id("m"),
+        name: fallback_trimmed(&input.name, "未命名成员"),
+        role: input.role,
+        status: MemberStatus::Active,
+        joined_at: input
+            .joined_at
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(today_key),
+        released_at: None,
+        note: input.note.unwrap_or_default(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    conn.execute(
+        "INSERT INTO team_members \
+         (id, name, role, status, joined_at, released_at, note, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            &member.id,
+            &member.name,
+            member.role.as_str(),
+            member.status.as_str(),
+            &member.joined_at,
+            &member.released_at,
+            &member.note,
+            &member.created_at,
+            &member.updated_at,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(member)
+}
+
+pub fn update_team_member(
+    conn: &mut Connection,
+    input: UpdateTeamMemberInput,
+) -> DbResult<TeamMember> {
+    let mut member = get_team_member(conn, &input.id)?;
+    if let Some(name) = input.patch.name {
+        member.name = fallback_trimmed(&name, "未命名成员");
+    }
+    if let Some(role) = input.patch.role {
+        member.role = role;
+    }
+    if let Some(status) = input.patch.status {
+        member.status = status;
+    }
+    if let Some(joined_at) = input.patch.joined_at {
+        if !joined_at.trim().is_empty() {
+            member.joined_at = joined_at;
+        }
+    }
+    if let Some(released_at) = input.patch.released_at {
+        member.released_at = released_at.and_then(non_empty);
+    }
+    if let Some(note) = input.patch.note {
+        member.note = note;
+    }
+    if member.status == MemberStatus::Released && member.released_at.is_none() {
+        member.released_at = Some(today_key());
+    }
+    if member.status == MemberStatus::Active {
+        member.released_at = None;
+    }
+    member.updated_at = now_iso();
+    conn.execute(
+        "UPDATE team_members SET name = ?1, role = ?2, status = ?3, joined_at = ?4, \
+         released_at = ?5, note = ?6, updated_at = ?7 WHERE id = ?8",
+        params![
+            &member.name,
+            member.role.as_str(),
+            member.status.as_str(),
+            &member.joined_at,
+            &member.released_at,
+            &member.note,
+            &member.updated_at,
+            &member.id,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(member)
+}
+
+pub fn delete_team_member(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    conn.execute("DELETE FROM team_members WHERE id = ?1", [&input.id])
+        .map_err(db_err)?;
+    Ok(())
+}
+
+pub fn get_overtime_records(conn: &Connection) -> DbResult<Vec<OvertimeRecord>> {
+    collect_rows(
+        conn,
+        "SELECT id, member_id, date, hours, status, note, created_at, updated_at \
+         FROM overtime_records ORDER BY date DESC, created_at DESC",
+        row_to_overtime,
+    )
+}
+
+fn get_overtime(conn: &Connection, id: &str) -> DbResult<OvertimeRecord> {
+    conn.query_row(
+        "SELECT id, member_id, date, hours, status, note, created_at, updated_at \
+         FROM overtime_records WHERE id = ?1",
+        [id],
+        row_to_overtime,
+    )
+    .optional()
+    .map_err(db_err)?
+    .ok_or_else(|| format!("加班记录不存在：{id}"))
+}
+
+pub fn create_overtime(
+    conn: &mut Connection,
+    input: NewOvertimeInput,
+) -> DbResult<OvertimeRecord> {
+    require_team_member(conn, &input.member_id)?;
+    if !input.hours.is_finite() || input.hours <= 0.0 {
+        return Err("加班时长必须大于 0".to_string());
+    }
+    let now = now_iso();
+    let record = OvertimeRecord {
+        id: create_id("ot"),
+        member_id: input.member_id,
+        date: normalize_date(&input.date),
+        hours: (input.hours * 10.0).round() / 10.0,
+        status: input.status.unwrap_or(OvertimeStatus::Planned),
+        note: input.note.unwrap_or_default(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    conn.execute(
+        "INSERT INTO overtime_records \
+         (id, member_id, date, hours, status, note, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            &record.id,
+            &record.member_id,
+            &record.date,
+            record.hours,
+            record.status.as_str(),
+            &record.note,
+            &record.created_at,
+            &record.updated_at,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(record)
+}
+
+pub fn update_overtime(
+    conn: &mut Connection,
+    input: UpdateOvertimeInput,
+) -> DbResult<OvertimeRecord> {
+    let mut record = get_overtime(conn, &input.id)?;
+    if let Some(member_id) = input.patch.member_id {
+        require_team_member(conn, &member_id)?;
+        record.member_id = member_id;
+    }
+    if let Some(date) = input.patch.date {
+        if !date.trim().is_empty() {
+            record.date = date;
+        }
+    }
+    if let Some(hours) = input.patch.hours {
+        if !hours.is_finite() || hours <= 0.0 {
+            return Err("加班时长必须大于 0".to_string());
+        }
+        record.hours = (hours * 10.0).round() / 10.0;
+    }
+    if let Some(status) = input.patch.status {
+        record.status = status;
+    }
+    if let Some(note) = input.patch.note {
+        record.note = note;
+    }
+    record.updated_at = now_iso();
+    conn.execute(
+        "UPDATE overtime_records SET member_id = ?1, date = ?2, hours = ?3, status = ?4, \
+         note = ?5, updated_at = ?6 WHERE id = ?7",
+        params![
+            &record.member_id,
+            &record.date,
+            record.hours,
+            record.status.as_str(),
+            &record.note,
+            &record.updated_at,
+            &record.id,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(record)
+}
+
+pub fn delete_overtime(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    conn.execute("DELETE FROM overtime_records WHERE id = ?1", [&input.id])
+        .map_err(db_err)?;
+    Ok(())
+}
+
+pub fn get_performance_records(conn: &Connection) -> DbResult<Vec<PerformanceRecord>> {
+    collect_rows(
+        conn,
+        "SELECT id, member_id, date, points, reason, category, note, created_at \
+         FROM performance_records ORDER BY date DESC, created_at DESC",
+        row_to_performance,
+    )
+}
+
+fn get_performance(conn: &Connection, id: &str) -> DbResult<PerformanceRecord> {
+    conn.query_row(
+        "SELECT id, member_id, date, points, reason, category, note, created_at \
+         FROM performance_records WHERE id = ?1",
+        [id],
+        row_to_performance,
+    )
+    .optional()
+    .map_err(db_err)?
+    .ok_or_else(|| format!("绩效记录不存在：{id}"))
+}
+
+pub fn create_performance(
+    conn: &mut Connection,
+    input: NewPerformanceInput,
+) -> DbResult<PerformanceRecord> {
+    require_team_member(conn, &input.member_id)?;
+    if input.points == 0 {
+        return Err("绩效分值不能为 0".to_string());
+    }
+    let record = PerformanceRecord {
+        id: create_id("pf"),
+        member_id: input.member_id,
+        date: normalize_date(&input.date),
+        points: input.points.clamp(-100, 100),
+        reason: fallback_trimmed(&input.reason, "绩效记录"),
+        category: input.category.unwrap_or(PerformanceCategory::Other),
+        note: input.note.unwrap_or_default(),
+        created_at: now_iso(),
+    };
+    conn.execute(
+        "INSERT INTO performance_records \
+         (id, member_id, date, points, reason, category, note, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            &record.id,
+            &record.member_id,
+            &record.date,
+            record.points,
+            &record.reason,
+            record.category.as_str(),
+            &record.note,
+            &record.created_at,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(record)
+}
+
+pub fn update_performance(
+    conn: &mut Connection,
+    input: UpdatePerformanceInput,
+) -> DbResult<PerformanceRecord> {
+    let mut record = get_performance(conn, &input.id)?;
+    if let Some(member_id) = input.patch.member_id {
+        require_team_member(conn, &member_id)?;
+        record.member_id = member_id;
+    }
+    if let Some(date) = input.patch.date {
+        if !date.trim().is_empty() {
+            record.date = date;
+        }
+    }
+    if let Some(points) = input.patch.points {
+        if points == 0 {
+            return Err("绩效分值不能为 0".to_string());
+        }
+        record.points = points.clamp(-100, 100);
+    }
+    if let Some(reason) = input.patch.reason {
+        record.reason = fallback_trimmed(&reason, "绩效记录");
+    }
+    if let Some(category) = input.patch.category {
+        record.category = category;
+    }
+    if let Some(note) = input.patch.note {
+        record.note = note;
+    }
+    conn.execute(
+        "UPDATE performance_records SET member_id = ?1, date = ?2, points = ?3, \
+         reason = ?4, category = ?5, note = ?6 WHERE id = ?7",
+        params![
+            &record.member_id,
+            &record.date,
+            record.points,
+            &record.reason,
+            record.category.as_str(),
+            &record.note,
+            &record.id,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(record)
+}
+
+pub fn delete_performance(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    conn.execute("DELETE FROM performance_records WHERE id = ?1", [&input.id])
+        .map_err(db_err)?;
     Ok(())
 }
 
@@ -3006,5 +3414,72 @@ mod tests {
         )
         .expect_err("父目标挂到子目标下应拒绝");
         assert!(err.contains("循环"), "错误：{err}");
+    }
+
+    #[test]
+    fn team_members_overtime_and_performance_cascade() {
+        let mut conn = memory_db();
+        let member = create_team_member(
+            &mut conn,
+            NewTeamMemberInput {
+                name: "张三".to_string(),
+                role: MemberRole::Dev,
+                joined_at: Some("2026-10-01".to_string()),
+                note: Some("后端".to_string()),
+            },
+        )
+        .expect("创建成员");
+        let released = update_team_member(
+            &mut conn,
+            UpdateTeamMemberInput {
+                id: member.id.clone(),
+                patch: TeamMemberPatch {
+                    status: Some(MemberStatus::Released),
+                    released_at: Some(Some("2026-10-31".to_string())),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("释放成员");
+        assert_eq!(released.status, MemberStatus::Released);
+        assert_eq!(released.released_at.as_deref(), Some("2026-10-31"));
+
+        let overtime = create_overtime(
+            &mut conn,
+            NewOvertimeInput {
+                member_id: member.id.clone(),
+                date: "2026-10-31".to_string(),
+                hours: 8.0,
+                status: Some(OvertimeStatus::Done),
+                note: Some("版本上线".to_string()),
+            },
+        )
+        .expect("创建加班");
+        assert_eq!(overtime.hours, 8.0);
+
+        let performance = create_performance(
+            &mut conn,
+            NewPerformanceInput {
+                member_id: member.id.clone(),
+                date: "2026-10-31".to_string(),
+                points: 5,
+                reason: "提前交付".to_string(),
+                category: Some(PerformanceCategory::Delivery),
+                note: None,
+            },
+        )
+        .expect("创建绩效");
+        assert_eq!(performance.points, 5);
+
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.team_members.len(), 1);
+        assert_eq!(snapshot.overtime_records.len(), 1);
+        assert_eq!(snapshot.performance_records.len(), 1);
+
+        delete_team_member(&mut conn, id_input(&member.id)).expect("删除成员");
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert!(snapshot.team_members.is_empty());
+        assert!(snapshot.overtime_records.is_empty());
+        assert!(snapshot.performance_records.is_empty());
     }
 }

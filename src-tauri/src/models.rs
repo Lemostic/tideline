@@ -246,6 +246,157 @@ pub struct Goal {
     pub updated_at: String,
 }
 
+/// 项目组角色（V0.8）：开发 / 测试 / 需求 / 设计 / 其他。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemberRole {
+    Dev,
+    Test,
+    Requirements,
+    Design,
+    Other,
+}
+
+impl MemberRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Test => "test",
+            Self::Requirements => "requirements",
+            Self::Design => "design",
+            Self::Other => "other",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "dev" => Self::Dev,
+            "test" => Self::Test,
+            "requirements" => Self::Requirements,
+            "design" => Self::Design,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemberStatus {
+    Active,
+    Released,
+}
+
+impl MemberStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Released => "released",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "released" => Self::Released,
+            _ => Self::Active,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OvertimeStatus {
+    Planned,
+    Done,
+}
+
+impl OvertimeStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Planned => "planned",
+            Self::Done => "done",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "done" => Self::Done,
+            _ => Self::Planned,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PerformanceCategory {
+    Delivery,
+    Quality,
+    Collaboration,
+    Other,
+}
+
+impl PerformanceCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Delivery => "delivery",
+            Self::Quality => "quality",
+            Self::Collaboration => "collaboration",
+            Self::Other => "other",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "delivery" => Self::Delivery,
+            "quality" => Self::Quality,
+            "collaboration" => Self::Collaboration,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// 项目组成员（V0.8）：在组 / 已释放，入组与释放日期用于资源盘点。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamMember {
+    pub id: String,
+    pub name: String,
+    pub role: MemberRole,
+    pub status: MemberStatus,
+    pub joined_at: String,
+    pub released_at: Option<String>,
+    pub note: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 周末加班记录：planned=排班，done=已发生。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OvertimeRecord {
+    pub id: String,
+    pub member_id: String,
+    pub date: String,
+    pub hours: f64,
+    pub status: OvertimeStatus,
+    pub note: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 绩效加减分记录：points 正数为加分、负数为减分。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceRecord {
+    pub id: String,
+    pub member_id: String,
+    pub date: String,
+    pub points: i64,
+    pub reason: String,
+    pub category: PerformanceCategory,
+    pub note: String,
+    pub created_at: String,
+}
+
 /// 启动时一次性拉取的全量快照。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -263,6 +414,15 @@ pub struct Snapshot {
     /// 目标（V0.6）。
     #[serde(default)]
     pub goals: Vec<Goal>,
+    /// 项目组成员（V0.8）。
+    #[serde(default)]
+    pub team_members: Vec<TeamMember>,
+    /// 周末加班记录（V0.8）。
+    #[serde(default)]
+    pub overtime_records: Vec<OvertimeRecord>,
+    /// 绩效加减分（V0.8）。
+    #[serde(default)]
+    pub performance_records: Vec<PerformanceRecord>,
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +450,13 @@ pub struct BackupFile {
     /// V0.6 新增；旧备份没有该字段时按空目标处理。
     #[serde(default)]
     pub goals: Vec<Goal>,
+    /// V0.8 新增。
+    #[serde(default)]
+    pub team_members: Vec<TeamMember>,
+    #[serde(default)]
+    pub overtime_records: Vec<OvertimeRecord>,
+    #[serde(default)]
+    pub performance_records: Vec<PerformanceRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -306,6 +473,12 @@ pub struct BackupSummary {
     pub board_sets: usize,
     #[serde(default)]
     pub goals: usize,
+    #[serde(default)]
+    pub team_members: usize,
+    #[serde(default)]
+    pub overtime_records: usize,
+    #[serde(default)]
+    pub performance_records: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -578,6 +751,112 @@ pub struct GoalPatch {
 pub struct UpdateGoalInput {
     pub id: String,
     pub patch: GoalPatch,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTeamMemberInput {
+    pub name: String,
+    pub role: MemberRole,
+    #[serde(default)]
+    pub joined_at: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamMemberPatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub role: Option<MemberRole>,
+    #[serde(default)]
+    pub status: Option<MemberStatus>,
+    #[serde(default)]
+    pub joined_at: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub released_at: Option<Option<String>>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTeamMemberInput {
+    pub id: String,
+    pub patch: TeamMemberPatch,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewOvertimeInput {
+    pub member_id: String,
+    pub date: String,
+    pub hours: f64,
+    #[serde(default)]
+    pub status: Option<OvertimeStatus>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OvertimePatch {
+    #[serde(default)]
+    pub member_id: Option<String>,
+    #[serde(default)]
+    pub date: Option<String>,
+    #[serde(default)]
+    pub hours: Option<f64>,
+    #[serde(default)]
+    pub status: Option<OvertimeStatus>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateOvertimeInput {
+    pub id: String,
+    pub patch: OvertimePatch,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewPerformanceInput {
+    pub member_id: String,
+    pub date: String,
+    pub points: i64,
+    pub reason: String,
+    #[serde(default)]
+    pub category: Option<PerformanceCategory>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformancePatch {
+    #[serde(default)]
+    pub member_id: Option<String>,
+    #[serde(default)]
+    pub date: Option<String>,
+    #[serde(default)]
+    pub points: Option<i64>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub category: Option<PerformanceCategory>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePerformanceInput {
+    pub id: String,
+    pub patch: PerformancePatch,
 }
 
 // ---------------------------------------------------------------------------

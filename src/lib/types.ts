@@ -92,6 +92,10 @@ export interface Snapshot {
   boardSets: BoardSet[];
   /** 目标（V0.6）：目标树与任务关联 */
   goals: Goal[];
+  /** 项目组（V0.8） */
+  teamMembers: TeamMember[];
+  overtimeRecords: OvertimeRecord[];
+  performanceRecords: PerformanceRecord[];
 }
 
 /** 任务依赖（V0.4）：`cardId` 被 `dependsOnCardId` 阻塞 */
@@ -166,6 +170,83 @@ export type GoalPatch = Partial<
     | 'parentId'
     | 'cardIds'
   >
+>;
+
+/** 项目组角色（V0.8） */
+export type MemberRole = 'dev' | 'test' | 'requirements' | 'design' | 'other';
+export type MemberStatus = 'active' | 'released';
+export type OvertimeStatus = 'planned' | 'done';
+export type PerformanceCategory = 'delivery' | 'quality' | 'collaboration' | 'other';
+
+export interface TeamMember {
+  id: string;
+  name: string;
+  role: MemberRole;
+  status: MemberStatus;
+  joinedAt: string;
+  releasedAt: string | null;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OvertimeRecord {
+  id: string;
+  memberId: string;
+  date: string;
+  hours: number;
+  status: OvertimeStatus;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PerformanceRecord {
+  id: string;
+  memberId: string;
+  date: string;
+  /** 正数加分，负数减分 */
+  points: number;
+  reason: string;
+  category: PerformanceCategory;
+  note: string;
+  createdAt: string;
+}
+
+export interface NewTeamMemberInput {
+  name: string;
+  role: MemberRole;
+  joinedAt?: string;
+  note?: string;
+}
+
+export type TeamMemberPatch = Partial<
+  Pick<TeamMember, 'name' | 'role' | 'status' | 'joinedAt' | 'releasedAt' | 'note'>
+>;
+
+export interface NewOvertimeInput {
+  memberId: string;
+  date: string;
+  hours: number;
+  status?: OvertimeStatus;
+  note?: string;
+}
+
+export type OvertimePatch = Partial<
+  Pick<OvertimeRecord, 'memberId' | 'date' | 'hours' | 'status' | 'note'>
+>;
+
+export interface NewPerformanceInput {
+  memberId: string;
+  date: string;
+  points: number;
+  reason: string;
+  category?: PerformanceCategory;
+  note?: string;
+}
+
+export type PerformancePatch = Partial<
+  Pick<PerformanceRecord, 'memberId' | 'date' | 'points' | 'reason' | 'category' | 'note'>
 >;
 
 export type BoardPatch = Partial<
@@ -281,6 +362,10 @@ export interface BackupFile {
   boardSets: BoardSet[];
   /** V0.6 新增；旧备份没有该字段时按空目标处理 */
   goals: Goal[];
+  /** V0.8 新增；旧备份没有该字段时按空项目组处理 */
+  teamMembers: TeamMember[];
+  overtimeRecords: OvertimeRecord[];
+  performanceRecords: PerformanceRecord[];
 }
 
 export interface BackupSummary {
@@ -292,6 +377,9 @@ export interface BackupSummary {
   dependencies: number;
   boardSets: number;
   goals: number;
+  teamMembers: number;
+  overtimeRecords: number;
+  performanceRecords: number;
 }
 
 export interface BackupExport {

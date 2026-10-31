@@ -62,6 +62,9 @@ const validBackup = () =>
     dependencies: [{ cardId: 'c_2', dependsOnCardId: 'c_1' }],
     boardSets: [],
     goals: [],
+    teamMembers: [],
+    overtimeRecords: [],
+    performanceRecords: [],
   });
 
 describe('backup helpers', () => {
@@ -76,6 +79,9 @@ describe('backup helpers', () => {
       dependencies: 1,
       boardSets: 0,
       goals: 0,
+      teamMembers: 0,
+      overtimeRecords: 0,
+      performanceRecords: 0,
     });
   });
 

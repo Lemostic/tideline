@@ -15,6 +15,7 @@ const SECTION_LABELS: Record<string, string> = {
   '/dashboard': '仪表盘',
   '/board-sets': '看板集',
   '/goals': '目标',
+  '/team': '项目组',
 };
 
 export function TopBar() {

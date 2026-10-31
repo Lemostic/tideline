@@ -32,6 +32,9 @@ pub fn build(conn: &Connection) -> Result<BackupFile, String> {
         dependencies: repo::get_dependencies(conn)?,
         board_sets: repo::get_board_sets(conn)?,
         goals: repo::get_goals(conn)?,
+        team_members: repo::get_team_members(conn)?,
+        overtime_records: repo::get_overtime_records(conn)?,
+        performance_records: repo::get_performance_records(conn)?,
     })
 }
 
@@ -46,6 +49,9 @@ impl BackupFile {
             dependencies: self.dependencies.len(),
             board_sets: self.board_sets.len(),
             goals: self.goals.len(),
+            team_members: self.team_members.len(),
+            overtime_records: self.overtime_records.len(),
+            performance_records: self.performance_records.len(),
         }
     }
 }
@@ -239,6 +245,51 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         }
     }
 
+    let mut member_ids = HashSet::new();
+    for member in &backup.team_members {
+        if member.id.trim().is_empty() {
+            return Err("备份中存在空的项目成员 id".to_string());
+        }
+        if !member_ids.insert(member.id.as_str()) {
+            return Err(format!("备份中存在重复的项目成员 id：{}", member.id));
+        }
+        if member.name.trim().is_empty() {
+            return Err("备份中存在未命名的项目成员".to_string());
+        }
+    }
+
+    let mut overtime_ids = HashSet::new();
+    for record in &backup.overtime_records {
+        if record.id.trim().is_empty() {
+            return Err("备份中存在空的加班记录 id".to_string());
+        }
+        if !overtime_ids.insert(record.id.as_str()) {
+            return Err(format!("备份中存在重复的加班记录 id：{}", record.id));
+        }
+        if !member_ids.contains(record.member_id.as_str()) {
+            return Err("加班记录引用了不存在的项目成员".to_string());
+        }
+        if !record.hours.is_finite() || record.hours <= 0.0 {
+            return Err("备份中的加班时长无效".to_string());
+        }
+    }
+
+    let mut performance_ids = HashSet::new();
+    for record in &backup.performance_records {
+        if record.id.trim().is_empty() {
+            return Err("备份中存在空的绩效记录 id".to_string());
+        }
+        if !performance_ids.insert(record.id.as_str()) {
+            return Err(format!("备份中存在重复的绩效记录 id：{}", record.id));
+        }
+        if !member_ids.contains(record.member_id.as_str()) {
+            return Err("绩效记录引用了不存在的项目成员".to_string());
+        }
+        if record.points == 0 {
+            return Err("备份中的绩效分值不能为 0".to_string());
+        }
+    }
+
     Ok(())
 }
 
@@ -248,6 +299,9 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
     let tx = conn.transaction().map_err(|error| format!("恢复失败：{error}"))?;
     tx.execute("DELETE FROM goal_cards", [])
         .and_then(|_| tx.execute("DELETE FROM goals", []))
+        .and_then(|_| tx.execute("DELETE FROM performance_records", []))
+        .and_then(|_| tx.execute("DELETE FROM overtime_records", []))
+        .and_then(|_| tx.execute("DELETE FROM team_members", []))
         .and_then(|_| tx.execute("DELETE FROM board_set_boards", []))
         .and_then(|_| tx.execute("DELETE FROM board_sets", []))
         .and_then(|_| tx.execute("DELETE FROM card_dependencies", []))
@@ -373,6 +427,64 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
             )
             .map_err(|error| format!("写入看板集成员失败：{error}"))?;
         }
+    }
+
+    for member in &backup.team_members {
+        tx.execute(
+            "INSERT INTO team_members \
+             (id, name, role, status, joined_at, released_at, note, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &member.id,
+                &member.name,
+                member.role.as_str(),
+                member.status.as_str(),
+                &member.joined_at,
+                &member.released_at,
+                &member.note,
+                &member.created_at,
+                &member.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入项目成员「{}」失败：{error}", member.name))?;
+    }
+
+    for record in &backup.overtime_records {
+        tx.execute(
+            "INSERT INTO overtime_records \
+             (id, member_id, date, hours, status, note, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &record.id,
+                &record.member_id,
+                &record.date,
+                record.hours,
+                record.status.as_str(),
+                &record.note,
+                &record.created_at,
+                &record.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入加班记录失败：{error}"))?;
+    }
+
+    for record in &backup.performance_records {
+        tx.execute(
+            "INSERT INTO performance_records \
+             (id, member_id, date, points, reason, category, note, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &record.id,
+                &record.member_id,
+                &record.date,
+                record.points,
+                &record.reason,
+                record.category.as_str(),
+                &record.note,
+                &record.created_at,
+            ],
+        )
+        .map_err(|error| format!("写入绩效记录失败：{error}"))?;
     }
 
     for item in &backup.inbox {
@@ -546,6 +658,9 @@ mod tests {
             dependencies: Vec::new(),
             board_sets: Vec::new(),
             goals: Vec::new(),
+            team_members: Vec::new(),
+            overtime_records: Vec::new(),
+            performance_records: Vec::new(),
         };
         let summary = restore(&mut conn, &empty).expect("恢复空备份");
         assert_eq!(summary.cards, 0);
@@ -695,5 +810,55 @@ mod tests {
         assert_eq!(snapshot.goals.len(), 1);
         assert_eq!(snapshot.goals[0].id, goal.id);
         assert_eq!(snapshot.goals[0].card_ids, vec![card_id]);
+    }
+
+    #[test]
+    fn team_resources_round_trip_through_backup() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        seed(&mut conn);
+        let member = repo::create_team_member(
+            &mut conn,
+            NewTeamMemberInput {
+                name: "张三".to_string(),
+                role: MemberRole::Dev,
+                joined_at: Some("2026-10-01".to_string()),
+                note: None,
+            },
+        )
+        .expect("创建成员");
+        repo::create_overtime(
+            &mut conn,
+            NewOvertimeInput {
+                member_id: member.id.clone(),
+                date: "2026-10-31".to_string(),
+                hours: 8.0,
+                status: Some(OvertimeStatus::Done),
+                note: None,
+            },
+        )
+        .expect("创建加班");
+        repo::create_performance(
+            &mut conn,
+            NewPerformanceInput {
+                member_id: member.id.clone(),
+                date: "2026-10-31".to_string(),
+                points: 5,
+                reason: "提前交付".to_string(),
+                category: Some(PerformanceCategory::Delivery),
+                note: None,
+            },
+        )
+        .expect("创建绩效");
+
+        let backup = build(&conn).expect("构建备份");
+        assert_eq!(backup.summary().team_members, 1);
+        assert_eq!(backup.summary().overtime_records, 1);
+        assert_eq!(backup.summary().performance_records, 1);
+        let restored = restore(&mut conn, &backup).expect("恢复备份");
+        assert_eq!(restored.team_members, 1);
+        let snapshot = repo::get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.team_members[0].id, member.id);
+        assert_eq!(snapshot.overtime_records[0].member_id, member.id);
+        assert_eq!(snapshot.performance_records[0].member_id, member.id);
     }
 }

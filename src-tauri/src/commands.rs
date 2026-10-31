@@ -220,6 +220,79 @@ pub fn set_autostart(enabled: bool) -> CmdResult<AutoStartInfo> {
     write_autostart(enabled)
 }
 
+// ---------------------------------------------------------------------------
+// 项目组（V0.8）
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn create_team_member(
+    db: State<'_, Db>,
+    input: NewTeamMemberInput,
+) -> CmdResult<TeamMember> {
+    let mut conn = db.lock()?;
+    repo::create_team_member(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn update_team_member(
+    db: State<'_, Db>,
+    input: UpdateTeamMemberInput,
+) -> CmdResult<TeamMember> {
+    let mut conn = db.lock()?;
+    repo::update_team_member(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn delete_team_member(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_team_member(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn create_overtime(db: State<'_, Db>, input: NewOvertimeInput) -> CmdResult<OvertimeRecord> {
+    let mut conn = db.lock()?;
+    repo::create_overtime(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn update_overtime(
+    db: State<'_, Db>,
+    input: UpdateOvertimeInput,
+) -> CmdResult<OvertimeRecord> {
+    let mut conn = db.lock()?;
+    repo::update_overtime(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn delete_overtime(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_overtime(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn create_performance(
+    db: State<'_, Db>,
+    input: NewPerformanceInput,
+) -> CmdResult<PerformanceRecord> {
+    let mut conn = db.lock()?;
+    repo::create_performance(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn update_performance(
+    db: State<'_, Db>,
+    input: UpdatePerformanceInput,
+) -> CmdResult<PerformanceRecord> {
+    let mut conn = db.lock()?;
+    repo::update_performance(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn delete_performance(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_performance(&mut conn, input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_allowed_release_url;

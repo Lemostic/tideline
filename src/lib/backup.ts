@@ -15,6 +15,9 @@ import type {
   Goal,
   InboxItem,
   List,
+  OvertimeRecord,
+  PerformanceRecord,
+  TeamMember,
 } from './types';
 
 export const BACKUP_APP = 'tideline';
@@ -30,12 +33,16 @@ export interface BackupData {
   dependencies: CardDependency[];
   boardSets: BoardSet[];
   goals: Goal[];
+  teamMembers: TeamMember[];
+  overtimeRecords: OvertimeRecord[];
+  performanceRecords: PerformanceRecord[];
 }
 
 export function summarizeBackup(
   backup: Pick<
     BackupFile,
-    'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets' | 'goals'
+    'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets' | 'goals' |
+      'teamMembers' | 'overtimeRecords' | 'performanceRecords'
   >,
 ): BackupSummary {
   return {
@@ -47,6 +54,9 @@ export function summarizeBackup(
     dependencies: backup.dependencies.length,
     boardSets: backup.boardSets.length,
     goals: backup.goals.length,
+    teamMembers: backup.teamMembers.length,
+    overtimeRecords: backup.overtimeRecords.length,
+    performanceRecords: backup.performanceRecords.length,
   };
 }
 
@@ -63,6 +73,9 @@ export function createBackup(data: BackupData): BackupFile {
     dependencies: data.dependencies,
     boardSets: data.boardSets,
     goals: data.goals,
+    teamMembers: data.teamMembers,
+    overtimeRecords: data.overtimeRecords,
+    performanceRecords: data.performanceRecords,
   };
 }
 
@@ -323,6 +336,88 @@ export function parseBackup(text: string): BackupFile {
     }
   }
 
+  // 项目组是 V0.8 新增的；旧备份按空数组处理。
+  const rawTeamMembers =
+    raw.teamMembers === undefined ? [] : requireArray(raw.teamMembers, 'teamMembers');
+  const teamMembers: TeamMember[] = [];
+  const memberIds = new Set<string>();
+  for (const item of rawTeamMembers) {
+    if (!isRecord(item)) throw new Error('备份中的项目成员格式不正确');
+    const id = requireString(item.id, 'teamMembers[].id');
+    if (memberIds.has(id)) throw new Error(`备份中存在重复的项目成员 id：${id}`);
+    memberIds.add(id);
+    const name = requireString(item.name, 'teamMembers[].name');
+    teamMembers.push({
+      id,
+      name,
+      role:
+        item.role === 'dev' || item.role === 'test' || item.role === 'requirements' || item.role === 'design'
+          ? item.role
+          : 'other',
+      status: item.status === 'released' ? 'released' : 'active',
+      joinedAt: typeof item.joinedAt === 'string' ? item.joinedAt : '',
+      releasedAt: typeof item.releasedAt === 'string' ? item.releasedAt : null,
+      note: typeof item.note === 'string' ? item.note : '',
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
+  const rawOvertime =
+    raw.overtimeRecords === undefined ? [] : requireArray(raw.overtimeRecords, 'overtimeRecords');
+  const overtimeRecords: OvertimeRecord[] = [];
+  const overtimeIds = new Set<string>();
+  for (const item of rawOvertime) {
+    if (!isRecord(item)) throw new Error('备份中的加班记录格式不正确');
+    const id = requireString(item.id, 'overtimeRecords[].id');
+    if (overtimeIds.has(id)) throw new Error(`备份中存在重复的加班记录 id：${id}`);
+    overtimeIds.add(id);
+    const memberId = requireString(item.memberId, 'overtimeRecords[].memberId');
+    if (!memberIds.has(memberId)) throw new Error('加班记录引用了不存在的项目成员');
+    const hours = typeof item.hours === 'number' ? item.hours : 0;
+    if (!Number.isFinite(hours) || hours <= 0) throw new Error('备份中的加班时长无效');
+    overtimeRecords.push({
+      id,
+      memberId,
+      date: requireString(item.date, 'overtimeRecords[].date'),
+      hours,
+      status: item.status === 'done' ? 'done' : 'planned',
+      note: typeof item.note === 'string' ? item.note : '',
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
+  const rawPerformance =
+    raw.performanceRecords === undefined
+      ? []
+      : requireArray(raw.performanceRecords, 'performanceRecords');
+  const performanceRecords: PerformanceRecord[] = [];
+  const performanceIds = new Set<string>();
+  for (const item of rawPerformance) {
+    if (!isRecord(item)) throw new Error('备份中的绩效记录格式不正确');
+    const id = requireString(item.id, 'performanceRecords[].id');
+    if (performanceIds.has(id)) throw new Error(`备份中存在重复的绩效记录 id：${id}`);
+    performanceIds.add(id);
+    const memberId = requireString(item.memberId, 'performanceRecords[].memberId');
+    if (!memberIds.has(memberId)) throw new Error('绩效记录引用了不存在的项目成员');
+    const points = typeof item.points === 'number' ? Math.round(item.points) : 0;
+    if (points === 0) throw new Error('备份中的绩效分值不能为 0');
+    performanceRecords.push({
+      id,
+      memberId,
+      date: requireString(item.date, 'performanceRecords[].date'),
+      points,
+      reason: requireString(item.reason, 'performanceRecords[].reason'),
+      category:
+        item.category === 'delivery' || item.category === 'quality' || item.category === 'collaboration'
+          ? item.category
+          : 'other',
+      note: typeof item.note === 'string' ? item.note : '',
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+    });
+  }
+
   return {
     app: BACKUP_APP,
     formatVersion: BACKUP_FORMAT_VERSION,
@@ -334,5 +429,8 @@ export function parseBackup(text: string): BackupFile {
     dependencies,
     boardSets,
     goals,
+    teamMembers,
+    overtimeRecords,
+    performanceRecords,
   };
 }

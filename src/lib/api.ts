@@ -37,15 +37,28 @@ import type {
   InboxItem,
   List,
   ListPatch,
+  MemberRole,
+  MemberStatus,
   MoveCardInput,
   NewBoardInput,
   NewBoardSetInput,
   NewCardInput,
   NewGoalInput,
   NewListInput,
+  NewOvertimeInput,
+  NewPerformanceInput,
+  NewTeamMemberInput,
+  OvertimePatch,
+  OvertimeRecord,
+  OvertimeStatus,
+  PerformanceCategory,
+  PerformancePatch,
+  PerformanceRecord,
   Snapshot,
   StorageInfo,
   Subtask,
+  TeamMember,
+  TeamMemberPatch,
 } from './types';
 
 export interface TidelineApi {
@@ -95,6 +108,16 @@ export interface TidelineApi {
   /** 开机自动启动状态（V0.7.3） */
   getAutoStart(): Promise<AutoStartInfo>;
   setAutoStart(enabled: boolean): Promise<AutoStartInfo>;
+  /** 项目组（V0.8） */
+  createTeamMember(input: NewTeamMemberInput): Promise<TeamMember>;
+  updateTeamMember(input: { id: string; patch: TeamMemberPatch }): Promise<TeamMember>;
+  deleteTeamMember(input: IdInput): Promise<void>;
+  createOvertime(input: NewOvertimeInput): Promise<OvertimeRecord>;
+  updateOvertime(input: { id: string; patch: OvertimePatch }): Promise<OvertimeRecord>;
+  deleteOvertime(input: IdInput): Promise<void>;
+  createPerformance(input: NewPerformanceInput): Promise<PerformanceRecord>;
+  updatePerformance(input: { id: string; patch: PerformancePatch }): Promise<PerformanceRecord>;
+  deletePerformance(input: IdInput): Promise<void>;
 }
 
 export function isTauri(): boolean {
@@ -139,6 +162,15 @@ const tauriApi: TidelineApi = {
   openExternal: (url) => invoke<void>('open_external', { url }),
   getAutoStart: () => invoke<AutoStartInfo>('get_autostart'),
   setAutoStart: (enabled) => invoke<AutoStartInfo>('set_autostart', { enabled }),
+  createTeamMember: (input) => invoke<TeamMember>('create_team_member', { input }),
+  updateTeamMember: (input) => invoke<TeamMember>('update_team_member', { input }),
+  deleteTeamMember: (input) => invoke<void>('delete_team_member', { input }),
+  createOvertime: (input) => invoke<OvertimeRecord>('create_overtime', { input }),
+  updateOvertime: (input) => invoke<OvertimeRecord>('update_overtime', { input }),
+  deleteOvertime: (input) => invoke<void>('delete_overtime', { input }),
+  createPerformance: (input) => invoke<PerformanceRecord>('create_performance', { input }),
+  updatePerformance: (input) => invoke<PerformanceRecord>('update_performance', { input }),
+  deletePerformance: (input) => invoke<void>('delete_performance', { input }),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
@@ -186,6 +218,26 @@ function clampProgress(value: unknown): number {
   return Math.min(100, Math.max(0, Math.round(numeric)));
 }
 
+function normalizeMemberRole(value: unknown): MemberRole {
+  return value === 'dev' || value === 'test' || value === 'requirements' || value === 'design'
+    ? value
+    : 'other';
+}
+
+function normalizeMemberStatus(value: unknown): MemberStatus {
+  return value === 'released' ? 'released' : 'active';
+}
+
+function normalizeOvertimeStatus(value: unknown): OvertimeStatus {
+  return value === 'done' ? 'done' : 'planned';
+}
+
+function normalizePerformanceCategory(value: unknown): PerformanceCategory {
+  return value === 'delivery' || value === 'quality' || value === 'collaboration'
+    ? value
+    : 'other';
+}
+
 function loadLocalDb(): LocalDb {
   if (typeof localStorage === 'undefined') {
     return {
@@ -196,6 +248,9 @@ function loadLocalDb(): LocalDb {
       dependencies: [],
       boardSets: [],
       goals: [],
+      teamMembers: [],
+      overtimeRecords: [],
+      performanceRecords: [],
     };
   }
   try {
@@ -209,6 +264,9 @@ function loadLocalDb(): LocalDb {
         dependencies: [],
         boardSets: [],
         goals: [],
+        teamMembers: [],
+        overtimeRecords: [],
+        performanceRecords: [],
       };
     }
     const parsed = JSON.parse(raw) as Partial<LocalDb>;
@@ -269,6 +327,50 @@ function loadLocalDb(): LocalDb {
               position: typeof item.position === 'number' ? item.position : 0,
             }))
         : [],
+      teamMembers: Array.isArray(parsed.teamMembers)
+        ? parsed.teamMembers
+            .filter(
+              (item): item is TeamMember =>
+                Boolean(item) && typeof item.id === 'string' && typeof item.name === 'string',
+            )
+            .map((item) => ({
+              ...item,
+              role: normalizeMemberRole(item.role),
+              status: normalizeMemberStatus(item.status),
+              joinedAt: typeof item.joinedAt === 'string' ? item.joinedAt : '',
+              releasedAt: typeof item.releasedAt === 'string' ? item.releasedAt : null,
+              note: typeof item.note === 'string' ? item.note : '',
+            }))
+        : [],
+      overtimeRecords: Array.isArray(parsed.overtimeRecords)
+        ? parsed.overtimeRecords
+            .filter(
+              (item): item is OvertimeRecord =>
+                Boolean(item) && typeof item.id === 'string' && typeof item.memberId === 'string',
+            )
+            .map((item) => ({
+              ...item,
+              date: typeof item.date === 'string' ? item.date : '',
+              hours: typeof item.hours === 'number' ? item.hours : 0,
+              status: normalizeOvertimeStatus(item.status),
+              note: typeof item.note === 'string' ? item.note : '',
+            }))
+        : [],
+      performanceRecords: Array.isArray(parsed.performanceRecords)
+        ? parsed.performanceRecords
+            .filter(
+              (item): item is PerformanceRecord =>
+                Boolean(item) && typeof item.id === 'string' && typeof item.memberId === 'string',
+            )
+            .map((item) => ({
+              ...item,
+              date: typeof item.date === 'string' ? item.date : '',
+              points: typeof item.points === 'number' ? item.points : 0,
+              reason: typeof item.reason === 'string' ? item.reason : '',
+              category: normalizePerformanceCategory(item.category),
+              note: typeof item.note === 'string' ? item.note : '',
+            }))
+        : [],
     };
   } catch {
     return {
@@ -279,6 +381,9 @@ function loadLocalDb(): LocalDb {
       dependencies: [],
       boardSets: [],
       goals: [],
+      teamMembers: [],
+      overtimeRecords: [],
+      performanceRecords: [],
     };
   }
 }
@@ -350,6 +455,17 @@ function requireGoal(db: LocalDb, id: string): Goal {
   const goal = db.goals.find((item) => item.id === id);
   if (!goal) throw new Error(`目标不存在：${id}`);
   return goal;
+}
+
+function todayLocalDate(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
+}
+
+function requireTeamMember(db: LocalDb, id: string): TeamMember {
+  const member = db.teamMembers.find((item) => item.id === id);
+  if (!member) throw new Error(`项目成员不存在：${id}`);
+  return member;
 }
 
 function normalizeGoalCardIds(db: LocalDb, cardIds: string[]): string[] {
@@ -440,6 +556,13 @@ const localApi: TidelineApi = {
       ),
       goals: [...db.goals].sort(
         (a, b) => a.position - b.position || a.id.localeCompare(b.id),
+      ),
+      teamMembers: [...db.teamMembers].sort(
+        (a, b) => a.status.localeCompare(b.status) || a.joinedAt.localeCompare(b.joinedAt),
+      ),
+      overtimeRecords: [...db.overtimeRecords].sort((a, b) => b.date.localeCompare(a.date)),
+      performanceRecords: [...db.performanceRecords].sort((a, b) =>
+        b.date.localeCompare(a.date),
       ),
     };
   },
@@ -801,6 +924,9 @@ const localApi: TidelineApi = {
       dependencies: backup.dependencies,
       boardSets: backup.boardSets,
       goals: backup.goals,
+      teamMembers: backup.teamMembers,
+      overtimeRecords: backup.overtimeRecords,
+      performanceRecords: backup.performanceRecords,
     });
     return summarizeBackup(backup);
   },
@@ -922,6 +1048,150 @@ const localApi: TidelineApi = {
       throw new Error('只允许打开发布页链接');
     }
     window.open(url, '_blank', 'noopener,noreferrer');
+  },
+
+  async createTeamMember(input) {
+    const db = loadLocalDb();
+    const now = nowISO();
+    const member: TeamMember = {
+      id: createId('m'),
+      name: input.name.trim() || '未命名成员',
+      role: normalizeMemberRole(input.role),
+      status: 'active',
+      joinedAt: input.joinedAt?.trim() || todayLocalDate(),
+      releasedAt: null,
+      note: input.note ?? '',
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.teamMembers.push(member);
+    saveLocalDb(db);
+    return member;
+  },
+
+  async updateTeamMember({ id, patch }) {
+    const db = loadLocalDb();
+    const member = requireTeamMember(db, id);
+    if (patch.name !== undefined) member.name = patch.name.trim() || '未命名成员';
+    if (patch.role !== undefined) member.role = normalizeMemberRole(patch.role);
+    if (patch.status !== undefined) member.status = normalizeMemberStatus(patch.status);
+    if (patch.joinedAt !== undefined && patch.joinedAt.trim()) member.joinedAt = patch.joinedAt;
+    if (patch.releasedAt !== undefined) member.releasedAt = patch.releasedAt || null;
+    if (patch.note !== undefined) member.note = patch.note;
+    if (member.status === 'released' && !member.releasedAt) {
+      member.releasedAt = todayLocalDate();
+    }
+    if (member.status === 'active') member.releasedAt = null;
+    member.updatedAt = nowISO();
+    saveLocalDb(db);
+    return member;
+  },
+
+  async deleteTeamMember({ id }) {
+    const db = loadLocalDb();
+    db.teamMembers = db.teamMembers.filter((member) => member.id !== id);
+    db.overtimeRecords = db.overtimeRecords.filter((record) => record.memberId !== id);
+    db.performanceRecords = db.performanceRecords.filter((record) => record.memberId !== id);
+    saveLocalDb(db);
+  },
+
+  async createOvertime(input) {
+    const db = loadLocalDb();
+    requireTeamMember(db, input.memberId);
+    if (!Number.isFinite(input.hours) || input.hours <= 0) {
+      throw new Error('加班时长必须大于 0');
+    }
+    const now = nowISO();
+    const record: OvertimeRecord = {
+      id: createId('ot'),
+      memberId: input.memberId,
+      date: input.date || todayLocalDate(),
+      hours: Math.round(input.hours * 10) / 10,
+      status: normalizeOvertimeStatus(input.status),
+      note: input.note ?? '',
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.overtimeRecords.push(record);
+    saveLocalDb(db);
+    return record;
+  },
+
+  async updateOvertime({ id, patch }) {
+    const db = loadLocalDb();
+    const record = db.overtimeRecords.find((item) => item.id === id);
+    if (!record) throw new Error(`加班记录不存在：${id}`);
+    if (patch.memberId !== undefined) {
+      requireTeamMember(db, patch.memberId);
+      record.memberId = patch.memberId;
+    }
+    if (patch.date !== undefined && patch.date.trim()) record.date = patch.date;
+    if (patch.hours !== undefined) {
+      if (!Number.isFinite(patch.hours) || patch.hours <= 0) {
+        throw new Error('加班时长必须大于 0');
+      }
+      record.hours = Math.round(patch.hours * 10) / 10;
+    }
+    if (patch.status !== undefined) record.status = normalizeOvertimeStatus(patch.status);
+    if (patch.note !== undefined) record.note = patch.note;
+    record.updatedAt = nowISO();
+    saveLocalDb(db);
+    return record;
+  },
+
+  async deleteOvertime({ id }) {
+    const db = loadLocalDb();
+    db.overtimeRecords = db.overtimeRecords.filter((record) => record.id !== id);
+    saveLocalDb(db);
+  },
+
+  async createPerformance(input) {
+    const db = loadLocalDb();
+    requireTeamMember(db, input.memberId);
+    if (!Number.isFinite(input.points) || input.points === 0) {
+      throw new Error('绩效分值不能为 0');
+    }
+    const record: PerformanceRecord = {
+      id: createId('pf'),
+      memberId: input.memberId,
+      date: input.date || todayLocalDate(),
+      points: Math.max(-100, Math.min(100, Math.round(input.points))),
+      reason: input.reason.trim() || '绩效记录',
+      category: normalizePerformanceCategory(input.category),
+      note: input.note ?? '',
+      createdAt: nowISO(),
+    };
+    db.performanceRecords.push(record);
+    saveLocalDb(db);
+    return record;
+  },
+
+  async updatePerformance({ id, patch }) {
+    const db = loadLocalDb();
+    const record = db.performanceRecords.find((item) => item.id === id);
+    if (!record) throw new Error(`绩效记录不存在：${id}`);
+    if (patch.memberId !== undefined) {
+      requireTeamMember(db, patch.memberId);
+      record.memberId = patch.memberId;
+    }
+    if (patch.date !== undefined && patch.date.trim()) record.date = patch.date;
+    if (patch.points !== undefined) {
+      if (!Number.isFinite(patch.points) || patch.points === 0) {
+        throw new Error('绩效分值不能为 0');
+      }
+      record.points = Math.max(-100, Math.min(100, Math.round(patch.points)));
+    }
+    if (patch.reason !== undefined) record.reason = patch.reason.trim() || '绩效记录';
+    if (patch.category !== undefined) record.category = normalizePerformanceCategory(patch.category);
+    if (patch.note !== undefined) record.note = patch.note;
+    saveLocalDb(db);
+    return record;
+  },
+
+  async deletePerformance({ id }) {
+    const db = loadLocalDb();
+    db.performanceRecords = db.performanceRecords.filter((record) => record.id !== id);
+    saveLocalDb(db);
   },
 
   async getAutoStart() {

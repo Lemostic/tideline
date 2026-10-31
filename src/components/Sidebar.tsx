@@ -19,6 +19,7 @@ const WORKSPACE_NAV: NavEntry[] = [
   { to: '/dashboard', label: '仪表盘', icon: 'chart' },
   { to: '/board-sets', label: '看板集', icon: 'layers' },
   { to: '/goals', label: '目标', icon: 'target' },
+  { to: '/team', label: '项目组', icon: 'users' },
   { to: '/data', label: '数据备份', icon: 'database' },
   { to: '/settings', label: '设置', icon: 'sliders' },
 ];

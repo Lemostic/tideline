@@ -16,6 +16,7 @@ import { GoalsPage } from '@/pages/GoalsPage';
 import { InboxPage } from '@/pages/InboxPage';
 import { MyTasksPage } from '@/pages/MyTasksPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { TeamPage } from '@/pages/TeamPage';
 import { TemplatesPage } from '@/pages/TemplatesPage';
 import { TrashPage } from '@/pages/TrashPage';
 import { WorkbenchPage } from '@/pages/WorkbenchPage';
@@ -86,6 +87,7 @@ export default function App() {
               <Route path="/board-sets/:setId" element={<BoardSetDetailPage />} />
               <Route path="/goals" element={<GoalsPage />} />
               <Route path="/goals/:goalId" element={<GoalDetailPage />} />
+              <Route path="/team" element={<TeamPage />} />
               <Route path="*" element={<WorkbenchPage />} />
             </Routes>
           </div>

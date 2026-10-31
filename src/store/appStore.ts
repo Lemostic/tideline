@@ -26,7 +26,16 @@ import type {
   NewBoardSetInput,
   NewCardInput,
   NewGoalInput,
+  NewOvertimeInput,
+  NewPerformanceInput,
+  NewTeamMemberInput,
+  OvertimePatch,
+  OvertimeRecord,
+  PerformancePatch,
+  PerformanceRecord,
   Snapshot,
+  TeamMember,
+  TeamMemberPatch,
 } from '@/lib/types';
 
 const EMPTY_SNAPSHOT: Snapshot = {
@@ -37,6 +46,9 @@ const EMPTY_SNAPSHOT: Snapshot = {
   dependencies: [],
   boardSets: [],
   goals: [],
+  teamMembers: [],
+  overtimeRecords: [],
+  performanceRecords: [],
 };
 const SEED_FLAG = 'tideline.seeded';
 
@@ -69,6 +81,16 @@ export interface AppState {
   createGoal: (input: NewGoalInput) => Promise<Goal>;
   updateGoal: (id: string, patch: GoalPatch) => Promise<void>;
   deleteGoal: (id: string) => Promise<void>;
+
+  createTeamMember: (input: NewTeamMemberInput) => Promise<TeamMember>;
+  updateTeamMember: (id: string, patch: TeamMemberPatch) => Promise<void>;
+  deleteTeamMember: (id: string) => Promise<void>;
+  createOvertime: (input: NewOvertimeInput) => Promise<OvertimeRecord>;
+  updateOvertime: (id: string, patch: OvertimePatch) => Promise<void>;
+  deleteOvertime: (id: string) => Promise<void>;
+  createPerformance: (input: NewPerformanceInput) => Promise<PerformanceRecord>;
+  updatePerformance: (id: string, patch: PerformancePatch) => Promise<void>;
+  deletePerformance: (id: string) => Promise<void>;
 
   createList: (boardId: string, title: string) => Promise<List>;
   updateList: (id: string, patch: ListPatch) => Promise<void>;
@@ -192,6 +214,9 @@ export const useAppStore = create<AppState>((set, get) => {
                 ...goal,
                 cardIds: goal.cardIds.filter((cardId) => !removedCardIds.has(cardId)),
               })),
+              teamMembers: state.snapshot.teamMembers,
+              overtimeRecords: state.snapshot.overtimeRecords,
+              performanceRecords: state.snapshot.performanceRecords,
             },
           };
         });
@@ -275,6 +300,149 @@ export const useAppStore = create<AppState>((set, get) => {
             goals: state.snapshot.goals
               .filter((item) => item.id !== id)
               .map((item) => (item.parentId === id ? { ...item, parentId: null } : item)),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    createTeamMember: async (input) => {
+      try {
+        const member = await api.createTeamMember(input);
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            teamMembers: [...state.snapshot.teamMembers, member],
+          },
+        }));
+        return member;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateTeamMember: async (id, patch) => {
+      try {
+        const member = await api.updateTeamMember({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            teamMembers: state.snapshot.teamMembers.map((item) =>
+              item.id === id ? member : item,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteTeamMember: async (id) => {
+      try {
+        await api.deleteTeamMember({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            teamMembers: state.snapshot.teamMembers.filter((item) => item.id !== id),
+            overtimeRecords: state.snapshot.overtimeRecords.filter(
+              (item) => item.memberId !== id,
+            ),
+            performanceRecords: state.snapshot.performanceRecords.filter(
+              (item) => item.memberId !== id,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    createOvertime: async (input) => {
+      try {
+        const record = await api.createOvertime(input);
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            overtimeRecords: [record, ...state.snapshot.overtimeRecords],
+          },
+        }));
+        return record;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateOvertime: async (id, patch) => {
+      try {
+        const record = await api.updateOvertime({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            overtimeRecords: state.snapshot.overtimeRecords.map((item) =>
+              item.id === id ? record : item,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteOvertime: async (id) => {
+      try {
+        await api.deleteOvertime({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            overtimeRecords: state.snapshot.overtimeRecords.filter((item) => item.id !== id),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    createPerformance: async (input) => {
+      try {
+        const record = await api.createPerformance(input);
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            performanceRecords: [record, ...state.snapshot.performanceRecords],
+          },
+        }));
+        return record;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updatePerformance: async (id, patch) => {
+      try {
+        const record = await api.updatePerformance({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            performanceRecords: state.snapshot.performanceRecords.map((item) =>
+              item.id === id ? record : item,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deletePerformance: async (id) => {
+      try {
+        await api.deletePerformance({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            performanceRecords: state.snapshot.performanceRecords.filter(
+              (item) => item.id !== id,
+            ),
           },
         }));
       } catch (error) {
