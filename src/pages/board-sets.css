@@ -31,8 +31,8 @@
 
 .board-sets-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--card-min-width, 252px)), 1fr));
+  gap: var(--card-gap, 14px);
 }
 
 .board-set-card {

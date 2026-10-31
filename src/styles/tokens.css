@@ -70,6 +70,12 @@
   --sidebar-w: 232px;
   --topbar-h: 56px;
 
+  /* 全局卡片尺寸：模板中心 / 工作台看板 / 看板集等画廊统一引用 */
+  --card-min-width: 252px;
+  --card-gap: 14px;
+  --card-min-height: 140px;
+  --card-cover-height: 98px;
+
   /* 动效 */
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
   --transition: 150ms var(--ease);

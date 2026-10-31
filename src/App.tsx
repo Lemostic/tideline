@@ -21,6 +21,7 @@ import { TemplatesPage } from '@/pages/TemplatesPage';
 import { TrashPage } from '@/pages/TrashPage';
 import { WorkbenchPage } from '@/pages/WorkbenchPage';
 import { useAppStore } from '@/store/appStore';
+import { applyCardSize } from '@/lib/cardLayout';
 import { applyTheme } from '@/lib/theme';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
@@ -34,6 +35,7 @@ export default function App() {
   const openSearch = useUiStore((state) => state.openSearch);
   const themeId = useSettingsStore((state) => state.themeId);
   const customTheme = useSettingsStore((state) => state.customTheme);
+  const cardSize = useSettingsStore((state) => state.cardSize);
 
   useEffect(() => {
     void init();
@@ -42,6 +44,10 @@ export default function App() {
   useEffect(() => {
     applyTheme(themeId, customTheme);
   }, [themeId, customTheme]);
+
+  useEffect(() => {
+    applyCardSize(cardSize);
+  }, [cardSize]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

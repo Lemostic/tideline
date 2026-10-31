@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { Modal } from '@/components/Modal';
 import { api } from '@/lib/api';
+import { CARD_SIZE_OPTIONS } from '@/lib/cardLayout';
 import { DEFAULT_CUSTOM_THEME, THEME_PRESETS, type ThemeBaseColors } from '@/lib/theme';
 import { formatRelativeTime } from '@/lib/date';
 import { RELEASES_PAGE } from '@/lib/update';
@@ -284,6 +285,27 @@ export function SettingsPage() {
             >
               <option value={1}>周一</option>
               <option value={0}>周日</option>
+            </select>
+          </label>
+
+          <label className="settings-row">
+            <span className="settings-row-label">
+              <span>卡片尺寸</span>
+              <span className="settings-row-hint">统一影响模板中心、工作台看板卡片与看板集卡片</span>
+            </span>
+            <select
+              className="select settings-select"
+              value={settings.cardSize}
+              onChange={(event) =>
+                settings.update({ cardSize: event.target.value as typeof settings.cardSize })
+              }
+              aria-label="卡片尺寸"
+            >
+              {CARD_SIZE_OPTIONS.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
 

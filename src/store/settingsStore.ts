@@ -7,6 +7,11 @@
 import { create } from 'zustand';
 import type { BoardView } from '@/lib/types';
 import {
+  DEFAULT_CARD_SIZE,
+  normalizeCardSize,
+  type CardSize,
+} from '@/lib/cardLayout';
+import {
   DEFAULT_CUSTOM_THEME,
   DEFAULT_THEME_ID,
   normalizeCustomTheme,
@@ -36,6 +41,8 @@ export interface Settings {
   customTheme: ThemeBaseColors;
   /** 默认主题迁移版本：旧版板栗鹅黄默认值一次性升级为雾蓝白 */
   themeDefaultVersion: number;
+  /** 全局卡片尺寸，卡片画廊统一引用 */
+  cardSize: CardSize;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -48,6 +55,7 @@ export const DEFAULT_SETTINGS: Settings = {
   themeId: DEFAULT_THEME_ID,
   customTheme: DEFAULT_CUSTOM_THEME,
   themeDefaultVersion: 2,
+  cardSize: DEFAULT_CARD_SIZE,
 };
 
 const STORAGE_KEY = 'tideline.settings.v1';
@@ -84,6 +92,7 @@ function normalize(raw: unknown): Settings {
     themeId,
     customTheme,
     themeDefaultVersion: 2,
+    cardSize: normalizeCardSize(value.cardSize),
   };
 }
 

@@ -87,8 +87,8 @@
 /* ---------- 模板网格 ---------- */
 .tmpl-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--card-min-width, 252px)), 1fr));
+  gap: var(--card-gap, 14px);
 }
 
 .tmpl-card {
@@ -124,7 +124,7 @@
   position: relative;
   display: grid;
   place-items: center;
-  height: 98px;
+  height: var(--card-cover-height, 98px);
   overflow: hidden;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(135deg, var(--tmpl-soft, #f4f7f3) 0%, #ffffff 96%);
@@ -411,8 +411,11 @@
 /* ---------- 响应式与动效偏好 ---------- */
 @media (max-width: 1080px) {
   .tmpl-grid {
-    grid-template-columns: repeat(auto-fill, minmax(218px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(
+      auto-fill,
+      minmax(min(100%, var(--card-min-width, 252px)), 1fr)
+    );
+    gap: var(--card-gap, 14px);
   }
 }
 

@@ -39,8 +39,8 @@
 /* ---------- 看板网格 ---------- */
 .home-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(252px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--card-min-width, 252px)), 1fr));
+  gap: var(--card-gap, 14px);
 }
 
 /* ---------- 看板卡片 ---------- */
@@ -48,7 +48,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 140px;
+  min-height: var(--card-min-height, 140px);
   padding: 15px 14px 13px 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -363,8 +363,11 @@
 /* ---------- 响应式与动效偏好 ---------- */
 @media (max-width: 1080px) {
   .home-grid {
-    grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(
+      auto-fill,
+      minmax(min(100%, var(--card-min-width, 252px)), 1fr)
+    );
+    gap: var(--card-gap, 14px);
   }
 }
 
