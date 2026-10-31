@@ -1162,6 +1162,68 @@ mod tests {
     }
 
     #[test]
+    fn automation_data_round_trips_through_backup() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        let card = seed(&mut conn);
+        crate::automation::create_recurrence(
+            &mut conn,
+            crate::models::NewRecurrenceInput {
+                card_id: card.id.clone(),
+                frequency: crate::models::RecurrenceFrequency::Daily,
+                interval_value: None,
+                weekdays: None,
+                next_due_date: None,
+            },
+        )
+        .expect("创建重复配置");
+        crate::automation::create_automation_rule(
+            &mut conn,
+            crate::models::NewAutomationRuleInput {
+                name: "备份规则".to_string(),
+                trigger: crate::models::RuleTrigger::Complete,
+                list_id: None,
+                actions: vec![crate::models::RuleAction {
+                    kind: crate::models::RuleActionKind::AddLabels,
+                    offset_days: 0,
+                    priority: None,
+                    labels: vec!["研发".to_string()],
+                    subtasks: Vec::new(),
+                }],
+                enabled: Some(true),
+            },
+        )
+        .expect("创建规则");
+
+        let backup = build(&conn).expect("构建备份");
+        assert_eq!(backup.summary().recurrences, 1);
+        assert_eq!(backup.summary().automation_rules, 1);
+
+        let restored = restore(&mut conn, &backup).expect("恢复备份");
+        assert_eq!(restored.recurrences, 1);
+        assert_eq!(restored.automation_rules, 1);
+        let snapshot = repo::get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.recurrences.len(), 1);
+        assert_eq!(snapshot.automation_rules.len(), 1);
+        assert!(snapshot.automation_rules[0].enabled, "规则启用状态应随备份恢复");
+    }
+
+    #[test]
+    fn backup_without_automation_fields_is_accepted() {
+        // V0.10 备份没有 recurrences / automationRules / cardActivity 字段，
+        // 反序列化后应按空集合处理，不影响恢复。
+        let mut conn = db::open_in_memory().expect("内存库");
+        seed(&mut conn);
+        let mut backup = build(&conn).expect("构建备份");
+        backup.recurrences.clear();
+        backup.automation_rules.clear();
+        backup.card_activity.clear();
+        validate(&backup).expect("校验应通过");
+        let restored = restore(&mut conn, &backup).expect("恢复备份");
+        assert_eq!(restored.recurrences, 0);
+        assert_eq!(restored.automation_rules, 0);
+    }
+
+    #[test]
     fn invalid_dependency_backup_is_rejected() {
         let mut conn = db::open_in_memory().expect("内存库");
         seed(&mut conn);

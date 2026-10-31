@@ -393,4 +393,121 @@ mod tests {
         assert!(!mark_delivered(&conn, KIND_DUE, "2026-01-01", "c_1").expect("重复投递"));
         assert!(mark_delivered(&conn, KIND_DUE, "2026-01-02", "c_1").expect("次日投递"));
     }
+
+    fn settings(due: bool, overdue: bool, lead_days: i64) -> NotificationSettings {
+        NotificationSettings {
+            due_enabled: due,
+            overdue_enabled: overdue,
+            daily_summary_enabled: false,
+            daily_summary_time: "09:00".to_string(),
+            lead_days,
+            updated_at: String::new(),
+        }
+    }
+
+    fn seed_card(conn: &mut rusqlite::Connection, title: &str, due_date: &str) -> String {
+        let board = crate::repo::create_board(
+            conn,
+            crate::models::NewBoardInput {
+                title: "提醒测试".to_string(),
+                description: None,
+                color: None,
+            },
+        )
+        .expect("创建看板");
+        let list = crate::repo::create_list(
+            conn,
+            crate::models::NewListInput {
+                board_id: board.id.clone(),
+                title: "待办".to_string(),
+                color: None,
+                wip_limit: None,
+            },
+        )
+        .expect("创建待办列");
+        let card = crate::repo::create_card(
+            conn,
+            crate::models::NewCardInput {
+                board_id: board.id.clone(),
+                list_id: list.id.clone(),
+                title: title.to_string(),
+                description: None,
+                due_date: Some(due_date.to_string()),
+                start_date: None,
+                priority: None,
+                accent: None,
+                labels: None,
+                subtasks: None,
+            },
+        )
+        .expect("创建任务");
+        card.id
+    }
+
+    #[test]
+    fn due_reminders_respect_switches_and_lead_days() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        seed_card(&mut conn, "今天到期", "2026-01-05");
+        seed_card(&mut conn, "两天后到期", "2026-01-07");
+        seed_card(&mut conn, "很久以后", "2026-03-01");
+
+        // 全部关闭时不产生提醒
+        let none = collect_due_reminders(&conn, &settings(false, false, 1), "2026-01-05")
+            .expect("收集提醒");
+        assert!(none.is_empty(), "提醒开关全关时不应产生提醒");
+
+        // 只开到期：今天到期与两天后（lead_days=2）命中
+        let due = collect_due_reminders(&conn, &settings(true, false, 2), "2026-01-05")
+            .expect("收集提醒");
+        let titles: Vec<String> = due.iter().map(|item| item.title.clone()).collect();
+        assert!(titles.contains(&"今天到期".to_string()));
+        assert!(titles.contains(&"两天后到期".to_string()));
+        assert!(!titles.contains(&"很久以后".to_string()));
+        assert!(due.iter().all(|item| item.kind == KIND_DUE));
+    }
+
+    #[test]
+    fn overdue_reminders_only_fire_for_past_due_dates() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        seed_card(&mut conn, "已经逾期", "2026-01-01");
+        seed_card(&mut conn, "还没到期", "2026-01-05");
+
+        let overdue = collect_due_reminders(&conn, &settings(false, true, 1), "2026-01-05")
+            .expect("收集提醒");
+        assert_eq!(overdue.len(), 1, "只有逾期的任务应该提醒");
+        assert_eq!(overdue[0].kind, KIND_OVERDUE);
+        assert_eq!(overdue[0].title, "已经逾期");
+    }
+
+    #[test]
+    fn completed_tasks_are_not_reminded() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let card_id = seed_card(&mut conn, "已完成的任务", "2026-01-05");
+        crate::repo::update_card(
+            &mut conn,
+            crate::models::UpdateCardInput {
+                id: card_id,
+                patch: crate::models::CardPatch {
+                    completed: Some(true),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("标记完成");
+
+        let reminders = collect_due_reminders(&conn, &settings(true, true, 1), "2026-01-05")
+            .expect("收集提醒");
+        assert!(reminders.is_empty(), "已完成的任务不应再提醒");
+    }
+
+    #[test]
+    fn default_settings_keep_every_switch_off() {
+        let conn = crate::db::open_in_memory().expect("内存库");
+        let settings = get_settings(&conn).expect("读取设置");
+        assert!(!settings.due_enabled);
+        assert!(!settings.overdue_enabled);
+        assert!(!settings.daily_summary_enabled);
+        assert_eq!(settings.daily_summary_time, "09:00");
+        assert_eq!(settings.lead_days, 1);
+    }
 }

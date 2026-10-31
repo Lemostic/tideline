@@ -1360,7 +1360,43 @@ mod tests {
     }
 
     #[test]
-    fn rule_action_appends_labels_and_subtasks() {
+    fn rule_defaults_to_disabled() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let (_, _, doing_id, card_id) = seed(&mut conn);
+        let rule = create_automation_rule(
+            &mut conn,
+            NewAutomationRuleInput {
+                name: "默认关闭".to_string(),
+                trigger: RuleTrigger::MoveToList,
+                list_id: Some(doing_id.clone()),
+                actions: vec![RuleAction {
+                    kind: RuleActionKind::AddLabels,
+                    offset_days: 0,
+                    priority: None,
+                    labels: vec!["研发".to_string()],
+                    subtasks: Vec::new(),
+                }],
+                enabled: None,
+            },
+        )
+        .expect("创建规则");
+        assert!(!rule.enabled, "新建规则默认应关闭");
+
+        crate::repo::move_card(
+            &mut conn,
+            crate::models::MoveCardInput {
+                card_id: card_id.clone(),
+                to_list_id: doing_id.clone(),
+                to_index: 0,
+            },
+        )
+        .expect("移动任务");
+        let card = crate::repo::get_card(&conn, &card_id).expect("读取任务");
+        assert!(card.labels.is_empty(), "关闭的规则不应执行");
+    }
+
+    #[test]
+    fn rule_action_appplies_labels_and_subtasks() {
         let mut conn = crate::db::open_in_memory().expect("内存库");
         let (_, _, doing_id, card_id) = seed(&mut conn);
         create_automation_rule(
