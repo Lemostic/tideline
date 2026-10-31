@@ -1,7 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { DatePicker } from '@/components/DatePicker';
 import { Icon } from '@/components/Icon';
 import { EmptyState, Modal } from '@/components/Modal';
+import {
+  diffDays,
+  endOfWeek,
+  formatMonthDay,
+  parseDateKey,
+  startOfWeek,
+  toDateKey,
+} from '@/lib/date';
 import {
   isWeekend,
   monthKey,
@@ -33,6 +42,7 @@ import type {
   TeamMember,
 } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import './team.css';
 
 function todayLocalDate(): string {
@@ -110,6 +120,51 @@ export function ProjectDetailPage() {
   const roles = projectRolesOf(snapshot.projectRoles, project.id);
   const overtime = projectOvertime(snapshot.overtimeRecords, project.id);
   const performance = projectPerformance(snapshot.performanceRecords, project.id);
+  const weekStartsOn = useSettingsStore((state) => state.weekStartsOn);
+
+  const overtimeGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        startKey: string;
+        endKey: string;
+        records: Array<(typeof overtime)[number]>;
+      }
+    >();
+    for (const record of overtime) {
+      const date = parseDateKey(record.date);
+      if (!date) continue;
+      const start = startOfWeek(date, weekStartsOn);
+      const startKey = toDateKey(start);
+      const endKey = toDateKey(endOfWeek(date, weekStartsOn));
+      const existing = groups.get(startKey);
+      if (existing) existing.records.push(record);
+      else groups.set(startKey, { startKey, endKey, records: [record] });
+    }
+    const thisWeekStart = toDateKey(startOfWeek(new Date(), weekStartsOn));
+    return [...groups.entries()]
+      .map(([key, group]) => {
+        const weekOffset = diffDays(thisWeekStart, key);
+        const relative =
+          weekOffset === 0
+            ? '本周'
+            : weekOffset === 7
+              ? '下周'
+              : weekOffset === -7
+                ? '上周'
+                : '';
+        const records = [...group.records].sort((a, b) => a.date.localeCompare(b.date));
+        return {
+          key,
+          startKey: group.startKey,
+          endKey: group.endKey,
+          relative,
+          records,
+          totalHours: records.reduce((sum, record) => sum + record.hours, 0),
+        };
+      })
+      .sort((a, b) => b.startKey.localeCompare(a.startKey));
+  }, [overtime, weekStartsOn]);
   const meta = projectMeta(snapshot.projectMetaFields, project.id);
   const active = members.filter((member) => member.status === 'active');
   const released = members.filter((member) => member.status === 'released');
@@ -482,22 +537,20 @@ export function ProjectDetailPage() {
             </label>
             <label>
               从
-              <input
-                className="input"
-                type="date"
+              <DatePicker
                 value={tenureFrom}
-                onChange={(event) => setTenureFrom(event.target.value)}
-                aria-label="投入记录开始日期"
+                onChange={setTenureFrom}
+                ariaLabel="投入记录开始日期"
+                placeholder="开始日期"
               />
             </label>
             <label>
               到
-              <input
-                className="input"
-                type="date"
+              <DatePicker
                 value={tenureTo}
-                onChange={(event) => setTenureTo(event.target.value)}
-                aria-label="投入记录结束日期"
+                onChange={setTenureTo}
+                ariaLabel="投入记录结束日期"
+                placeholder="结束日期"
               />
             </label>
             {tenureMemberFilter || tenureFrom || tenureTo ? (
@@ -635,56 +688,80 @@ export function ProjectDetailPage() {
               />
             </div>
           ) : (
-            <div className="team-records">
-              {overtime.map((record) => {
-                const member = memberById.get(record.memberId);
-                return (
-                  <article className={`team-record${record.status === 'done' ? ' is-done' : ''}`} key={record.id}>
-                    <div className="team-record-date">
-                      <strong>{record.date.slice(5).replace('-', '/')}</strong>
-                      <span className={isWeekend(record.date) ? 'is-weekend' : ''}>
-                        {isWeekend(record.date) ? '周末' : '工作日'}
+            <div className="overtime-weeks">
+              {overtimeGroups.map((group) => (
+                <section className="overtime-week" key={group.key}>
+                  <div className="overtime-week-head">
+                    <div className="overtime-week-title">
+                      <span className="overtime-week-range">
+                        {formatMonthDay(group.startKey)} – {formatMonthDay(group.endKey)}
                       </span>
-                    </div>
-                    <div className="team-record-main">
-                      <div className="team-record-title">
-                        {member?.name ?? '未知成员'}
-                        <span className={`team-ot-status status-${record.status}`}>
-                          {record.status === 'planned' ? '排班' : '已发生'}
+                      {group.relative ? (
+                        <span className={`overtime-week-badge${group.relative === '本周' ? ' is-current' : ''}`}>
+                          {group.relative}
                         </span>
-                      </div>
-                      <div className="team-record-meta">
-                        <span>{record.hours} 小时</span>
-                        {record.note ? <span>{record.note}</span> : null}
-                      </div>
+                      ) : null}
                     </div>
-                    <div className="team-record-actions">
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() =>
-                          void updateOvertime(record.id, {
-                            status: record.status === 'planned' ? 'done' : 'planned',
-                          }).catch(() => undefined)
-                        }
-                      >
-                        {record.status === 'planned' ? '标记已发生' : '改回排班'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-icon"
-                        aria-label="删除加班记录"
-                        onClick={() => {
-                          if (!window.confirm('确认删除这条加班记录？')) return;
-                          void deleteOvertime(record.id).catch(() => undefined);
-                        }}
-                      >
-                        <Icon name="trash" size={13} />
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
+                    <span className="overtime-week-total">
+                      {group.records.length} 条 · {group.totalHours}h
+                    </span>
+                  </div>
+                  <div className="team-records">
+                    {group.records.map((record) => {
+                      const member = memberById.get(record.memberId);
+                      return (
+                        <article
+                          className={`team-record${record.status === 'done' ? ' is-done' : ''}`}
+                          key={record.id}
+                        >
+                          <div className="team-record-date">
+                            <strong>{record.date.slice(5).replace('-', '/')}</strong>
+                            <span className={isWeekend(record.date) ? 'is-weekend' : ''}>
+                              {isWeekend(record.date) ? '周末' : '工作日'}
+                            </span>
+                          </div>
+                          <div className="team-record-main">
+                            <div className="team-record-title">
+                              {member?.name ?? '未知成员'}
+                              <span className={`team-ot-status status-${record.status}`}>
+                                {record.status === 'planned' ? '排班' : '已发生'}
+                              </span>
+                            </div>
+                            <div className="team-record-meta">
+                              <span>{record.hours} 小时</span>
+                              {record.note ? <span>{record.note}</span> : null}
+                            </div>
+                          </div>
+                          <div className="team-record-actions">
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() =>
+                                void updateOvertime(record.id, {
+                                  status: record.status === 'planned' ? 'done' : 'planned',
+                                }).catch(() => undefined)
+                              }
+                            >
+                              {record.status === 'planned' ? '标记已发生' : '改回排班'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-icon"
+                              aria-label="删除加班记录"
+                              onClick={() => {
+                                if (!window.confirm('确认删除这条加班记录？')) return;
+                                void deleteOvertime(record.id).catch(() => undefined);
+                              }}
+                            >
+                              <Icon name="trash" size={13} />
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
         </section>
@@ -972,7 +1049,7 @@ function MemberModal({
 }) {
   const [name, setName] = useState('');
   const [roleId, setRoleId] = useState('');
-  const [joinedAt, setJoinedAt] = useState(todayLocalDate());
+  const [joinedAt, setJoinedAt] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -981,7 +1058,7 @@ function MemberModal({
     if (!open) return;
     setName(member?.name ?? '');
     setRoleId(member?.roleId ?? roles[0]?.id ?? '');
-    setJoinedAt(member?.joinedAt ?? todayLocalDate());
+    setJoinedAt(member?.joinedAt ?? '');
     setNote(member?.note ?? '');
     setBusy(false);
     setError(null);
@@ -997,6 +1074,10 @@ function MemberModal({
     }
     if (!roleId) {
       setError('请选择角色');
+      return;
+    }
+    if (!joinedAt) {
+      setError('请选择入组日期');
       return;
     }
     setBusy(true);
@@ -1055,13 +1136,11 @@ function MemberModal({
           </label>
           <label className="team-form-field">
             <span>入组日期{member ? '（在投入记录中维护）' : ''}</span>
-            <input
-              className="input"
-              type="date"
+            <DatePicker
               value={joinedAt}
+              onChange={setJoinedAt}
               disabled={member !== null}
-              onChange={(event) => setJoinedAt(event.target.value)}
-              aria-label="项目成员入组日期"
+              ariaLabel="项目成员入组日期"
             />
           </label>
         </div>
@@ -1104,7 +1183,7 @@ function OvertimeModal({
   }) => Promise<void>;
 }) {
   const [memberId, setMemberId] = useState('');
-  const [date, setDate] = useState(todayLocalDate());
+  const [date, setDate] = useState('');
   const [hours, setHours] = useState('8');
   const [status, setStatus] = useState<OvertimeStatus>('planned');
   const [note, setNote] = useState('');
@@ -1114,7 +1193,7 @@ function OvertimeModal({
   useEffect(() => {
     if (!open) return;
     setMemberId(members[0]?.id ?? '');
-    setDate(todayLocalDate());
+    setDate('');
     setHours('8');
     setStatus('planned');
     setNote('');
@@ -1126,6 +1205,10 @@ function OvertimeModal({
 
   const submit = async () => {
     if (busy) return;
+    if (!date) {
+      setError('请选择加班日期');
+      return;
+    }
     const parsed = Number(hours);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       setError('请填写大于 0 的加班时长');
@@ -1175,13 +1258,7 @@ function OvertimeModal({
           </label>
           <label className="team-form-field">
             <span>日期</span>
-            <input
-              className="input"
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              aria-label="加班日期"
-            />
+            <DatePicker value={date} onChange={setDate} ariaLabel="加班日期" />
           </label>
           <label className="team-form-field">
             <span>时长（小时）</span>
@@ -1209,8 +1286,12 @@ function OvertimeModal({
             </select>
           </label>
         </div>
-        <p className={`team-weekend-note${isWeekend(date) ? ' is-weekend' : ''}`}>
-          {isWeekend(date) ? '这一天是周末，适合安排加班。' : '提示：这一天不是周末，仍可记录调休/工作日加班。'}
+        <p className={`team-weekend-note${date && isWeekend(date) ? ' is-weekend' : ''}`}>
+          {!date
+            ? '选择日期后会自动判断是否为周末。'
+            : isWeekend(date)
+              ? '这一天是周末，适合安排加班。'
+              : '提示：这一天不是周末，仍可记录调休/工作日加班。'}
         </p>
         <label className="team-form-field">
           <span>备注</span>
@@ -1247,7 +1328,7 @@ function PerformanceModal({
   }) => Promise<void>;
 }) {
   const [memberId, setMemberId] = useState('');
-  const [date, setDate] = useState(todayLocalDate());
+  const [date, setDate] = useState('');
   const [points, setPoints] = useState('5');
   const [category, setCategory] = useState<PerformanceCategory>('delivery');
   const [reason, setReason] = useState('');
@@ -1258,7 +1339,7 @@ function PerformanceModal({
   useEffect(() => {
     if (!open) return;
     setMemberId(members[0]?.id ?? '');
-    setDate(todayLocalDate());
+    setDate('');
     setPoints('5');
     setCategory('delivery');
     setReason('');
@@ -1271,6 +1352,10 @@ function PerformanceModal({
 
   const submit = async () => {
     if (busy) return;
+    if (!date) {
+      setError('请选择绩效日期');
+      return;
+    }
     const value = Number(points);
     if (!Number.isFinite(value) || value === 0) {
       setError('绩效分值不能为 0，加分填正数、减分填负数');
@@ -1331,13 +1416,7 @@ function PerformanceModal({
           </label>
           <label className="team-form-field">
             <span>日期</span>
-            <input
-              className="input"
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              aria-label="绩效日期"
-            />
+            <DatePicker value={date} onChange={setDate} ariaLabel="绩效日期" />
           </label>
           <label className="team-form-field">
             <span>分值（可负）</span>
@@ -1415,7 +1494,7 @@ function TenureModal({
   }) => Promise<void>;
 }) {
   const [memberId, setMemberId] = useState('');
-  const [startedAt, setStartedAt] = useState(todayLocalDate());
+  const [startedAt, setStartedAt] = useState('');
   const [endedAt, setEndedAt] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1424,7 +1503,7 @@ function TenureModal({
   useEffect(() => {
     if (!open) return;
     setMemberId(tenure?.memberId || defaultMemberId || members[0]?.id || '');
-    setStartedAt(tenure?.startedAt ?? todayLocalDate());
+    setStartedAt(tenure?.startedAt ?? '');
     setEndedAt(tenure?.endedAt ?? '');
     setNote(tenure?.note ?? '');
     setBusy(false);
@@ -1498,22 +1577,15 @@ function TenureModal({
         <div className="team-form-grid">
           <label className="team-form-field">
             <span>入组日期 / 开始</span>
-            <input
-              className="input"
-              type="date"
-              value={startedAt}
-              onChange={(event) => setStartedAt(event.target.value)}
-              aria-label="投入记录开始"
-            />
+            <DatePicker value={startedAt} onChange={setStartedAt} ariaLabel="投入记录开始" />
           </label>
           <label className="team-form-field">
             <span>出组日期 / 结束（留空=至今）</span>
-            <input
-              className="input"
-              type="date"
+            <DatePicker
               value={endedAt}
-              onChange={(event) => setEndedAt(event.target.value)}
-              aria-label="投入记录结束"
+              onChange={setEndedAt}
+              ariaLabel="投入记录结束"
+              placeholder="留空表示至今"
             />
           </label>
         </div>

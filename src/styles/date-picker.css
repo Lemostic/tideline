@@ -1,0 +1,189 @@
+/* 全局日期选择器（V0.8.15）：轻量 input + 自定义日历弹层 */
+.date-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.date-picker-input {
+  width: 100%;
+  min-width: 0;
+  padding-right: 30px;
+  font-variant-numeric: tabular-nums;
+}
+
+.date-picker-input::placeholder {
+  color: var(--faint);
+}
+
+.date-picker-trigger {
+  position: absolute;
+  right: 3px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  place-items: center;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+}
+
+.date-picker-trigger:hover {
+  background: var(--surface-sunken);
+  color: var(--ink-2);
+}
+
+.date-picker.is-disabled {
+  opacity: 0.55;
+}
+
+.date-picker.is-disabled .date-picker-trigger {
+  cursor: not-allowed;
+}
+
+.date-picker-pop {
+  position: fixed;
+  z-index: 400;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: date-picker-in 120ms var(--ease);
+}
+
+@keyframes date-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+.date-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 2px 8px;
+}
+
+.date-picker-head strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.date-picker-nav {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  place-items: center;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.date-picker-nav:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.date-picker-weekdays,
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.date-picker-weekdays {
+  margin-bottom: 3px;
+}
+
+.date-picker-weekdays span {
+  display: grid;
+  height: 22px;
+  place-items: center;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.date-picker-day {
+  display: grid;
+  height: 29px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  place-items: center;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.date-picker-day:hover {
+  background: var(--surface-hover);
+}
+
+.date-picker-day.is-outside {
+  color: var(--faint);
+  opacity: 0.55;
+}
+
+.date-picker-day.is-today {
+  box-shadow: inset 0 0 0 1px var(--primary-soft-2);
+  color: var(--primary-strong);
+  font-weight: 650;
+}
+
+.date-picker-day.is-selected {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: none;
+  font-weight: 650;
+}
+
+.date-picker-day.is-selected:hover {
+  background: var(--primary-strong);
+}
+
+.date-picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.date-picker-today,
+.date-picker-clear {
+  height: 25px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.date-picker-today:hover,
+.date-picker-clear:hover {
+  border-color: var(--line-strong);
+  color: var(--ink-2);
+}
+
+.date-picker-clear {
+  color: var(--danger);
+}

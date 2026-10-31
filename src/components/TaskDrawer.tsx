@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { DatePicker } from '@/components/DatePicker';
 import { Icon } from '@/components/Icon';
 import { formatDateCN, formatRelativeTime, todayKey } from '@/lib/date';
 import { blockersFor, dependencyCandidates } from '@/lib/dependencies';
@@ -405,12 +406,11 @@ export function TaskDrawer() {
                 开始日期
               </div>
               <div className="meta-value">
-                <input
-                  className="input"
-                  type="date"
+                <DatePicker
                   value={card.startDate ?? ''}
-                  onChange={(event) => changeStartDate(event.target.value)}
-                  aria-label="开始日期"
+                  onChange={changeStartDate}
+                  ariaLabel="开始日期"
+                  placeholder="选择开始日期"
                 />
                 {card.startDate ? (
                   <button
@@ -420,9 +420,7 @@ export function TaskDrawer() {
                   >
                     <Icon name="x" size={13} />
                   </button>
-                ) : (
-                  <span className="td-meta-hint">甘特排期用</span>
-                )}
+                ) : null}
               </div>
             </div>
 
@@ -432,12 +430,11 @@ export function TaskDrawer() {
                 截止日期
               </div>
               <div className="meta-value">
-                <input
-                  className="input"
-                  type="date"
+                <DatePicker
                   value={card.dueDate ?? ''}
-                  onChange={(event) => changeDueDate(event.target.value)}
-                  aria-label="截止日期"
+                  onChange={changeDueDate}
+                  ariaLabel="截止日期"
+                  placeholder="选择截止日期"
                 />
                 {card.dueDate ? (
                   <button

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { DatePicker } from '@/components/DatePicker';
 import { Modal } from '@/components/Modal';
 import { descendantGoalIds } from '@/lib/goals';
 import type { Goal, GoalScope, GoalStatus } from '@/lib/types';
@@ -202,22 +203,18 @@ export function GoalFormModal({
           </label>
           <label className="goal-form-field">
             <span>开始日期</span>
-            <input
-              className="input"
-              type="date"
+            <DatePicker
               value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
-              aria-label="目标开始日期"
+              onChange={setStartDate}
+              ariaLabel="目标开始日期"
             />
           </label>
           <label className="goal-form-field">
             <span>截止日期</span>
-            <input
-              className="input"
-              type="date"
+            <DatePicker
               value={dueDate}
-              onChange={(event) => setDueDate(event.target.value)}
-              aria-label="目标截止日期"
+              onChange={setDueDate}
+              ariaLabel="目标截止日期"
             />
           </label>
         </div>
