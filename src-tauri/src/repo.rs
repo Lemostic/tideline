@@ -2427,6 +2427,14 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
     record_card_changes(&tx, &previous, &card)?;
     if !previous.completed && card.completed {
         record_card_event(&tx, &card.id, "completed", "")?;
+        // 完成时执行本地规则并滚动重复任务；失败只记录，不影响本次完成。
+        let _ = crate::automation::run_rules(
+            &tx,
+            &card,
+            crate::models::RuleTrigger::Complete,
+            &crate::automation::today_key(),
+        );
+        let _ = crate::automation::roll_recurrence(&tx, &card.id);
     }
     tx.commit().map_err(db_err)?;
     Ok(card)
@@ -2571,6 +2579,13 @@ pub fn move_card(conn: &mut Connection, input: MoveCardInput) -> DbResult<Card> 
     touch_board(&tx, &card.board_id)?;
     if old_list_id != card.list_id {
         record_card_event(&tx, &card.id, "moved", &card.list_id)?;
+        // 移动到指定列表时执行本地规则；失败只记录，不影响本次移动。
+        let _ = crate::automation::run_rules(
+            &tx,
+            &card,
+            crate::models::RuleTrigger::MoveToList,
+            &crate::automation::today_key(),
+        );
     }
     tx.commit().map_err(db_err)?;
     Ok(card)

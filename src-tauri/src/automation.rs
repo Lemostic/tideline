@@ -340,7 +340,23 @@ pub fn get_recurrences(conn: &Connection) -> DbResult<Vec<Recurrence>> {
 }
 
 /// 某张任务的重复配置（最多一条）。
+///
+/// 优先按 `cards.recurrence_id` 精确定位，找不到时再按 `recurrences.card_id` 回退，
+/// 这样由重复配置生成出来的下一次任务也能继承同一套重复规则。
 pub fn get_recurrence_by_card(conn: &Connection, card_id: &str) -> DbResult<Option<Recurrence>> {
+    let linked_id: Option<String> = conn
+        .query_row(
+            "SELECT recurrence_id FROM cards WHERE id = ?1",
+            [card_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+    if let Some(id) = linked_id {
+        if let Some(recurrence) = get_recurrence_by_id(conn, &id)? {
+            return Ok(Some(recurrence));
+        }
+    }
     Ok(conn
         .query_row(
             &format!(
@@ -348,6 +364,17 @@ pub fn get_recurrence_by_card(conn: &Connection, card_id: &str) -> DbResult<Opti
                  ORDER BY created_at ASC LIMIT 1"
             ),
             [card_id],
+            row_to_recurrence,
+        )
+        .ok())
+}
+
+/// 按重复配置 ID 查询。
+pub fn get_recurrence_by_id(conn: &Connection, id: &str) -> DbResult<Option<Recurrence>> {
+    Ok(conn
+        .query_row(
+            &format!("SELECT {RECURRENCE_COLUMNS} FROM recurrences WHERE id = ?1"),
+            [id],
             row_to_recurrence,
         )
         .ok())
@@ -716,8 +743,9 @@ pub struct RuleRunResult {
 /// 执行命中的规则，返回实际写入的字段补丁。
 ///
 /// 规则失败不影响主流程：错误写进 `error`，调用方只记录不抛出。
+/// `conn` 可以是调用方已经打开的事务，写入会一起提交。
 pub fn run_rules(
-    conn: &mut Connection,
+    conn: &Connection,
     card: &Card,
     trigger: RuleTrigger,
     today: &str,
@@ -807,7 +835,7 @@ pub fn run_rules(
 
 /// 把规则计算出的字段变更写回任务。
 fn apply_rule_patch(
-    conn: &mut Connection,
+    conn: &Connection,
     card_id: &str,
     outcome: &RuleOutcome,
 ) -> Result<(), String> {
@@ -847,8 +875,9 @@ fn apply_rule_patch(
 /// 完成任务后滚动重复任务，返回生成的新任务（没有重复配置时返回 None）。
 ///
 /// 幂等性由 `recurrence_runs` 的主键保证：同一个完成事件重复执行不会重复生成。
+/// 写入走调用方的事务，完成任务和生成下一次任务是同一次原子提交。
 pub fn roll_recurrence(
-    conn: &mut Connection,
+    conn: &Connection,
     card_id: &str,
 ) -> DbResult<Option<Card>> {
     let Some(recurrence) = get_recurrence_by_card(conn, card_id)? else {
@@ -880,19 +909,30 @@ pub fn roll_recurrence(
         .clone()
         .or_else(|| card.due_date.clone())
         .unwrap_or_else(today_key);
-    let next_due = next_recurrence_date(
+    // `next_due_date` 就是「下一张任务该有的截止日期」；生成后把它再往后推一格。
+    let generated_due = recurrence.next_due_date.clone().unwrap_or_else(|| {
+        next_recurrence_date(
+            &RecurrenceSpec {
+                frequency: recurrence.frequency.as_str(),
+                interval_days: recurrence.interval_value,
+                weekdays: recurrence.weekdays.clone(),
+            },
+            &base,
+        )
+        .unwrap_or_else(|| base.clone())
+    });
+    let following_due = next_recurrence_date(
         &RecurrenceSpec {
             frequency: recurrence.frequency.as_str(),
             interval_days: recurrence.interval_value,
             weekdays: recurrence.weekdays.clone(),
         },
-        &base,
+        &generated_due,
     );
 
-    let tx = conn.transaction().map_err(|error| error.to_string())?;
     let now = repo::now_iso();
     let generated_id = repo::create_id("c");
-    let position: i64 = tx
+    let position: i64 = conn
         .query_row(
             "SELECT COALESCE(MAX(position), -1) + 1 FROM cards \
              WHERE list_id = ?1 AND deleted_at IS NULL",
@@ -902,7 +942,7 @@ pub fn roll_recurrence(
         .map_err(|error| error.to_string())?;
     let labels_json = serde_json::to_string(&card.labels).map_err(|error| error.to_string())?;
     let subtasks_json = serde_json::to_string(&card.subtasks).map_err(|error| error.to_string())?;
-    tx.execute(
+    conn.execute(
         "INSERT INTO cards \
          (id, board_id, list_id, title, description, due_date, start_date, priority, accent, \
           completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, \
@@ -914,7 +954,7 @@ pub fn roll_recurrence(
             &card.list_id,
             &card.title,
             &card.description,
-            &next_due,
+            &generated_due,
             card.priority.map(|item| item.as_str().to_string()),
             card.accent.map(|item| item.as_str().to_string()),
             labels_json,
@@ -926,20 +966,19 @@ pub fn roll_recurrence(
         ],
     )
     .map_err(|error| error.to_string())?;
-    tx.execute(
+    conn.execute(
         "INSERT INTO recurrence_runs \
          (recurrence_id, completed_card_id, generated_card_id, created_at) \
          VALUES (?1, ?2, ?3, ?4)",
         params![&recurrence.id, &card.id, &generated_id, &now],
     )
     .map_err(|error| error.to_string())?;
-    tx.execute(
+    conn.execute(
         "UPDATE recurrences SET next_due_date = ?1, updated_at = ?2 WHERE id = ?3",
-        params![&next_due, &now, &recurrence.id],
+        params![&following_due, &now, &recurrence.id],
     )
     .map_err(|error| error.to_string())?;
-    insert_activity(&tx, &generated_id, "recurrence", "", "", &card.id)?;
-    tx.commit().map_err(|error| error.to_string())?;
+    insert_activity(conn, &generated_id, "recurrence", "", "", &card.id)?;
 
     Ok(Some(repo::get_card(conn, &generated_id)?))
 }
@@ -1054,5 +1093,347 @@ mod tests {
             subtasks: Vec::new(),
         };
         assert!(validate_rule_actions(&[bad_offset]).is_some());
+    }
+
+    // -----------------------------------------------------------------------
+    // 数据库行为
+    // -----------------------------------------------------------------------
+
+    /// 建一个看板 + 两个列表 + 一张任务，返回三者。
+    fn seed(conn: &mut rusqlite::Connection) -> (String, String, String, String) {
+        let board = crate::repo::create_board(
+            conn,
+            crate::models::NewBoardInput {
+                title: "自动化测试".to_string(),
+                description: None,
+                color: None,
+            },
+        )
+        .expect("创建看板");
+        let todo = crate::repo::create_list(
+            conn,
+            crate::models::NewListInput {
+                board_id: board.id.clone(),
+                title: "待办".to_string(),
+                color: None,
+                wip_limit: None,
+            },
+        )
+        .expect("创建待办列");
+        let doing = crate::repo::create_list(
+            conn,
+            crate::models::NewListInput {
+                board_id: board.id.clone(),
+                title: "进行中".to_string(),
+                color: None,
+                wip_limit: None,
+            },
+        )
+        .expect("创建进行中列");
+        let card = crate::repo::create_card(
+            conn,
+            crate::models::NewCardInput {
+                board_id: board.id.clone(),
+                list_id: todo.id.clone(),
+                title: "写周报".to_string(),
+                description: None,
+                due_date: Some("2026-01-05".to_string()),
+                start_date: None,
+                priority: None,
+                accent: None,
+                labels: None,
+                subtasks: None,
+            },
+        )
+        .expect("创建任务");
+        (board.id, todo.id, doing.id, card.id)
+    }
+
+    #[test]
+    fn activity_records_only_changed_fields() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let (_, _, _, card_id) = seed(&mut conn);
+
+        crate::repo::update_card(
+            &mut conn,
+            crate::models::UpdateCardInput {
+                id: card_id.clone(),
+                patch: crate::models::CardPatch {
+                    title: Some("写月报".to_string()),
+                    due_date: Some(Some("2026-02-01".to_string())),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("更新任务");
+
+        let activity = get_card_activity(&conn, &card_id, 50).expect("读取活动");
+        let fields: Vec<&str> = activity
+            .iter()
+            .filter(|item| item.field != "")
+            .map(|item| item.field.as_str())
+            .collect();
+        assert!(fields.contains(&"title"), "应记录标题变化");
+        assert!(fields.contains(&"dueDate"), "应记录截止日期变化");
+        assert_eq!(
+            fields.len(),
+            2,
+            "只应记录真正变化的字段，实际：{fields:?}"
+        );
+    }
+
+    #[test]
+    fn activity_records_event_level_actions() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let (_, _, _, card_id) = seed(&mut conn);
+        crate::repo::delete_card(
+            &mut conn,
+            crate::models::IdInput { id: card_id.clone() },
+        )
+        .expect("删除任务");
+        let activity = get_card_activity(&conn, &card_id, 50).expect("读取活动");
+        assert!(
+            activity.iter().any(|item| item.event_type == "deleted"),
+            "应记录移入回收站"
+        );
+    }
+
+    #[test]
+    fn recurrence_rolls_once_on_completion() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let (_, _, _, card_id) = seed(&mut conn);
+        create_recurrence(
+            &mut conn,
+            NewRecurrenceInput {
+                card_id: card_id.clone(),
+                frequency: RecurrenceFrequency::Daily,
+                interval_value: None,
+                weekdays: None,
+                next_due_date: None,
+            },
+        )
+        .expect("创建重复配置");
+
+        let generated = roll_recurrence(&mut conn, &card_id).expect("滚动重复");
+        let generated = generated.expect("应生成下一次任务");
+        assert_eq!(generated.title, "写周报");
+        assert!(!generated.completed, "新任务应是未完成状态");
+        // 原任务截止 2026-01-05，下一次是 2026-01-06。
+        assert_eq!(generated.due_date, Some("2026-01-06".to_string()));
+
+        // 幂等：同一个完成事件重复执行不会再生成。
+        let again = roll_recurrence(&mut conn, &card_id).expect("重复滚动");
+        assert!(again.is_none(), "重复完成不应再次生成");
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
+            .expect("统计任务数");
+        assert_eq!(count, 2, "只应多出一张任务");
+
+        // 下一次完成会再生成一张，日期继续往后推。
+        let generated = roll_recurrence(&mut conn, &generated.id)
+            .expect("滚动重复")
+            .expect("应生成再下一次任务");
+        assert_eq!(generated.due_date, Some("2026-01-07".to_string()));
+    }
+
+    #[test]
+    fn disabled_recurrence_does_not_roll() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let (_, _, _, card_id) = seed(&mut conn);
+        let recurrence = create_recurrence(
+            &mut conn,
+            NewRecurrenceInput {
+                card_id: card_id.clone(),
+                frequency: RecurrenceFrequency::Daily,
+                interval_value: None,
+                weekdays: None,
+                next_due_date: None,
+            },
+        )
+        .expect("创建重复配置");
+        update_recurrence(
+            &mut conn,
+            &recurrence.id,
+            RecurrencePatch {
+                enabled: Some(false),
+                ..Default::default()
+            },
+        )
+        .expect("停用重复配置");
+
+        let generated = roll_recurrence(&mut conn, &card_id).expect("滚动重复");
+        assert!(generated.is_none(), "停用后不应生成下一次任务");
+    }
+
+    #[test]
+    fn rule_fires_on_move_to_list() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let (_, todo_id, doing_id, card_id) = seed(&mut conn);
+        create_automation_rule(
+            &mut conn,
+            NewAutomationRuleInput {
+                name: "进入进行中就标高优先级".to_string(),
+                trigger: RuleTrigger::MoveToList,
+                list_id: Some(doing_id.clone()),
+                actions: vec![RuleAction {
+                    kind: RuleActionKind::SetPriority,
+                    offset_days: 0,
+                    priority: Some(Priority::High),
+                    labels: Vec::new(),
+                    subtasks: Vec::new(),
+                }],
+                enabled: Some(true),
+            },
+        )
+        .expect("创建规则");
+
+        // 先移动到不匹配的列：不触发。
+        let moved = crate::repo::move_card(
+            &mut conn,
+            crate::models::MoveCardInput {
+                card_id: card_id.clone(),
+                to_list_id: todo_id.clone(),
+                to_index: 0,
+            },
+        )
+        .expect("移动任务");
+        assert_eq!(moved.priority, None, "不匹配的列不应触发规则");
+
+        // 移动到目标列：触发。
+        let moved = crate::repo::move_card(
+            &mut conn,
+            crate::models::MoveCardInput {
+                card_id: card_id.clone(),
+                to_list_id: doing_id.clone(),
+                to_index: 0,
+            },
+        )
+        .expect("移动任务");
+        let _ = moved;
+        let card = crate::repo::get_card(&conn, &card_id).expect("读取任务");
+        assert_eq!(card.priority, Some(Priority::High), "规则应写入优先级");
+    }
+
+    #[test]
+    fn disabled_rule_does_not_fire() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let (_, _, doing_id, card_id) = seed(&mut conn);
+        create_automation_rule(
+            &mut conn,
+            NewAutomationRuleInput {
+                name: "默认关闭".to_string(),
+                trigger: RuleTrigger::MoveToList,
+                list_id: Some(doing_id.clone()),
+                actions: vec![RuleAction {
+                    kind: RuleActionKind::SetPriority,
+                    offset_days: 0,
+                    priority: Some(Priority::High),
+                    labels: Vec::new(),
+                    subtasks: Vec::new(),
+                }],
+                enabled: Some(false),
+            },
+        )
+        .expect("创建规则");
+
+        crate::repo::move_card(
+            &mut conn,
+            crate::models::MoveCardInput {
+                card_id: card_id.clone(),
+                to_list_id: doing_id.clone(),
+                to_index: 0,
+            },
+        )
+        .expect("移动任务");
+        let card = crate::repo::get_card(&conn, &card_id).expect("读取任务");
+        assert_eq!(card.priority, None, "关闭的规则不应执行");
+    }
+
+    #[test]
+    fn rule_action_appends_labels_and_subtasks() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let (_, _, doing_id, card_id) = seed(&mut conn);
+        create_automation_rule(
+            &mut conn,
+            NewAutomationRuleInput {
+                name: "加标签与子任务".to_string(),
+                trigger: RuleTrigger::MoveToList,
+                list_id: Some(doing_id.clone()),
+                actions: vec![
+                    RuleAction {
+                        kind: RuleActionKind::AddLabels,
+                        offset_days: 0,
+                        priority: None,
+                        labels: vec!["研发".to_string()],
+                        subtasks: Vec::new(),
+                    },
+                    RuleAction {
+                        kind: RuleActionKind::AppendSubtasks,
+                        offset_days: 0,
+                        priority: None,
+                        labels: Vec::new(),
+                        subtasks: vec!["补充数据".to_string()],
+                    },
+                ],
+                enabled: Some(true),
+            },
+        )
+        .expect("创建规则");
+
+        crate::repo::move_card(
+            &mut conn,
+            crate::models::MoveCardInput {
+                card_id: card_id.clone(),
+                to_list_id: doing_id.clone(),
+                to_index: 0,
+            },
+        )
+        .expect("移动任务");
+        let card = crate::repo::get_card(&conn, &card_id).expect("读取任务");
+        assert_eq!(card.labels, vec!["研发".to_string()]);
+        assert_eq!(card.subtasks.len(), 1);
+        assert_eq!(card.subtasks[0].title, "补充数据");
+    }
+
+    #[test]
+    fn rule_rejects_missing_list_for_move_trigger() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let error = create_automation_rule(
+            &mut conn,
+            NewAutomationRuleInput {
+                name: "缺列表".to_string(),
+                trigger: RuleTrigger::MoveToList,
+                list_id: None,
+                actions: vec![RuleAction {
+                    kind: RuleActionKind::SetPriority,
+                    offset_days: 0,
+                    priority: Some(Priority::High),
+                    labels: Vec::new(),
+                    subtasks: Vec::new(),
+                }],
+                enabled: Some(true),
+            },
+        )
+        .expect_err("移动触发必须选择列表");
+        assert!(error.contains("目标列表"), "错误应可读：{error}");
+    }
+
+    #[test]
+    fn weekly_recurrence_requires_weekdays() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let (_, _, _, card_id) = seed(&mut conn);
+        let error = create_recurrence(
+            &mut conn,
+            NewRecurrenceInput {
+                card_id,
+                frequency: RecurrenceFrequency::Weekly,
+                interval_value: None,
+                weekdays: None,
+                next_due_date: None,
+            },
+        )
+        .expect_err("每周重复必须选择星期");
+        assert!(error.contains("星期"), "错误应可读：{error}");
     }
 }

@@ -70,22 +70,9 @@ pub fn create_card(db: State<'_, Db>, input: NewCardInput) -> CmdResult<Card> {
 #[tauri::command]
 pub fn update_card(db: State<'_, Db>, input: UpdateCardInput) -> CmdResult<Card> {
     let mut conn = db.lock()?;
-    // 先记住完成状态，自动化只在「未完成 → 已完成」时触发。
-    let was_completed = repo::get_card(&conn, &input.id)
-        .map(|card| card.completed)
-        .unwrap_or(false);
-    let card = repo::update_card(&mut conn, input)?;
-    // 自动化在主写入成功之后执行：失败只记录，不影响本次修改的结果。
-    if !was_completed && card.completed {
-        let _ = automation::run_rules(
-            &mut conn,
-            &card,
-            RuleTrigger::Complete,
-            &automation::today_key(),
-        );
-        let _ = automation::roll_recurrence(&mut conn, &card.id);
-    }
-    Ok(card)
+    // 自动化（完成规则、重复任务滚动）已在 repo 层随主写入一起执行，
+    // 失败只记录日志，不影响这里返回的任务。
+    repo::update_card(&mut conn, input)
 }
 
 #[tauri::command]
@@ -97,15 +84,8 @@ pub fn delete_card(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
 #[tauri::command]
 pub fn move_card(db: State<'_, Db>, input: MoveCardInput) -> CmdResult<Card> {
     let mut conn = db.lock()?;
-    let card = repo::move_card(&mut conn, input)?;
-    // 移动到指定列表时执行对应的本地规则。
-    let _ = automation::run_rules(
-        &mut conn,
-        &card,
-        RuleTrigger::MoveToList,
-        &automation::today_key(),
-    );
-    Ok(card)
+    // 移动触发的本地规则已在 repo 层执行。
+    repo::move_card(&mut conn, input)
 }
 
 // ---------------------------------------------------------------------------
