@@ -50,6 +50,10 @@ export default function App() {
         event.preventDefault();
         openSearch();
       }
+      if (isMod && event.key === ',') {
+        event.preventDefault();
+        window.location.hash = '#/settings';
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);

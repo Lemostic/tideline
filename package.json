@@ -1,7 +1,7 @@
 {
   "name": "tideline",
   "private": true,
-  "version": "0.8.6",
+  "version": "0.8.7",
   "description": "潮线 tideline — 本地优先、开源免费的多视图看板工具",
   "type": "module",
   "scripts": {

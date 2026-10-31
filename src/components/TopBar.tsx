@@ -103,9 +103,6 @@ export function TopBar() {
           <Icon name="database" size={13} />
           仅本机
         </span>
-        <div className="avatar" title="本地用户">
-          L
-        </div>
       </div>
     </header>
   );

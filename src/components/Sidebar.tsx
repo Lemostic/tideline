@@ -67,11 +67,18 @@ export function Sidebar() {
       <div className="sidebar-footer">
         <NavLink
           to="/settings"
-          className={({ isActive }) => `sidebar-gear${isActive ? ' is-active' : ''}`}
-          title="设置"
+          className={({ isActive }) => `sidebar-profile${isActive ? ' is-active' : ''}`}
+          title="设置（Ctrl + ,）"
           aria-label="设置"
         >
-          <Icon name="settings" size={17} />
+          <span className="sidebar-profile-avatar" aria-hidden="true">L</span>
+          <span className="sidebar-profile-text">
+            <strong>Lemostic</strong>
+            <small>本机用户 · 设置</small>
+          </span>
+          <span className="sidebar-profile-icon">
+            <Icon name="settings" size={15} />
+          </span>
         </NavLink>
         <div className="storage-status">
           <span className="storage-dot" />
