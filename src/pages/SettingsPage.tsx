@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { Modal } from '@/components/Modal';
+import { AutomationSettings } from '@/components/AutomationSettings';
 import { api } from '@/lib/api';
 import { CARD_SIZE_OPTIONS } from '@/lib/cardLayout';
 import { DEFAULT_CUSTOM_THEME, THEME_PRESETS, type ThemeBaseColors } from '@/lib/theme';
@@ -647,6 +648,8 @@ export function SettingsPage() {
             </button>
           </div>
         </section>
+
+        <AutomationSettings />
       </div>
 
       <p className="settings-note">

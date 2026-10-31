@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DatePicker } from '@/components/DatePicker';
 import { Icon } from '@/components/Icon';
+import { ActivitySection, RecurrenceSection } from '@/components/RecurrenceSection';
 import { formatDateCN, formatRelativeTime, todayKey } from '@/lib/date';
 import { blockersFor, dependencyCandidates } from '@/lib/dependencies';
 import { createId } from '@/lib/ids';
@@ -770,6 +771,10 @@ export function TaskDrawer() {
               </div>
             ) : null}
           </div>
+
+          <RecurrenceSection card={card} />
+
+          <ActivitySection cardId={card.id} />
 
           <div className="td-section">
             <div className="td-section-head">

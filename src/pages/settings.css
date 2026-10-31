@@ -671,3 +671,181 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- 自动化与提醒（V0.11） ---------- */
+.auto-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auto-rule {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+}
+
+.auto-rule.is-on {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.auto-rule-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.auto-rule-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.auto-rule-name {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auto-rule-trigger {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.auto-rule-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.auto-rule-actions-list {
+  margin: 8px 0 0;
+  padding-left: 16px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.auto-rule-error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 11.5px;
+}
+
+.auto-empty {
+  margin: 0;
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.auto-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.auto-form-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.auto-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.auto-field > span {
+  font-weight: 500;
+}
+
+.auto-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auto-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.auto-action .input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.auto-offset,
+.auto-lead {
+  max-width: 84px;
+  flex: none;
+}
+
+.auto-priority {
+  max-width: 100px;
+  flex: none;
+}
+
+.auto-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 11.5px;
+}
+
+.auto-form-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.auto-notify {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auto-notify-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+
+.auto-notify-row > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.auto-hint {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.auto-time {
+  max-width: 120px;
+  flex: none;
+}

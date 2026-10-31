@@ -979,3 +979,107 @@
     white-space: normal;
   }
 }
+
+/* ---------- 重复任务（V0.11） ---------- */
+.td-inline-action {
+  align-self: flex-start;
+}
+
+.td-inline-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.td-recurrence-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.td-inline-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.td-inline-field > span {
+  min-width: 60px;
+}
+
+.td-inline-field .select,
+.td-inline-field .input {
+  flex: 1;
+}
+
+.td-weekday-group {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.td-weekday-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.td-weekday-btn.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- 最近活动（V0.11） ---------- */
+.td-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.td-activity {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.td-activity-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.td-activity-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.td-activity-time {
+  flex: none;
+  color: var(--faint);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
