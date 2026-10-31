@@ -6,7 +6,17 @@
  * 避免用户配置几十个令牌。
  */
 
-export type ThemeId = 'pine' | 'chestnut' | 'tech' | 'minimal' | 'fresh' | 'custom';
+export type ThemeId =
+  | 'pine'
+  | 'chestnut'
+  | 'tech'
+  | 'minimal'
+  | 'fresh'
+  | 'mint'
+  | 'seasalt'
+  | 'sakura'
+  | 'lavender'
+  | 'custom';
 
 export interface ThemeBaseColors {
   primary: string;
@@ -70,6 +80,54 @@ export const THEME_PRESETS: ThemePreset[] = [
       background: '#eef8f3',
       surface: '#ffffff',
       text: '#163a2c',
+    },
+  },
+  {
+    id: 'mint',
+    name: '薄荷青',
+    description: '雾感薄荷绿，清爽不刺眼',
+    colors: {
+      primary: '#2f8a7a',
+      accent: '#e8b86a',
+      background: '#edf8f3',
+      surface: '#ffffff',
+      text: '#1e3834',
+    },
+  },
+  {
+    id: 'seasalt',
+    name: '海盐蓝',
+    description: '浅海盐蓝，安静通透',
+    colors: {
+      primary: '#3d7ea6',
+      accent: '#87c6c9',
+      background: '#eef7fb',
+      surface: '#ffffff',
+      text: '#1b3440',
+    },
+  },
+  {
+    id: 'sakura',
+    name: '樱花粉',
+    description: '低饱和樱花粉，柔和轻盈',
+    colors: {
+      primary: '#b85c79',
+      accent: '#e3a56d',
+      background: '#fdf1f4',
+      surface: '#fffdfd',
+      text: '#3d2a31',
+    },
+  },
+  {
+    id: 'lavender',
+    name: '雾紫',
+    description: '雾面紫罗兰，柔和安静',
+    colors: {
+      primary: '#7566a8',
+      accent: '#e0a878',
+      background: '#f4f1fa',
+      surface: '#ffffff',
+      text: '#2b273b',
     },
   },
   {

@@ -1,6 +1,6 @@
 [package]
 name = "tideline"
-version = "0.8.11"
+version = "0.8.12"
 description = "潮线 tideline — 本地优先的看板工具"
 authors = ["tideline"]
 edition = "2021"

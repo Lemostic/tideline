@@ -9,16 +9,21 @@ import {
 } from '@/lib/theme';
 
 describe('theme helpers', () => {
-  it('提供五套内置主题并默认板栗鹅黄', () => {
+  it('提供九套内置主题并默认板栗鹅黄', () => {
     expect(THEME_PRESETS.map((preset) => preset.name)).toEqual([
       '板栗鹅黄',
       '科技蓝',
       '简约白',
       '清新绿',
+      '薄荷青',
+      '海盐蓝',
+      '樱花粉',
+      '雾紫',
       '竹青',
     ]);
     expect(normalizeThemeId(undefined)).toBe('chestnut');
     expect(normalizeThemeId('tech')).toBe('tech');
+    expect(normalizeThemeId('mint')).toBe('mint');
     expect(normalizeThemeId('unknown')).toBe('chestnut');
   });
 
