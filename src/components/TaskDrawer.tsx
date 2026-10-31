@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
-import { formatDateCN, formatRelativeTime, parseDateKey, todayKey } from '@/lib/date';
+import { formatDateCN, formatRelativeTime, todayKey } from '@/lib/date';
 import { blockersFor, dependencyCandidates } from '@/lib/dependencies';
 import { createId } from '@/lib/ids';
 import { isBlankMarkdown, renderMarkdown } from '@/lib/markdown';
@@ -332,6 +332,10 @@ export function TaskDrawer() {
                   被 {unfinishedBlockers.length} 个前置任务阻塞
                 </span>
               ) : null}
+              <span className="td-created-meta">
+                <Icon name="clock" size={11} />
+                创建 {formatRelativeTime(card.createdAt)} · 更新 {formatRelativeTime(card.updatedAt)}
+              </span>
             </div>
             {linkedGoals.length > 0 ? (
               <div className="drawer-goals">
@@ -502,19 +506,6 @@ export function TaskDrawer() {
                     />
                   ))}
                 </div>
-              </div>
-            </div>
-
-            <div className="meta-row">
-              <div className="meta-label">
-                <Icon name="clock" size={14} />
-                创建时间
-              </div>
-              <div className="meta-value meta-static">
-                {parseDateKey(card.createdAt.slice(0, 10))
-                  ? formatRelativeTime(card.createdAt)
-                  : '—'}
-                <span className="faint">· 更新于 {formatRelativeTime(card.updatedAt)}</span>
               </div>
             </div>
           </div>
