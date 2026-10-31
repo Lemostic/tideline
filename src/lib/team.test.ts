@@ -9,7 +9,12 @@ import {
   projectOvertime,
   projectPerformance,
   projectRolesOf,
+  projectTenureStats,
   roleName,
+  tenureDays,
+  tenureIsActive,
+  tenureOverlapsRange,
+  tenureSummaryForProject,
 } from '@/lib/team';
 import type {
   OvertimeRecord,
@@ -136,5 +141,41 @@ describe('team helpers', () => {
     expect(projectRolesOf(roles, 'p1')).toHaveLength(1);
     expect(roleName(roles, 'r1')).toBe('开发');
     expect(projectMeta(meta, 'p1')[0].value).toBe('某集团');
+  });
+
+  it('统计多段投入：天数、开放段与项目汇总', () => {
+    const first = {
+      id: 't1',
+      memberId: 'a',
+      projectId: 'p1',
+      startedAt: '2026-01-01',
+      endedAt: '2026-01-10',
+      note: '',
+      createdAt: '',
+      updatedAt: '',
+    };
+    const second = {
+      ...first,
+      id: 't2',
+      startedAt: '2026-02-01',
+      endedAt: null,
+    };
+    expect(tenureDays(first)).toBe(10);
+    // 以固定 asOf 避免依赖今天
+    expect(tenureDays(second, '2026-02-10')).toBe(10);
+    expect(tenureIsActive(second)).toBe(true);
+
+    const members = [member('a', 'p1', 'active')];
+    const summaries = tenureSummaryForProject([first, second], members, 'p1', '2026-02-10');
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({ totalDays: 20, active: true });
+    expect(projectTenureStats(summaries)).toMatchObject({
+      totalDays: 20,
+      activeMembers: 1,
+      historicalMembers: 0,
+      segmentCount: 2,
+    });
+    expect(tenureOverlapsRange(first, '2026-01-05', '2026-01-20')).toBe(true);
+    expect(tenureOverlapsRange(first, '2026-02-01', '2026-02-20')).toBe(false);
   });
 });

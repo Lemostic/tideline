@@ -35,6 +35,7 @@ pub fn build(conn: &Connection) -> Result<BackupFile, String> {
         team_members: repo::get_team_members(conn)?,
         overtime_records: repo::get_overtime_records(conn)?,
         performance_records: repo::get_performance_records(conn)?,
+        member_tenures: repo::get_member_tenures(conn)?,
         projects: repo::get_projects(conn)?,
         project_meta_fields: repo::get_all_project_meta(conn)?,
         project_roles: repo::get_all_project_roles(conn)?,
@@ -55,6 +56,7 @@ impl BackupFile {
             team_members: self.team_members.len(),
             overtime_records: self.overtime_records.len(),
             performance_records: self.performance_records.len(),
+            member_tenures: self.member_tenures.len(),
             projects: self.projects.len(),
             project_meta_fields: self.project_meta_fields.len(),
             project_roles: self.project_roles.len(),
@@ -184,6 +186,42 @@ fn normalize_legacy_backup(backup: &mut BackupFile) {
         .iter()
         .map(|member| (member.id.clone(), member.project_id.clone()))
         .collect();
+
+    // 旧备份或早期 V0.8.3 备份缺失时间段时，用成员的入组/出组字段补首段。
+    let members_for_tenure = backup.team_members.clone();
+    for member in &members_for_tenure {
+        let has_tenure = backup
+            .member_tenures
+            .iter()
+            .any(|tenure| tenure.member_id == member.id);
+        if has_tenure {
+            continue;
+        }
+        let ended_at = if member.status == MemberStatus::Released {
+            member.released_at.clone().or_else(|| Some(member.joined_at.clone()))
+        } else {
+            None
+        };
+        backup.member_tenures.push(MemberTenure {
+            id: format!("mt_bak_{}", member.id),
+            member_id: member.id.clone(),
+            project_id: member.project_id.clone(),
+            started_at: member.joined_at.clone(),
+            ended_at,
+            note: "由旧备份成员记录补全".to_string(),
+            created_at: backup.exported_at.clone(),
+            updated_at: backup.exported_at.clone(),
+        });
+    }
+    for tenure in &mut backup.member_tenures {
+        if tenure.project_id.trim().is_empty() {
+            tenure.project_id = member_projects
+                .get(&tenure.member_id)
+                .cloned()
+                .unwrap_or_else(|| fallback_project_id.clone());
+        }
+    }
+
     for record in &mut backup.overtime_records {
         if record.project_id.trim().is_empty() {
             record.project_id = member_projects
@@ -417,6 +455,50 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         }
     }
 
+    let member_project_map: HashMap<&str, &str> = backup
+        .team_members
+        .iter()
+        .map(|member| (member.id.as_str(), member.project_id.as_str()))
+        .collect();
+
+    let mut tenure_ids = HashSet::new();
+    let mut tenure_intervals: HashMap<&str, Vec<(&str, Option<&str>)>> = HashMap::new();
+    for tenure in &backup.member_tenures {
+        if tenure.id.trim().is_empty() {
+            return Err("备份中存在空的投入时间段 id".to_string());
+        }
+        if !tenure_ids.insert(tenure.id.as_str()) {
+            return Err(format!("备份中存在重复的投入时间段 id：{}", tenure.id));
+        }
+        let Some(member_project) = member_project_map.get(tenure.member_id.as_str()) else {
+            return Err("投入时间段引用了不存在的项目成员".to_string());
+        };
+        if !project_ids.contains(tenure.project_id.as_str())
+            || *member_project != tenure.project_id
+        {
+            return Err("投入时间段的项目归属与成员不一致".to_string());
+        }
+        if tenure.started_at.trim().is_empty() {
+            return Err("备份中的投入时间段缺少开始日期".to_string());
+        }
+        if let Some(ended_at) = &tenure.ended_at {
+            if ended_at.trim().is_empty() || ended_at < &tenure.started_at {
+                return Err("备份中的投入时间段结束日期无效".to_string());
+            }
+        }
+        let intervals = tenure_intervals
+            .entry(tenure.member_id.as_str())
+            .or_default();
+        let new_end = tenure.ended_at.as_deref().unwrap_or("9999-12-31");
+        for (old_start, old_end) in intervals.iter() {
+            let old_end = old_end.unwrap_or("9999-12-31");
+            if tenure.started_at.as_str() < old_end && *old_start < new_end {
+                return Err("备份中同一成员的投入时间段存在重叠".to_string());
+            }
+        }
+        intervals.push((tenure.started_at.as_str(), tenure.ended_at.as_deref()));
+    }
+
     let mut overtime_ids = HashSet::new();
     for record in &backup.overtime_records {
         if record.id.trim().is_empty() {
@@ -469,6 +551,7 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
         .and_then(|_| tx.execute("DELETE FROM goals", []))
         .and_then(|_| tx.execute("DELETE FROM performance_records", []))
         .and_then(|_| tx.execute("DELETE FROM overtime_records", []))
+        .and_then(|_| tx.execute("DELETE FROM member_tenures", []))
         .and_then(|_| tx.execute("DELETE FROM team_members", []))
         .and_then(|_| tx.execute("DELETE FROM project_meta_fields", []))
         .and_then(|_| tx.execute("DELETE FROM project_roles", []))
@@ -676,6 +759,25 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
             ],
         )
         .map_err(|error| format!("写入项目成员「{}」失败：{error}", member.name))?;
+    }
+
+    for tenure in &backup.member_tenures {
+        tx.execute(
+            "INSERT INTO member_tenures \
+             (id, member_id, project_id, started_at, ended_at, note, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &tenure.id,
+                &tenure.member_id,
+                &tenure.project_id,
+                &tenure.started_at,
+                &tenure.ended_at,
+                &tenure.note,
+                &tenure.created_at,
+                &tenure.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入成员投入时间段失败：{error}"))?;
     }
 
     for record in &backup.overtime_records {
@@ -892,6 +994,7 @@ mod tests {
             team_members: Vec::new(),
             overtime_records: Vec::new(),
             performance_records: Vec::new(),
+            member_tenures: Vec::new(),
             projects: Vec::new(),
             project_meta_fields: Vec::new(),
             project_roles: Vec::new(),
@@ -1100,10 +1203,14 @@ mod tests {
         assert_eq!(backup.summary().team_members, 1);
         assert_eq!(backup.summary().overtime_records, 1);
         assert_eq!(backup.summary().performance_records, 1);
+        assert_eq!(backup.summary().member_tenures, 1);
         let restored = restore(&mut conn, &backup).expect("恢复备份");
         assert_eq!(restored.team_members, 1);
+        assert_eq!(restored.member_tenures, 1);
         let snapshot = repo::get_snapshot(&conn).expect("快照");
         assert_eq!(snapshot.team_members[0].id, member.id);
+        assert_eq!(snapshot.member_tenures[0].member_id, member.id);
+        assert_eq!(snapshot.member_tenures[0].ended_at, None);
         assert_eq!(snapshot.overtime_records[0].member_id, member.id);
         assert_eq!(snapshot.performance_records[0].member_id, member.id);
     }

@@ -22,6 +22,7 @@ import type {
   InboxItem,
   List,
   ListPatch,
+  MemberTenure,
   NewBoardInput,
   NewBoardSetInput,
   NewCardInput,
@@ -32,6 +33,7 @@ import type {
   NewProjectMetaInput,
   NewProjectRoleInput,
   NewTeamMemberInput,
+  NewTenureInput,
   OvertimePatch,
   OvertimeRecord,
   PerformancePatch,
@@ -45,6 +47,7 @@ import type {
   Snapshot,
   TeamMember,
   TeamMemberPatch,
+  TenurePatch,
 } from '@/lib/types';
 
 const EMPTY_SNAPSHOT: Snapshot = {
@@ -58,6 +61,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   teamMembers: [],
   overtimeRecords: [],
   performanceRecords: [],
+  memberTenures: [],
   projects: [],
   projectMetaFields: [],
   projectRoles: [],
@@ -97,6 +101,9 @@ export interface AppState {
   createTeamMember: (input: NewTeamMemberInput) => Promise<TeamMember>;
   updateTeamMember: (id: string, patch: TeamMemberPatch) => Promise<void>;
   deleteTeamMember: (id: string) => Promise<void>;
+  createTenure: (input: NewTenureInput) => Promise<MemberTenure>;
+  updateTenure: (id: string, patch: TenurePatch) => Promise<void>;
+  deleteTenure: (id: string) => Promise<void>;
   createOvertime: (input: NewOvertimeInput) => Promise<OvertimeRecord>;
   updateOvertime: (id: string, patch: OvertimePatch) => Promise<void>;
   deleteOvertime: (id: string) => Promise<void>;
@@ -239,6 +246,7 @@ export const useAppStore = create<AppState>((set, get) => {
               teamMembers: state.snapshot.teamMembers,
               overtimeRecords: state.snapshot.overtimeRecords,
               performanceRecords: state.snapshot.performanceRecords,
+              memberTenures: state.snapshot.memberTenures,
               projects: state.snapshot.projects,
               projectMetaFields: state.snapshot.projectMetaFields,
               projectRoles: state.snapshot.projectRoles,
@@ -335,12 +343,7 @@ export const useAppStore = create<AppState>((set, get) => {
     createTeamMember: async (input) => {
       try {
         const member = await api.createTeamMember(input);
-        set((state) => ({
-          snapshot: {
-            ...state.snapshot,
-            teamMembers: [...state.snapshot.teamMembers, member],
-          },
-        }));
+        await get().reloadSnapshot();
         return member;
       } catch (error) {
         return fail(error);
@@ -349,15 +352,8 @@ export const useAppStore = create<AppState>((set, get) => {
 
     updateTeamMember: async (id, patch) => {
       try {
-        const member = await api.updateTeamMember({ id, patch });
-        set((state) => ({
-          snapshot: {
-            ...state.snapshot,
-            teamMembers: state.snapshot.teamMembers.map((item) =>
-              item.id === id ? member : item,
-            ),
-          },
-        }));
+        await api.updateTeamMember({ id, patch });
+        await get().reloadSnapshot();
       } catch (error) {
         fail(error);
       }
@@ -370,6 +366,9 @@ export const useAppStore = create<AppState>((set, get) => {
           snapshot: {
             ...state.snapshot,
             teamMembers: state.snapshot.teamMembers.filter((item) => item.id !== id),
+            memberTenures: state.snapshot.memberTenures.filter(
+              (tenure) => tenure.memberId !== id,
+            ),
             overtimeRecords: state.snapshot.overtimeRecords.filter(
               (item) => item.memberId !== id,
             ),
@@ -378,6 +377,34 @@ export const useAppStore = create<AppState>((set, get) => {
             ),
           },
         }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    createTenure: async (input) => {
+      try {
+        const tenure = await api.createTenure(input);
+        await get().reloadSnapshot();
+        return tenure;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateTenure: async (id, patch) => {
+      try {
+        await api.updateTenure({ id, patch });
+        await get().reloadSnapshot();
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteTenure: async (id) => {
+      try {
+        await api.deleteTenure({ id });
+        await get().reloadSnapshot();
       } catch (error) {
         fail(error);
       }
@@ -511,6 +538,9 @@ export const useAppStore = create<AppState>((set, get) => {
               (field) => field.projectId !== id,
             ),
             teamMembers: state.snapshot.teamMembers.filter((member) => member.projectId !== id),
+            memberTenures: state.snapshot.memberTenures.filter(
+              (tenure) => tenure.projectId !== id,
+            ),
             overtimeRecords: state.snapshot.overtimeRecords.filter(
               (record) => record.projectId !== id,
             ),

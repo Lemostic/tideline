@@ -345,6 +345,7 @@ pub fn get_snapshot(conn: &Connection) -> DbResult<Snapshot> {
         team_members: get_team_members(conn)?,
         overtime_records: get_overtime_records(conn)?,
         performance_records: get_performance_records(conn)?,
+        member_tenures: get_member_tenures(conn)?,
         projects: get_projects(conn)?,
         project_meta_fields: get_all_project_meta(conn)?,
         project_roles: get_all_project_roles(conn)?,
@@ -1281,6 +1282,244 @@ pub fn get_team_members(conn: &Connection) -> DbResult<Vec<TeamMember>> {
     )
 }
 
+fn row_to_tenure(row: &Row<'_>) -> rusqlite::Result<MemberTenure> {
+    Ok(MemberTenure {
+        id: row.get("id")?,
+        member_id: row.get("member_id")?,
+        project_id: row.get("project_id")?,
+        started_at: row.get("started_at")?,
+        ended_at: row.get("ended_at")?,
+        note: row.get("note")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+pub fn get_member_tenures(conn: &Connection) -> DbResult<Vec<MemberTenure>> {
+    collect_rows(
+        conn,
+        "SELECT id, member_id, project_id, started_at, ended_at, note, created_at, updated_at \
+         FROM member_tenures ORDER BY project_id ASC, started_at ASC, created_at ASC",
+        row_to_tenure,
+    )
+}
+
+fn get_member_tenure(conn: &Connection, id: &str) -> DbResult<MemberTenure> {
+    conn.query_row(
+        "SELECT id, member_id, project_id, started_at, ended_at, note, created_at, updated_at \
+         FROM member_tenures WHERE id = ?1",
+        [id],
+        row_to_tenure,
+    )
+    .optional()
+    .map_err(db_err)?
+    .ok_or_else(|| format!("投入时间段不存在：{id}"))
+}
+
+fn validate_tenure_dates(started_at: &str, ended_at: Option<&str>) -> DbResult<()> {
+    if started_at.trim().is_empty() {
+        return Err("入组日期不能为空".to_string());
+    }
+    if let Some(ended_at) = ended_at {
+        if ended_at.trim().is_empty() {
+            return Err("出组日期不能为空".to_string());
+        }
+        if ended_at < started_at {
+            return Err("出组日期不能早于入组日期".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// 同一成员的时间段不能重叠；开放段最多只能有一段。
+fn validate_tenure_overlap(
+    conn: &Connection,
+    member_id: &str,
+    started_at: &str,
+    ended_at: Option<&str>,
+    exclude_id: Option<&str>,
+) -> DbResult<()> {
+    let mut statement = conn
+        .prepare(
+            "SELECT id, started_at, ended_at FROM member_tenures WHERE member_id = ?1",
+        )
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([member_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(db_err)?;
+    for row in rows {
+        let (id, existing_start, existing_end) = row.map_err(db_err)?;
+        if Some(id.as_str()) == exclude_id {
+            continue;
+        }
+        if ended_at.is_none() && existing_end.is_none() {
+            return Err("该成员已有一段未结束的投入记录，请先填写出组日期".to_string());
+        }
+        let new_end = ended_at.unwrap_or("9999-12-31");
+        let old_end = existing_end.as_deref().unwrap_or("9999-12-31");
+        if started_at < old_end && existing_start.as_str() < new_end {
+            return Err(format!(
+                "时间段与已有记录（{existing_start} 至 {}）重叠",
+                existing_end.as_deref().unwrap_or("至今")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn sync_member_tenures(conn: &Connection, member_id: &str) -> DbResult<()> {
+    let mut statement = conn
+        .prepare(
+            "SELECT started_at, ended_at FROM member_tenures WHERE member_id = ?1 \
+             ORDER BY started_at ASC",
+        )
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([member_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        })
+        .map_err(db_err)?;
+    let mut earliest: Option<String> = None;
+    let mut latest_end: Option<String> = None;
+    let mut has_open = false;
+    let mut count = 0;
+    for row in rows {
+        let (start, end) = row.map_err(db_err)?;
+        count += 1;
+        if earliest.is_none() || start < *earliest.as_ref().unwrap() {
+            earliest = Some(start);
+        }
+        match end {
+            Some(end) => {
+                if latest_end.is_none() || end > *latest_end.as_ref().unwrap() {
+                    latest_end = Some(end);
+                }
+            }
+            None => has_open = true,
+        }
+    }
+    if count == 0 {
+        conn.execute(
+            "UPDATE team_members SET status = 'released', released_at = COALESCE(released_at, ?1), \
+             updated_at = ?2 WHERE id = ?3",
+            params![today_key(), now_iso(), member_id],
+        )
+        .map_err(db_err)?;
+        return Ok(());
+    }
+    let status = if has_open { "active" } else { "released" };
+    let joined_at = earliest.unwrap_or_else(today_key);
+    conn.execute(
+        "UPDATE team_members SET status = ?1, joined_at = ?2, released_at = ?3, updated_at = ?4 \
+         WHERE id = ?5",
+        params![
+            status,
+            joined_at,
+            if has_open { None } else { latest_end },
+            now_iso(),
+            member_id,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+pub fn create_tenure(conn: &mut Connection, input: NewTenureInput) -> DbResult<MemberTenure> {
+    let member = get_team_member(conn, &input.member_id)?;
+    let started_at = normalize_date(&input.started_at);
+    let ended_at = input.ended_at.and_then(non_empty);
+    validate_tenure_dates(&started_at, ended_at.as_deref())?;
+    validate_tenure_overlap(
+        conn,
+        &member.id,
+        &started_at,
+        ended_at.as_deref(),
+        None,
+    )?;
+    let now = now_iso();
+    let tenure = MemberTenure {
+        id: create_id("mt"),
+        member_id: member.id.clone(),
+        project_id: member.project_id,
+        started_at,
+        ended_at,
+        note: input.note.unwrap_or_default(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    conn.execute(
+        "INSERT INTO member_tenures \
+         (id, member_id, project_id, started_at, ended_at, note, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            &tenure.id,
+            &tenure.member_id,
+            &tenure.project_id,
+            &tenure.started_at,
+            &tenure.ended_at,
+            &tenure.note,
+            &tenure.created_at,
+            &tenure.updated_at,
+        ],
+    )
+    .map_err(db_err)?;
+    sync_member_tenures(conn, &tenure.member_id)?;
+    Ok(tenure)
+}
+
+pub fn update_tenure(conn: &mut Connection, input: UpdateTenureInput) -> DbResult<MemberTenure> {
+    let mut tenure = get_member_tenure(conn, &input.id)?;
+    if let Some(started_at) = input.patch.started_at {
+        tenure.started_at = normalize_date(&started_at);
+    }
+    if let Some(ended_at) = input.patch.ended_at {
+        tenure.ended_at = ended_at.and_then(non_empty);
+    }
+    if let Some(note) = input.patch.note {
+        tenure.note = note;
+    }
+    validate_tenure_dates(&tenure.started_at, tenure.ended_at.as_deref())?;
+    validate_tenure_overlap(
+        conn,
+        &tenure.member_id,
+        &tenure.started_at,
+        tenure.ended_at.as_deref(),
+        Some(&tenure.id),
+    )?;
+    tenure.updated_at = now_iso();
+    conn.execute(
+        "UPDATE member_tenures SET started_at = ?1, ended_at = ?2, note = ?3, updated_at = ?4 \
+         WHERE id = ?5",
+        params![
+            &tenure.started_at,
+            &tenure.ended_at,
+            &tenure.note,
+            &tenure.updated_at,
+            &tenure.id,
+        ],
+    )
+    .map_err(db_err)?;
+    sync_member_tenures(conn, &tenure.member_id)?;
+    Ok(tenure)
+}
+
+pub fn delete_tenure(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    let tenure = get_member_tenure(conn, &input.id)?;
+    conn.execute("DELETE FROM member_tenures WHERE id = ?1", [&tenure.id])
+        .map_err(db_err)?;
+    sync_member_tenures(conn, &tenure.member_id)?;
+    Ok(())
+}
+
 fn get_team_member(conn: &Connection, id: &str) -> DbResult<TeamMember> {
     conn.query_row(
         "SELECT id, project_id, role_id, name, role, status, joined_at, released_at, note, \
@@ -1314,7 +1553,7 @@ pub fn create_team_member(
         released_at: None,
         note: input.note.unwrap_or_default(),
         created_at: now.clone(),
-        updated_at: now,
+        updated_at: now.clone(),
     };
     conn.execute(
         "INSERT INTO team_members \
@@ -1335,6 +1574,32 @@ pub fn create_team_member(
         ],
     )
     .map_err(db_err)?;
+    let tenure = MemberTenure {
+        id: create_id("mt"),
+        member_id: member.id.clone(),
+        project_id: member.project_id.clone(),
+        started_at: member.joined_at.clone(),
+        ended_at: None,
+        note: "首次入组".to_string(),
+        created_at: now,
+        updated_at: member.updated_at.clone(),
+    };
+    conn.execute(
+        "INSERT INTO member_tenures \
+         (id, member_id, project_id, started_at, ended_at, note, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            &tenure.id,
+            &tenure.member_id,
+            &tenure.project_id,
+            &tenure.started_at,
+            &tenure.ended_at,
+            &tenure.note,
+            &tenure.created_at,
+            &tenure.updated_at,
+        ],
+    )
+    .map_err(db_err)?;
     Ok(member)
 }
 
@@ -1343,15 +1608,14 @@ pub fn update_team_member(
     input: UpdateTeamMemberInput,
 ) -> DbResult<TeamMember> {
     let mut member = get_team_member(conn, &input.id)?;
+    let old_status = member.status;
+    let status_patch = input.patch.status;
     if let Some(name) = input.patch.name {
         member.name = fallback_trimmed(&name, "未命名成员");
     }
     if let Some(role_id) = input.patch.role_id {
         require_project_role(conn, &member.project_id, &role_id)?;
         member.role_id = role_id;
-    }
-    if let Some(status) = input.patch.status {
-        member.status = status;
     }
     if let Some(joined_at) = input.patch.joined_at {
         if !joined_at.trim().is_empty() {
@@ -1364,29 +1628,61 @@ pub fn update_team_member(
     if let Some(note) = input.patch.note {
         member.note = note;
     }
-    if member.status == MemberStatus::Released && member.released_at.is_none() {
-        member.released_at = Some(today_key());
-    }
-    if member.status == MemberStatus::Active {
-        member.released_at = None;
-    }
     member.updated_at = now_iso();
     conn.execute(
-        "UPDATE team_members SET name = ?1, role_id = ?2, status = ?3, joined_at = ?4, \
-         released_at = ?5, note = ?6, updated_at = ?7 WHERE id = ?8",
+        "UPDATE team_members SET name = ?1, role_id = ?2, note = ?3, updated_at = ?4 \
+         WHERE id = ?5",
         params![
             &member.name,
             &member.role_id,
-            member.status.as_str(),
-            &member.joined_at,
-            &member.released_at,
             &member.note,
             &member.updated_at,
             &member.id,
         ],
     )
     .map_err(db_err)?;
-    Ok(member)
+
+    // 状态切换对应一段投入记录的结束/开启，历史段保留不覆盖。
+    if let Some(status) = status_patch {
+        if status != old_status {
+            match status {
+                MemberStatus::Released => {
+                    let end = member
+                        .released_at
+                        .clone()
+                        .unwrap_or_else(today_key);
+                    conn.execute(
+                        "UPDATE member_tenures SET ended_at = ?1, updated_at = ?2 \
+                         WHERE member_id = ?3 AND ended_at IS NULL",
+                        params![end, now_iso(), &member.id],
+                    )
+                    .map_err(db_err)?;
+                }
+                MemberStatus::Active => {
+                    let open_count: i64 = conn
+                        .query_row(
+                            "SELECT COUNT(*) FROM member_tenures \
+                             WHERE member_id = ?1 AND ended_at IS NULL",
+                            [&member.id],
+                            |row| row.get(0),
+                        )
+                        .map_err(db_err)?;
+                    if open_count == 0 {
+                        let now = now_iso();
+                        conn.execute(
+                            "INSERT INTO member_tenures \
+                             (id, member_id, project_id, started_at, ended_at, note, created_at, updated_at) \
+                             VALUES (?1, ?2, ?3, date('now'), NULL, '回归项目', ?4, ?4)",
+                            params![create_id("mt"), &member.id, &member.project_id, now],
+                        )
+                        .map_err(db_err)?;
+                    }
+                }
+            }
+            sync_member_tenures(conn, &member.id)?;
+        }
+    }
+    get_team_member(conn, &member.id)
 }
 
 pub fn delete_team_member(conn: &mut Connection, input: IdInput) -> DbResult<()> {
@@ -3911,6 +4207,101 @@ mod tests {
         assert_eq!(snapshot.team_members[0].role_id, role.id);
         assert_eq!(snapshot.project_meta_fields[0].project_id, first.id);
         assert_eq!(snapshot.team_members[0].id, member.id);
+    }
+
+    #[test]
+    fn member_tenures_support_multiple_join_leave_cycles() {
+        let mut conn = memory_db();
+        let project = create_project(
+            &mut conn,
+            NewProjectInput {
+                name: "投入记录项目".to_string(),
+                description: None,
+                color: None,
+                starred: None,
+            },
+        )
+        .expect("创建项目");
+        let roles = get_project_roles(&conn, &project.id).expect("项目角色");
+        let member = create_team_member(
+            &mut conn,
+            NewTeamMemberInput {
+                project_id: project.id.clone(),
+                role_id: roles[0].id.clone(),
+                name: "张三".to_string(),
+                joined_at: Some("2026-01-10".to_string()),
+                note: None,
+            },
+        )
+        .expect("创建成员");
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.member_tenures.len(), 1);
+        assert_eq!(snapshot.member_tenures[0].started_at, "2026-01-10");
+        assert_eq!(snapshot.member_tenures[0].ended_at, None);
+
+        let released = update_team_member(
+            &mut conn,
+            UpdateTeamMemberInput {
+                id: member.id.clone(),
+                patch: TeamMemberPatch {
+                    status: Some(MemberStatus::Released),
+                    released_at: Some(Some("2026-03-01".to_string())),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("释放成员");
+        assert_eq!(released.status, MemberStatus::Released);
+        assert_eq!(released.released_at.as_deref(), Some("2026-03-01"));
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.member_tenures[0].ended_at.as_deref(), Some("2026-03-01"));
+
+        let rejoined = update_team_member(
+            &mut conn,
+            UpdateTeamMemberInput {
+                id: member.id.clone(),
+                patch: TeamMemberPatch {
+                    status: Some(MemberStatus::Active),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("回归成员");
+        assert_eq!(rejoined.status, MemberStatus::Active);
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.member_tenures.len(), 2);
+        assert_eq!(snapshot.member_tenures[1].ended_at, None);
+
+        // 手动补一段更早的历史投入，允许不重叠的多个时间段。
+        let past = create_tenure(
+            &mut conn,
+            NewTenureInput {
+                member_id: member.id.clone(),
+                started_at: "2026-01-01".to_string(),
+                ended_at: Some("2026-01-05".to_string()),
+                note: Some("补录".to_string()),
+            },
+        )
+        .expect("补录历史段");
+        assert_eq!(past.ended_at.as_deref(), Some("2026-01-05"));
+
+        let overlap = create_tenure(
+            &mut conn,
+            NewTenureInput {
+                member_id: member.id.clone(),
+                started_at: "2026-02-01".to_string(),
+                ended_at: Some("2026-02-10".to_string()),
+                note: None,
+            },
+        )
+        .expect_err("重叠时间段应拒绝");
+        assert!(overlap.contains("重叠"), "错误：{overlap}");
+
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.member_tenures.len(), 3);
+        delete_tenure(&mut conn, id_input(&past.id)).expect("删除补录段");
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.member_tenures.len(), 2);
     }
 
     #[test]

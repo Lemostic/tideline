@@ -15,10 +15,16 @@ import {
   projectOvertime,
   projectPerformance,
   projectRolesOf,
+  projectTenureStats,
+  projectTenures,
   roleColor,
   roleName,
+  tenureDays,
+  tenureOverlapsRange,
+  tenureSummaryForProject,
 } from '@/lib/team';
 import type {
+  MemberTenure,
   OvertimeStatus,
   PerformanceCategory,
   Project,
@@ -43,7 +49,7 @@ function formatDate(value: string): string {
   return value.slice(0, 10).replaceAll('-', '/');
 }
 
-type Tab = 'members' | 'overtime' | 'performance' | 'settings';
+type Tab = 'members' | 'tenures' | 'overtime' | 'performance' | 'settings';
 
 export function ProjectDetailPage() {
   const { projectId = '' } = useParams();
@@ -54,6 +60,9 @@ export function ProjectDetailPage() {
   const deleteProject = useAppStore((state) => state.deleteProject);
   const updateMember = useAppStore((state) => state.updateTeamMember);
   const deleteMember = useAppStore((state) => state.deleteTeamMember);
+  const createTenure = useAppStore((state) => state.createTenure);
+  const updateTenure = useAppStore((state) => state.updateTenure);
+  const deleteTenure = useAppStore((state) => state.deleteTenure);
   const createOvertime = useAppStore((state) => state.createOvertime);
   const updateOvertime = useAppStore((state) => state.updateOvertime);
   const deleteOvertime = useAppStore((state) => state.deleteOvertime);
@@ -76,6 +85,11 @@ export function ProjectDetailPage() {
   const [roleEditing, setRoleEditing] = useState<ProjectRole | null>(null);
   const [metaOpen, setMetaOpen] = useState(false);
   const [metaEditing, setMetaEditing] = useState<ProjectMetaField | null>(null);
+  const [tenureOpen, setTenureOpen] = useState(false);
+  const [tenureEditing, setTenureEditing] = useState<MemberTenure | null>(null);
+  const [tenureMemberFilter, setTenureMemberFilter] = useState('');
+  const [tenureFrom, setTenureFrom] = useState('');
+  const [tenureTo, setTenureTo] = useState('');
 
   if (!project) {
     return (
@@ -100,6 +114,17 @@ export function ProjectDetailPage() {
   const active = members.filter((member) => member.status === 'active');
   const released = members.filter((member) => member.status === 'released');
   const memberById = new Map(members.map((member) => [member.id, member]));
+  const tenures = projectTenures(snapshot.memberTenures, project.id);
+  const tenureSummaries = tenureSummaryForProject(
+    snapshot.memberTenures,
+    members,
+    project.id,
+  );
+  const tenureStats = projectTenureStats(tenureSummaries);
+  const filteredTenures = tenures.filter((tenure) => {
+    if (tenureMemberFilter && tenure.memberId !== tenureMemberFilter) return false;
+    return tenureOverlapsRange(tenure, tenureFrom, tenureTo);
+  });
   const monthPerformance = performance.filter((record) => record.date.startsWith(month));
   const performanceRows = performanceByMember(performance, month);
   const overtimeTotal = overtimeHoursInMonth(overtime, month);
@@ -132,6 +157,11 @@ export function ProjectDetailPage() {
   const removeMeta = async (field: ProjectMetaField) => {
     if (!window.confirm(`确认删除元数据「${field.name}」？`)) return;
     await deleteMeta(field.id).catch(() => undefined);
+  };
+
+  const removeTenure = async (tenure: MemberTenure) => {
+    if (!window.confirm('确认删除这一段投入记录？成员状态会按剩余时间段重新计算。')) return;
+    await deleteTenure(tenure.id).catch(() => undefined);
   };
 
   const archiveProject = async () => {
@@ -226,6 +256,7 @@ export function ProjectDetailPage() {
         <div className="team-tabs" role="tablist" aria-label="项目视图">
           {[
             { key: 'members', label: '成员', count: members.length },
+            { key: 'tenures', label: '投入记录', count: tenures.length },
             { key: 'overtime', label: '周末加班', count: overtime.length },
             { key: 'performance', label: '绩效加减分', count: performance.length },
             { key: 'settings', label: '项目设置', count: roles.length + meta.length },
@@ -257,6 +288,19 @@ export function ProjectDetailPage() {
             <Icon name="plus" size={14} /> 添加成员
           </button>
         ) : null}
+        {tab === 'tenures' ? (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => {
+              setTenureEditing(null);
+              setTenureOpen(true);
+            }}
+            disabled={members.length === 0}
+          >
+            <Icon name="plus" size={14} /> 添加时间段
+          </button>
+        ) : null}
         {tab === 'overtime' ? (
           <button
             type="button"
@@ -277,15 +321,17 @@ export function ProjectDetailPage() {
             <Icon name="plus" size={14} /> 绩效记录
           </button>
         ) : null}
-        <label className="team-month">
-          统计月份
-          <input
-            type="month"
-            value={month}
-            onChange={(event) => setMonth(event.target.value || monthKey())}
-            aria-label="项目统计月份"
-          />
-        </label>
+        {tab === 'overtime' || tab === 'performance' ? (
+          <label className="team-month">
+            统计月份
+            <input
+              type="month"
+              value={month}
+              onChange={(event) => setMonth(event.target.value || monthKey())}
+              aria-label="项目统计月份"
+            />
+          </label>
+        ) : null}
       </div>
 
       {tab === 'members' ? (
@@ -388,6 +434,192 @@ export function ProjectDetailPage() {
                 </article>
               ))}
             </div>
+          )}
+        </section>
+      ) : null}
+
+      {tab === 'tenures' ? (
+        <section className="team-panel tenure-panel">
+          <div className="tenure-stats">
+            <div className="tenure-stat">
+              <span>累计投入</span>
+              <strong>{tenureStats.totalDays}<em>人天</em></strong>
+              <small>{tenureStats.segmentCount} 个时间段</small>
+            </div>
+            <div className="tenure-stat">
+              <span>当前在组</span>
+              <strong>{tenureStats.activeMembers}<em>人</em></strong>
+              <small>开放时间段</small>
+            </div>
+            <div className="tenure-stat">
+              <span>已释放成员</span>
+              <strong>{tenureStats.historicalMembers}<em>人</em></strong>
+              <small>已有出组记录</small>
+            </div>
+            <div className="tenure-stat">
+              <span>人均投入</span>
+              <strong>{tenureStats.averageDays}<em>天</em></strong>
+              <small>按在册成员计算</small>
+            </div>
+          </div>
+
+          <div className="tenure-filterbar">
+            <label>
+              成员
+              <select
+                className="select"
+                value={tenureMemberFilter}
+                onChange={(event) => setTenureMemberFilter(event.target.value)}
+                aria-label="投入记录成员筛选"
+              >
+                <option value="">全部成员</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              从
+              <input
+                className="input"
+                type="date"
+                value={tenureFrom}
+                onChange={(event) => setTenureFrom(event.target.value)}
+                aria-label="投入记录开始日期"
+              />
+            </label>
+            <label>
+              到
+              <input
+                className="input"
+                type="date"
+                value={tenureTo}
+                onChange={(event) => setTenureTo(event.target.value)}
+                aria-label="投入记录结束日期"
+              />
+            </label>
+            {tenureMemberFilter || tenureFrom || tenureTo ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setTenureMemberFilter('');
+                  setTenureFrom('');
+                  setTenureTo('');
+                }}
+              >
+                清除筛选
+              </button>
+            ) : null}
+            <span className="grow" />
+            <span className="tenure-filter-count">{filteredTenures.length} 段</span>
+          </div>
+
+          {tenures.length === 0 ? (
+            <div className="tenure-empty">
+              <EmptyState
+                icon={<Icon name="calendar-view" size={22} />}
+                title="还没有投入记录"
+                description="成员加入项目时会自动生成第一段；释放后再次加入会生成新的时间段。"
+                action={
+                  members.length > 0 ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => {
+                        setTenureEditing(null);
+                        setTenureOpen(true);
+                      }}
+                    >
+                      添加时间段
+                    </button>
+                  ) : undefined
+                }
+              />
+            </div>
+          ) : (
+            <>
+              <div className="tenure-member-summary">
+                <div className="tenure-member-summary-head">
+                  <span>成员投入汇总</span>
+                  <span>在册 {members.length} 人</span>
+                </div>
+                {tenureSummaries.map((summary) => (
+                  <div className="tenure-member-row" key={summary.member.id}>
+                    <span className="team-avatar">{initials(summary.member.name)}</span>
+                    <div className="tenure-member-main">
+                      <strong>{summary.member.name}</strong>
+                      <span>
+                        {roleName(roles, summary.member.roleId)} ·{' '}
+                        {summary.active ? '在组' : '已释放'} · {summary.segments.length} 段
+                      </span>
+                    </div>
+                    <span className="tenure-member-first">
+                      {summary.firstStartedAt ? formatDate(summary.firstStartedAt) : '—'} 起
+                    </span>
+                    <span className="tenure-member-total">{summary.totalDays} 天</span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setTenureMemberFilter(summary.member.id)}
+                    >
+                      查看
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="tenure-segments">
+                <div className="tenure-segments-head">
+                  <span>时间段明细</span>
+                  <span>{filteredTenures.length} 条</span>
+                </div>
+                {filteredTenures.length === 0 ? (
+                  <p className="tenure-filter-empty">当前筛选条件下没有投入记录。</p>
+                ) : (
+                  filteredTenures.map((tenure) => {
+                    const member = memberById.get(tenure.memberId);
+                    return (
+                      <div className="tenure-segment-row" key={tenure.id}>
+                        <span className="tenure-segment-member">
+                          {member?.name ?? '未知成员'}
+                        </span>
+                        <span className="tenure-segment-range">
+                          {formatDate(tenure.startedAt)} → {tenure.endedAt ? formatDate(tenure.endedAt) : '至今'}
+                        </span>
+                        <span className={`tenure-segment-days${tenure.endedAt === null ? ' is-active' : ''}`}>
+                          {tenureDays(tenure)} 天
+                        </span>
+                        <span className="tenure-segment-note">
+                          {tenure.note || (tenure.endedAt === null ? '当前投入中' : '')}
+                        </span>
+                        <span className="grow" />
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => {
+                            setTenureEditing(tenure);
+                            setTenureOpen(true);
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-icon"
+                          aria-label="删除投入时间段"
+                          onClick={() => void removeTenure(tenure)}
+                        >
+                          <Icon name="trash" size={13} />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </>
           )}
         </section>
       ) : null}
@@ -666,6 +898,25 @@ export function ProjectDetailPage() {
           setPerformanceOpen(false);
         }}
       />
+      <TenureModal
+        open={tenureOpen}
+        members={members}
+        tenure={tenureEditing}
+        defaultMemberId={tenureMemberFilter}
+        onClose={() => setTenureOpen(false)}
+        onSubmit={async (input) => {
+          if (tenureEditing) {
+            await updateTenure(tenureEditing.id, {
+              startedAt: input.startedAt,
+              endedAt: input.endedAt,
+              note: input.note,
+            });
+          } else {
+            await createTenure(input);
+          }
+          setTenureOpen(false);
+        }}
+      />
       <RoleModal
         open={roleOpen}
         role={roleEditing}
@@ -803,16 +1054,22 @@ function MemberModal({
             </select>
           </label>
           <label className="team-form-field">
-            <span>入组日期</span>
+            <span>入组日期{member ? '（在投入记录中维护）' : ''}</span>
             <input
               className="input"
               type="date"
               value={joinedAt}
+              disabled={member !== null}
               onChange={(event) => setJoinedAt(event.target.value)}
               aria-label="项目成员入组日期"
             />
           </label>
         </div>
+        {member ? (
+          <p className="team-weekend-note">
+            成员的多次入组/出组请到「投入记录」标签页维护，那里可以添加、编辑、删除每一段时间。
+          </p>
+        ) : null}
         <label className="team-form-field">
           <span>备注</span>
           <textarea
@@ -1129,6 +1386,149 @@ function PerformanceModal({
             maxLength={180}
             onChange={(event) => setNote(event.target.value)}
             aria-label="绩效补充说明"
+          />
+        </label>
+        {error ? <p className="team-form-error">{error}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
+function TenureModal({
+  open,
+  members,
+  tenure,
+  defaultMemberId,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  members: TeamMember[];
+  tenure: MemberTenure | null;
+  defaultMemberId: string;
+  onClose: () => void;
+  onSubmit: (input: {
+    memberId: string;
+    startedAt: string;
+    endedAt: string | null;
+    note: string;
+  }) => Promise<void>;
+}) {
+  const [memberId, setMemberId] = useState('');
+  const [startedAt, setStartedAt] = useState(todayLocalDate());
+  const [endedAt, setEndedAt] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setMemberId(tenure?.memberId || defaultMemberId || members[0]?.id || '');
+    setStartedAt(tenure?.startedAt ?? todayLocalDate());
+    setEndedAt(tenure?.endedAt ?? '');
+    setNote(tenure?.note ?? '');
+    setBusy(false);
+    setError(null);
+  }, [open, tenure, defaultMemberId, members]);
+
+  if (!open) return null;
+
+  const submit = async () => {
+    if (busy) return;
+    if (!memberId) {
+      setError('请选择成员');
+      return;
+    }
+    if (!startedAt) {
+      setError('请选择入组日期');
+      return;
+    }
+    if (endedAt && endedAt < startedAt) {
+      setError('出组日期不能早于入组日期');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await onSubmit({
+        memberId,
+        startedAt,
+        endedAt: endedAt || null,
+        note: note.trim(),
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={tenure ? '编辑投入时间段' : '添加投入时间段'}
+      subtitle="一个成员可以有多段投入；时间段不能重叠，开放段最多一段"
+      onClose={() => (busy ? undefined : onClose())}
+      footer={
+        <>
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
+            取消
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={busy}>
+            {busy ? '保存中…' : '保存时间段'}
+          </button>
+        </>
+      }
+    >
+      <div className="team-form">
+        <label className="team-form-field">
+          <span>成员</span>
+          <select
+            className="select"
+            value={memberId}
+            disabled={tenure !== null}
+            onChange={(event) => setMemberId(event.target.value)}
+            aria-label="投入记录成员"
+          >
+            {members.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="team-form-grid">
+          <label className="team-form-field">
+            <span>入组日期 / 开始</span>
+            <input
+              className="input"
+              type="date"
+              value={startedAt}
+              onChange={(event) => setStartedAt(event.target.value)}
+              aria-label="投入记录开始"
+            />
+          </label>
+          <label className="team-form-field">
+            <span>出组日期 / 结束（留空=至今）</span>
+            <input
+              className="input"
+              type="date"
+              value={endedAt}
+              onChange={(event) => setEndedAt(event.target.value)}
+              aria-label="投入记录结束"
+            />
+          </label>
+        </div>
+        <p className="team-weekend-note">
+          留空表示该成员目前仍在项目中；释放/回归操作会自动创建或关闭时间段，之后可在这里修正具体日期。
+        </p>
+        <label className="team-form-field">
+          <span>备注（可选）</span>
+          <input
+            className="input"
+            value={note}
+            maxLength={120}
+            placeholder="例如：第一阶段开发、临时支援"
+            onChange={(event) => setNote(event.target.value)}
+            aria-label="投入记录备注"
           />
         </label>
         {error ? <p className="team-form-error">{error}</p> : null}

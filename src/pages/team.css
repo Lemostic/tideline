@@ -922,3 +922,247 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ===== 投入记录（V0.8.3） ===== */
+.tenure-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.tenure-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border-bottom: 1px solid var(--line);
+  background: var(--line);
+}
+
+.tenure-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 13px 16px;
+  background: var(--surface);
+}
+
+.tenure-stat > span {
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.tenure-stat > strong {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 720;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.tenure-stat > strong em {
+  margin-left: 3px;
+  color: var(--faint);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.tenure-stat small {
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.tenure-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.tenure-filterbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.tenure-filterbar .select,
+.tenure-filterbar .input {
+  height: 27px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+.tenure-filterbar .select {
+  width: 120px;
+}
+
+.tenure-filterbar .input[type='date'] {
+  width: 118px;
+}
+
+.tenure-filter-count {
+  color: var(--faint);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.tenure-empty {
+  display: grid;
+  min-height: 250px;
+  place-items: center;
+  padding: 14px;
+}
+
+.tenure-member-summary,
+.tenure-segments {
+  display: flex;
+  flex-direction: column;
+}
+
+.tenure-member-summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.tenure-member-summary-head,
+.tenure-segments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 14px;
+  background: var(--surface-muted);
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.tenure-member-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.tenure-member-row:hover {
+  background: var(--surface-hover);
+}
+
+.tenure-member-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tenure-member-main strong {
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.tenure-member-main span {
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.tenure-member-first {
+  color: var(--faint);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.tenure-member-total {
+  width: 62px;
+  color: var(--primary-strong);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tenure-segments-head {
+  border-bottom: 1px solid var(--line);
+}
+
+.tenure-segment-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10.5px;
+}
+
+.tenure-segment-row:last-child {
+  border-bottom: 0;
+}
+
+.tenure-segment-row:hover {
+  background: var(--surface-hover);
+}
+
+.tenure-segment-member {
+  width: 70px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tenure-segment-range {
+  width: 170px;
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tenure-segment-days {
+  min-width: 54px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  color: var(--faint);
+  font-size: 9px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.tenure-segment-days.is-active {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.tenure-segment-note {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tenure-filter-empty {
+  margin: 0;
+  padding: 18px;
+  color: var(--faint);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .tenure-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tenure-member-first {
+    display: none;
+  }
+}

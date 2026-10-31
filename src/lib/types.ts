@@ -96,6 +96,8 @@ export interface Snapshot {
   teamMembers: TeamMember[];
   overtimeRecords: OvertimeRecord[];
   performanceRecords: PerformanceRecord[];
+  /** 成员投入时间段（V0.8.3） */
+  memberTenures: MemberTenure[];
   /** 项目（V0.9） */
   projects: Project[];
   projectMetaFields: ProjectMetaField[];
@@ -230,6 +232,28 @@ export interface TeamMember {
   createdAt: string;
   updatedAt: string;
 }
+
+/** 成员投入时间段（V0.8.3）：可多次入组/出组，每段独立可编辑。 */
+export interface MemberTenure {
+  id: string;
+  memberId: string;
+  projectId: string;
+  startedAt: string;
+  /** null 表示当前仍在组 */
+  endedAt: string | null;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewTenureInput {
+  memberId: string;
+  startedAt: string;
+  endedAt?: string | null;
+  note?: string;
+}
+
+export type TenurePatch = Partial<Pick<MemberTenure, 'startedAt' | 'endedAt' | 'note'>>;
 
 export interface OvertimeRecord {
   id: string;
@@ -437,6 +461,7 @@ export interface BackupFile {
   teamMembers: TeamMember[];
   overtimeRecords: OvertimeRecord[];
   performanceRecords: PerformanceRecord[];
+  memberTenures: MemberTenure[];
   /** V0.9 新增；旧备份没有该字段时按空项目处理，恢复时兼容迁移 */
   projects: Project[];
   projectMetaFields: ProjectMetaField[];
@@ -455,6 +480,7 @@ export interface BackupSummary {
   teamMembers: number;
   overtimeRecords: number;
   performanceRecords: number;
+  memberTenures: number;
   projects: number;
   projectMetaFields: number;
   projectRoles: number;

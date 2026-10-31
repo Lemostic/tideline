@@ -315,6 +315,24 @@ pub fn delete_team_member(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
 }
 
 #[tauri::command]
+pub fn create_tenure(db: State<'_, Db>, input: NewTenureInput) -> CmdResult<MemberTenure> {
+    let mut conn = db.lock()?;
+    repo::create_tenure(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn update_tenure(db: State<'_, Db>, input: UpdateTenureInput) -> CmdResult<MemberTenure> {
+    let mut conn = db.lock()?;
+    repo::update_tenure(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn delete_tenure(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_tenure(&mut conn, input)
+}
+
+#[tauri::command]
 pub fn create_overtime(db: State<'_, Db>, input: NewOvertimeInput) -> CmdResult<OvertimeRecord> {
     let mut conn = db.lock()?;
     repo::create_overtime(&mut conn, input)

@@ -1,4 +1,5 @@
 import type {
+  MemberTenure,
   OvertimeRecord,
   PerformanceCategory,
   PerformanceRecord,
@@ -154,4 +155,107 @@ export function projectPerformanceNet(
 
 export function activeProjectCount(projects: Project[]): number {
   return projects.filter((project) => project.status === 'active').length;
+}
+
+// ---------- 多段投入记录（V0.8.3） ----------
+
+export function todayKeyLocal(date = new Date()): string {
+  return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+}
+
+export function projectTenures(tenures: MemberTenure[], projectId: string): MemberTenure[] {
+  return tenures
+    .filter((tenure) => tenure.projectId === projectId)
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id));
+}
+
+export function memberTenuresOf(tenures: MemberTenure[], memberId: string): MemberTenure[] {
+  return tenures
+    .filter((tenure) => tenure.memberId === memberId)
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id));
+}
+
+/** 含首尾日期；开放段按今天计算；未来段返回 0。 */
+export function tenureDays(tenure: MemberTenure, asOf = todayKeyLocal()): number {
+  const start = Date.parse(`${tenure.startedAt}T00:00:00Z`);
+  const end = Date.parse(`${tenure.endedAt ?? asOf}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0;
+  return Math.floor((end - start) / 86_400_000) + 1;
+}
+
+export function tenureIsActive(tenure: MemberTenure): boolean {
+  return tenure.endedAt === null;
+}
+
+export function tenureOverlapsRange(
+  tenure: MemberTenure,
+  from: string,
+  to: string,
+): boolean {
+  if (from && tenure.endedAt !== null && tenure.endedAt < from) return false;
+  if (to && tenure.startedAt > to) return false;
+  return true;
+}
+
+export interface MemberTenureSummary {
+  member: TeamMember;
+  segments: MemberTenure[];
+  totalDays: number;
+  active: boolean;
+  firstStartedAt: string | null;
+  latestEndedAt: string | null;
+}
+
+export function tenureSummaryForProject(
+  tenures: MemberTenure[],
+  members: TeamMember[],
+  projectId: string,
+  asOf = todayKeyLocal(),
+): MemberTenureSummary[] {
+  return members
+    .filter((member) => member.projectId === projectId)
+    .map((member) => {
+      const segments = memberTenuresOf(tenures, member.id);
+      return {
+        member,
+        segments,
+        totalDays: segments.reduce((sum, tenure) => sum + tenureDays(tenure, asOf), 0),
+        active: segments.some((tenure) => tenureIsActive(tenure)),
+        firstStartedAt: segments[0]?.startedAt ?? null,
+        latestEndedAt:
+          [...segments]
+            .map((tenure) => tenure.endedAt)
+            .filter((value): value is string => Boolean(value))
+            .sort()
+            .at(-1) ?? null,
+      };
+    })
+    .sort((a, b) => b.totalDays - a.totalDays || a.member.name.localeCompare(b.member.name));
+}
+
+export interface ProjectTenureStats {
+  totalDays: number;
+  activeMembers: number;
+  historicalMembers: number;
+  averageDays: number;
+  segmentCount: number;
+}
+
+export function projectTenureStats(
+  summaries: MemberTenureSummary[],
+): ProjectTenureStats {
+  const totalDays = summaries.reduce((sum, item) => sum + item.totalDays, 0);
+  const activeMembers = summaries.filter((item) => item.active).length;
+  const historicalMembers = summaries.length - activeMembers;
+  return {
+    totalDays,
+    activeMembers,
+    historicalMembers,
+    averageDays: summaries.length > 0 ? Math.round(totalDays / summaries.length) : 0,
+    segmentCount: summaries.reduce((sum, item) => sum + item.segments.length, 0),
+  };
+}
+
+export function formatTenureRange(tenure: MemberTenure): string {
+  return `${tenure.startedAt} → ${tenure.endedAt ?? '至今'}`;
 }

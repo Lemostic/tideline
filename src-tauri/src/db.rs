@@ -227,6 +227,17 @@ CREATE TABLE IF NOT EXISTS overtime_records (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS member_tenures (
+    id         TEXT PRIMARY KEY NOT NULL,
+    member_id  TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    started_at TEXT NOT NULL,
+    ended_at   TEXT,
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS performance_records (
     id         TEXT PRIMARY KEY NOT NULL,
     project_id TEXT REFERENCES projects (id) ON DELETE CASCADE,
@@ -252,6 +263,8 @@ CREATE INDEX IF NOT EXISTS idx_projects_status ON projects (status);
 CREATE INDEX IF NOT EXISTS idx_project_meta_project ON project_meta_fields (project_id, position);
 CREATE INDEX IF NOT EXISTS idx_project_roles_project ON project_roles (project_id, position);
 CREATE INDEX IF NOT EXISTS idx_team_members_status ON team_members (status);
+CREATE INDEX IF NOT EXISTS idx_member_tenures_member ON member_tenures (member_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_member_tenures_project ON member_tenures (project_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_overtime_member_date ON overtime_records (member_id, date);
 CREATE INDEX IF NOT EXISTS idx_performance_member_date ON performance_records (member_id, date);
 "#;
@@ -287,7 +300,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -400,10 +413,22 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
                  created_at TEXT NOT NULL,
                  updated_at TEXT NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS member_tenures (
+                 id         TEXT PRIMARY KEY NOT NULL,
+                 member_id  TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
+                 project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+                 started_at TEXT NOT NULL,
+                 ended_at   TEXT,
+                 note       TEXT NOT NULL DEFAULT '',
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL
+             );
              CREATE INDEX IF NOT EXISTS idx_projects_status ON projects (status);
              CREATE INDEX IF NOT EXISTS idx_project_meta_project ON project_meta_fields (project_id, position);
              CREATE INDEX IF NOT EXISTS idx_project_roles_project ON project_roles (project_id, position);
              CREATE INDEX IF NOT EXISTS idx_team_members_project ON team_members (project_id);
+             CREATE INDEX IF NOT EXISTS idx_member_tenures_member ON member_tenures (member_id, started_at);
+             CREATE INDEX IF NOT EXISTS idx_member_tenures_project ON member_tenures (project_id, started_at);
              CREATE INDEX IF NOT EXISTS idx_overtime_project_date ON overtime_records (project_id, date);
              CREATE INDEX IF NOT EXISTS idx_performance_project_date ON performance_records (project_id, date);
              CREATE INDEX IF NOT EXISTS idx_cards_deleted_at ON cards (deleted_at);
@@ -414,9 +439,30 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
         )
         .map_err(|error| format!("创建项目/角色/元数据表失败：{error}"))?;
     migrate_legacy_team_projects(connection)?;
+    backfill_member_tenures(connection)?;
     connection
         .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|error| format!("写入 user_version 失败：{error}"))?;
+    Ok(())
+}
+
+/// V0.8.3：成员历史投入时间段表为空时，用成员的 joined_at / released_at 补首段。
+/// 已是多段记录的用户不会被重复补段。
+fn backfill_member_tenures(connection: &Connection) -> Result<(), String> {
+    connection
+        .execute(
+            "INSERT INTO member_tenures \
+             (id, member_id, project_id, started_at, ended_at, note, created_at, updated_at) \
+             SELECT 'mt_mig_' || id, id, project_id, \
+                    COALESCE(NULLIF(joined_at, ''), date('now')), \
+                    CASE WHEN status = 'released' THEN COALESCE(NULLIF(released_at, ''), joined_at) ELSE NULL END, \
+                    '由历史成员记录迁移', created_at, updated_at \
+             FROM team_members \
+             WHERE project_id IS NOT NULL AND project_id <> '' \
+               AND NOT EXISTS (SELECT 1 FROM member_tenures WHERE member_tenures.member_id = team_members.id)",
+            [],
+        )
+        .map_err(|error| format!("迁移成员投入时间段失败：{error}"))?;
     Ok(())
 }
 
@@ -841,6 +887,7 @@ CREATE TABLE cards (
             )
             .expect("插入 V0.8 成员");
         migrate_legacy_team_projects(&connection).expect("迁移旧项目组");
+        backfill_member_tenures(&connection).expect("补历史投入段");
         let project_id: String = connection
             .query_row(
                 "SELECT project_id FROM team_members WHERE id = 'm_old'",
@@ -865,5 +912,13 @@ CREATE TABLE cards (
             )
             .expect("默认角色数");
         assert_eq!(role_count, 5);
+        let tenure_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM member_tenures WHERE member_id = 'm_old'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("历史投入段数");
+        assert_eq!(tenure_count, 1);
     }
 }

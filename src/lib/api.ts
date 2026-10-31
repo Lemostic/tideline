@@ -39,6 +39,7 @@ import type {
   ListPatch,
   MemberRole,
   MemberStatus,
+  MemberTenure,
   MoveCardInput,
   NewBoardInput,
   NewBoardSetInput,
@@ -51,6 +52,7 @@ import type {
   NewProjectMetaInput,
   NewProjectRoleInput,
   NewTeamMemberInput,
+  NewTenureInput,
   OvertimePatch,
   OvertimeRecord,
   OvertimeStatus,
@@ -68,6 +70,7 @@ import type {
   Subtask,
   TeamMember,
   TeamMemberPatch,
+  TenurePatch,
 } from './types';
 
 export interface TidelineApi {
@@ -121,6 +124,9 @@ export interface TidelineApi {
   createTeamMember(input: NewTeamMemberInput): Promise<TeamMember>;
   updateTeamMember(input: { id: string; patch: TeamMemberPatch }): Promise<TeamMember>;
   deleteTeamMember(input: IdInput): Promise<void>;
+  createTenure(input: NewTenureInput): Promise<MemberTenure>;
+  updateTenure(input: { id: string; patch: TenurePatch }): Promise<MemberTenure>;
+  deleteTenure(input: IdInput): Promise<void>;
   createOvertime(input: NewOvertimeInput): Promise<OvertimeRecord>;
   updateOvertime(input: { id: string; patch: OvertimePatch }): Promise<OvertimeRecord>;
   deleteOvertime(input: IdInput): Promise<void>;
@@ -184,6 +190,9 @@ const tauriApi: TidelineApi = {
   createTeamMember: (input) => invoke<TeamMember>('create_team_member', { input }),
   updateTeamMember: (input) => invoke<TeamMember>('update_team_member', { input }),
   deleteTeamMember: (input) => invoke<void>('delete_team_member', { input }),
+  createTenure: (input) => invoke<MemberTenure>('create_tenure', { input }),
+  updateTenure: (input) => invoke<MemberTenure>('update_tenure', { input }),
+  deleteTenure: (input) => invoke<void>('delete_tenure', { input }),
   createOvertime: (input) => invoke<OvertimeRecord>('create_overtime', { input }),
   updateOvertime: (input) => invoke<OvertimeRecord>('update_overtime', { input }),
   deleteOvertime: (input) => invoke<void>('delete_overtime', { input }),
@@ -287,6 +296,7 @@ function loadLocalDb(): LocalDb {
       teamMembers: [],
       overtimeRecords: [],
       performanceRecords: [],
+      memberTenures: [],
       projects: [],
       projectMetaFields: [],
       projectRoles: [],
@@ -306,6 +316,7 @@ function loadLocalDb(): LocalDb {
         teamMembers: [],
         overtimeRecords: [],
         performanceRecords: [],
+        memberTenures: [],
         projects: [],
         projectMetaFields: [],
         projectRoles: [],
@@ -417,6 +428,22 @@ function loadLocalDb(): LocalDb {
               note: typeof item.note === 'string' ? item.note : '',
             }))
         : [],
+      memberTenures: Array.isArray(parsed.memberTenures)
+        ? parsed.memberTenures
+            .filter(
+              (item): item is MemberTenure =>
+                Boolean(item) &&
+                typeof item.id === 'string' &&
+                typeof item.memberId === 'string' &&
+                typeof item.projectId === 'string',
+            )
+            .map((item) => ({
+              ...item,
+              startedAt: typeof item.startedAt === 'string' ? item.startedAt : '',
+              endedAt: typeof item.endedAt === 'string' ? item.endedAt : null,
+              note: typeof item.note === 'string' ? item.note : '',
+            }))
+        : [],
       projects: Array.isArray(parsed.projects)
         ? parsed.projects
             .filter(
@@ -470,6 +497,7 @@ function loadLocalDb(): LocalDb {
       teamMembers: [],
       overtimeRecords: [],
       performanceRecords: [],
+      memberTenures: [],
       projects: [],
       projectMetaFields: [],
       projectRoles: [],
@@ -555,6 +583,55 @@ function requireTeamMember(db: LocalDb, id: string): TeamMember {
   const member = db.teamMembers.find((item) => item.id === id);
   if (!member) throw new Error(`项目成员不存在：${id}`);
   return member;
+}
+
+function syncLocalMemberTenures(db: LocalDb, memberId: string): void {
+  const member = db.teamMembers.find((item) => item.id === memberId);
+  if (!member) return;
+  const tenures = db.memberTenures
+    .filter((item) => item.memberId === memberId)
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  if (tenures.length === 0) {
+    member.status = 'released';
+    member.releasedAt = member.releasedAt ?? todayLocalDate();
+    member.updatedAt = nowISO();
+    return;
+  }
+  member.joinedAt = tenures[0].startedAt;
+  const open = tenures.find((item) => item.endedAt === null);
+  member.status = open ? 'active' : 'released';
+  member.releasedAt = open
+    ? null
+    : tenures
+        .map((item) => item.endedAt)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) ?? null;
+  member.updatedAt = nowISO();
+}
+
+function validateLocalTenure(
+  db: LocalDb,
+  memberId: string,
+  startedAt: string,
+  endedAt: string | null,
+  excludeId?: string,
+): void {
+  if (!startedAt.trim()) throw new Error('入组日期不能为空');
+  if (endedAt && endedAt < startedAt) throw new Error('出组日期不能早于入组日期');
+  const newEnd = endedAt ?? '9999-12-31';
+  for (const existing of db.memberTenures) {
+    if (existing.memberId !== memberId || existing.id === excludeId) continue;
+    if (!endedAt && !existing.endedAt) {
+      throw new Error('该成员已有一段未结束的投入记录，请先填写出组日期');
+    }
+    const oldEnd = existing.endedAt ?? '9999-12-31';
+    if (startedAt < oldEnd && existing.startedAt < newEnd) {
+      throw new Error(
+        `时间段与已有记录（${existing.startedAt} 至 ${existing.endedAt ?? '至今'}）重叠`,
+      );
+    }
+  }
 }
 
 function requireProject(db: LocalDb, id: string): Project {
@@ -664,6 +741,9 @@ const localApi: TidelineApi = {
       overtimeRecords: [...db.overtimeRecords].sort((a, b) => b.date.localeCompare(a.date)),
       performanceRecords: [...db.performanceRecords].sort((a, b) =>
         b.date.localeCompare(a.date),
+      ),
+      memberTenures: [...db.memberTenures].sort(
+        (a, b) => a.projectId.localeCompare(b.projectId) || a.startedAt.localeCompare(b.startedAt),
       ),
       projects: [...db.projects].sort(
         (a, b) =>
@@ -1040,6 +1120,7 @@ const localApi: TidelineApi = {
       teamMembers: backup.teamMembers,
       overtimeRecords: backup.overtimeRecords,
       performanceRecords: backup.performanceRecords,
+      memberTenures: backup.memberTenures,
       projects: backup.projects,
       projectMetaFields: backup.projectMetaFields,
       projectRoles: backup.projectRoles,
@@ -1185,6 +1266,16 @@ const localApi: TidelineApi = {
       updatedAt: now,
     };
     db.teamMembers.push(member);
+    db.memberTenures.push({
+      id: createId('mt'),
+      memberId: member.id,
+      projectId: member.projectId,
+      startedAt: member.joinedAt,
+      endedAt: null,
+      note: '首次入组',
+      createdAt: now,
+      updatedAt: now,
+    });
     saveLocalDb(db);
     return member;
   },
@@ -1192,6 +1283,7 @@ const localApi: TidelineApi = {
   async updateTeamMember({ id, patch }) {
     const db = loadLocalDb();
     const member = requireTeamMember(db, id);
+    const oldStatus = member.status;
     if (patch.name !== undefined) member.name = patch.name.trim() || '未命名成员';
     if (patch.roleId !== undefined) {
       requireProjectRole(db, member.projectId, patch.roleId);
@@ -1201,10 +1293,34 @@ const localApi: TidelineApi = {
     if (patch.joinedAt !== undefined && patch.joinedAt.trim()) member.joinedAt = patch.joinedAt;
     if (patch.releasedAt !== undefined) member.releasedAt = patch.releasedAt || null;
     if (patch.note !== undefined) member.note = patch.note;
-    if (member.status === 'released' && !member.releasedAt) {
-      member.releasedAt = todayLocalDate();
+    if (patch.status !== undefined && patch.status !== oldStatus) {
+      if (member.status === 'released') {
+        const end = member.releasedAt || todayLocalDate();
+        db.memberTenures = db.memberTenures.map((tenure) =>
+          tenure.memberId === id && tenure.endedAt === null
+            ? { ...tenure, endedAt: end, updatedAt: nowISO() }
+            : tenure,
+        );
+      } else if (member.status === 'active') {
+        const hasOpen = db.memberTenures.some(
+          (tenure) => tenure.memberId === id && tenure.endedAt === null,
+        );
+        if (!hasOpen) {
+          const now = nowISO();
+          db.memberTenures.push({
+            id: createId('mt'),
+            memberId: id,
+            projectId: member.projectId,
+            startedAt: todayLocalDate(),
+            endedAt: null,
+            note: '回归项目',
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+      syncLocalMemberTenures(db, id);
     }
-    if (member.status === 'active') member.releasedAt = null;
     member.updatedAt = nowISO();
     saveLocalDb(db);
     return member;
@@ -1213,8 +1329,55 @@ const localApi: TidelineApi = {
   async deleteTeamMember({ id }) {
     const db = loadLocalDb();
     db.teamMembers = db.teamMembers.filter((member) => member.id !== id);
+    db.memberTenures = db.memberTenures.filter((tenure) => tenure.memberId !== id);
     db.overtimeRecords = db.overtimeRecords.filter((record) => record.memberId !== id);
     db.performanceRecords = db.performanceRecords.filter((record) => record.memberId !== id);
+    saveLocalDb(db);
+  },
+
+  async createTenure(input) {
+    const db = loadLocalDb();
+    const member = requireTeamMember(db, input.memberId);
+    const startedAt = input.startedAt.trim() || todayLocalDate();
+    const endedAt = input.endedAt?.trim() || null;
+    validateLocalTenure(db, input.memberId, startedAt, endedAt);
+    const now = nowISO();
+    const tenure: MemberTenure = {
+      id: createId('mt'),
+      memberId: input.memberId,
+      projectId: member.projectId,
+      startedAt,
+      endedAt,
+      note: input.note ?? '',
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.memberTenures.push(tenure);
+    syncLocalMemberTenures(db, input.memberId);
+    saveLocalDb(db);
+    return tenure;
+  },
+
+  async updateTenure({ id, patch }) {
+    const db = loadLocalDb();
+    const tenure = db.memberTenures.find((item) => item.id === id);
+    if (!tenure) throw new Error(`投入时间段不存在：${id}`);
+    if (patch.startedAt !== undefined) tenure.startedAt = patch.startedAt.trim() || tenure.startedAt;
+    if (patch.endedAt !== undefined) tenure.endedAt = patch.endedAt || null;
+    if (patch.note !== undefined) tenure.note = patch.note;
+    validateLocalTenure(db, tenure.memberId, tenure.startedAt, tenure.endedAt, id);
+    tenure.updatedAt = nowISO();
+    syncLocalMemberTenures(db, tenure.memberId);
+    saveLocalDb(db);
+    return tenure;
+  },
+
+  async deleteTenure({ id }) {
+    const db = loadLocalDb();
+    const tenure = db.memberTenures.find((item) => item.id === id);
+    if (!tenure) throw new Error(`投入时间段不存在：${id}`);
+    db.memberTenures = db.memberTenures.filter((item) => item.id !== id);
+    syncLocalMemberTenures(db, tenure.memberId);
     saveLocalDb(db);
   },
 

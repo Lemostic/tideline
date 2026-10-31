@@ -440,6 +440,21 @@ pub struct TeamMember {
     pub updated_at: String,
 }
 
+/// 成员投入时间段（V0.8.3）：同一成员可多次入组/出组，每段独立记录起止日期。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberTenure {
+    pub id: String,
+    pub member_id: String,
+    pub project_id: String,
+    pub started_at: String,
+    /// None 表示当前仍在组（开放段）。
+    pub ended_at: Option<String>,
+    pub note: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// 周末加班记录：planned=排班，done=已发生。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -500,6 +515,9 @@ pub struct Snapshot {
     /// 绩效加减分（V0.8 / V0.9）。
     #[serde(default)]
     pub performance_records: Vec<PerformanceRecord>,
+    /// 成员投入时间段（V0.8.3）。
+    #[serde(default)]
+    pub member_tenures: Vec<MemberTenure>,
     /// 项目（V0.9）。
     #[serde(default)]
     pub projects: Vec<Project>,
@@ -541,6 +559,9 @@ pub struct BackupFile {
     pub overtime_records: Vec<OvertimeRecord>,
     #[serde(default)]
     pub performance_records: Vec<PerformanceRecord>,
+    /// V0.8.3 新增。
+    #[serde(default)]
+    pub member_tenures: Vec<MemberTenure>,
     /// V0.9 新增。
     #[serde(default)]
     pub projects: Vec<Project>,
@@ -570,6 +591,8 @@ pub struct BackupSummary {
     pub overtime_records: usize,
     #[serde(default)]
     pub performance_records: usize,
+    #[serde(default)]
+    pub member_tenures: usize,
     #[serde(default)]
     pub projects: usize,
     #[serde(default)]
@@ -968,6 +991,35 @@ pub struct TeamMemberPatch {
 pub struct UpdateTeamMemberInput {
     pub id: String,
     pub patch: TeamMemberPatch,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTenureInput {
+    pub member_id: String,
+    pub started_at: String,
+    #[serde(default)]
+    pub ended_at: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TenurePatch {
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub ended_at: Option<Option<String>>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTenureInput {
+    pub id: String,
+    pub patch: TenurePatch,
 }
 
 #[derive(Debug, Clone, Deserialize)]

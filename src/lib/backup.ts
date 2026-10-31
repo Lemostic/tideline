@@ -21,6 +21,7 @@ import type {
   ProjectMetaField,
   ProjectRole,
   TeamMember,
+  MemberTenure,
 } from './types';
 
 export const BACKUP_APP = 'tideline';
@@ -39,6 +40,7 @@ export interface BackupData {
   teamMembers: TeamMember[];
   overtimeRecords: OvertimeRecord[];
   performanceRecords: PerformanceRecord[];
+  memberTenures: MemberTenure[];
   projects: Project[];
   projectMetaFields: ProjectMetaField[];
   projectRoles: ProjectRole[];
@@ -48,7 +50,7 @@ export function summarizeBackup(
   backup: Pick<
     BackupFile,
     'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets' | 'goals' |
-      'teamMembers' | 'overtimeRecords' | 'performanceRecords' | 'projects' |
+      'teamMembers' | 'overtimeRecords' | 'performanceRecords' | 'memberTenures' | 'projects' |
       'projectMetaFields' | 'projectRoles'
   >,
 ): BackupSummary {
@@ -64,6 +66,7 @@ export function summarizeBackup(
     teamMembers: backup.teamMembers.length,
     overtimeRecords: backup.overtimeRecords.length,
     performanceRecords: backup.performanceRecords.length,
+    memberTenures: backup.memberTenures.length,
     projects: backup.projects.length,
     projectMetaFields: backup.projectMetaFields.length,
     projectRoles: backup.projectRoles.length,
@@ -86,6 +89,7 @@ export function createBackup(data: BackupData): BackupFile {
     teamMembers: data.teamMembers,
     overtimeRecords: data.overtimeRecords,
     performanceRecords: data.performanceRecords,
+    memberTenures: data.memberTenures,
     projects: data.projects,
     projectMetaFields: data.projectMetaFields,
     projectRoles: data.projectRoles,
@@ -506,6 +510,50 @@ export function parseBackup(text: string): BackupFile {
 
   const memberProjectById = new Map(teamMembers.map((member) => [member.id, member.projectId]));
 
+  const rawTenures =
+    raw.memberTenures === undefined ? [] : requireArray(raw.memberTenures, 'memberTenures');
+  const memberTenures: MemberTenure[] = [];
+  const tenureIds = new Set<string>();
+  for (const item of rawTenures) {
+    if (!isRecord(item)) throw new Error('备份中的投入时间段格式不正确');
+    const id = requireString(item.id, 'memberTenures[].id');
+    if (tenureIds.has(id)) throw new Error(`备份中存在重复的投入时间段 id：${id}`);
+    tenureIds.add(id);
+    const memberId = requireString(item.memberId, 'memberTenures[].memberId');
+    const projectId = memberProjectById.get(memberId);
+    if (!projectId) throw new Error('投入时间段引用了不存在的项目成员');
+    const startedAt = requireString(item.startedAt, 'memberTenures[].startedAt');
+    const endedAt = typeof item.endedAt === 'string' ? item.endedAt : null;
+    if (endedAt && endedAt < startedAt) throw new Error('备份中的投入时间段结束日期无效');
+    memberTenures.push({
+      id,
+      memberId,
+      projectId,
+      startedAt,
+      endedAt,
+      note: typeof item.note === 'string' ? item.note : '',
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+  // 旧备份没有时间段：用成员入组/出组字段补一段。
+  for (const member of teamMembers) {
+    if (memberTenures.some((tenure) => tenure.memberId === member.id)) continue;
+    memberTenures.push({
+      id: `mt_bak_${member.id}`,
+      memberId: member.id,
+      projectId: member.projectId,
+      startedAt: member.joinedAt || new Date().toISOString().slice(0, 10),
+      endedAt:
+        member.status === 'released'
+          ? member.releasedAt || member.joinedAt || new Date().toISOString().slice(0, 10)
+          : null,
+      note: '由旧备份成员记录补全',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   const rawOvertime =
     raw.overtimeRecords === undefined ? [] : requireArray(raw.overtimeRecords, 'overtimeRecords');
   const overtimeRecords: OvertimeRecord[] = [];
@@ -587,6 +635,7 @@ export function parseBackup(text: string): BackupFile {
     teamMembers,
     overtimeRecords,
     performanceRecords,
+    memberTenures,
     projects,
     projectMetaFields,
     projectRoles,

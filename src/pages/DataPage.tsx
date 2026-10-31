@@ -88,7 +88,7 @@ export function DataPage() {
       await loadTrash().catch(() => undefined);
       setPending(null);
       setFlash(
-        `已恢复 ${summary.boards} 个看板、${summary.lists} 个列表、${summary.cards} 个任务（回收站 ${summary.trashed} 个）、${summary.inbox} 条收件箱、${summary.teamMembers} 位项目成员（${summary.projects} 个项目）`,
+        `已恢复 ${summary.boards} 个看板、${summary.lists} 个列表、${summary.cards} 个任务（回收站 ${summary.trashed} 个）、${summary.inbox} 条收件箱、${summary.teamMembers} 位项目成员（${summary.projects} 个项目，${summary.memberTenures} 段投入记录）`,
       );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -184,7 +184,7 @@ export function DataPage() {
               <div className="data-result-meta">
                 {exported.summary.boards} 个看板 · {exported.summary.cards} 个任务（回收站{' '}
                 {exported.summary.trashed} 个）· {exported.summary.dependencies} 条依赖 ·{' '}
-                {exported.summary.inbox} 条收件箱 · {exported.summary.teamMembers} 位项目成员 · {exported.summary.projects} 个项目
+                {exported.summary.inbox} 条收件箱 · {exported.summary.teamMembers} 位项目成员 · {exported.summary.projects} 个项目 · {exported.summary.memberTenures} 段投入
               </div>
             </div>
           ) : null}
@@ -282,6 +282,7 @@ export function DataPage() {
               <span>{pending.summary.inbox} 条收件箱</span>
               <span>{pending.summary.teamMembers} 位项目成员</span>
               <span>{pending.summary.projects} 个项目</span>
+              <span>{pending.summary.memberTenures} 段投入记录</span>
             </div>
             <p className="data-confirm-hint">建议先「导出 JSON 备份」保存当前数据。</p>
           </div>
