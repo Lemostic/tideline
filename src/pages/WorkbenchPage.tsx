@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Icon } from '@/components/Icon';
+import { Icon, type IconName } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
+import { BoardCard, NewBoardCard } from '@/features/home/BoardCard';
 import { DeleteBoardDialog, RenameBoardDialog } from '@/features/home/BoardDialogs';
 import { PopMenu } from '@/features/board/PopMenu';
 import {
@@ -11,7 +12,7 @@ import {
   todaySummary,
 } from '@/lib/date';
 import { goalProgressDetail, topLevelGoals } from '@/lib/goals';
-import { boardColorValue, type Board } from '@/lib/types';
+import { boardColorValue, type Board, type Card, type List } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useUiStore } from '@/store/uiStore';
 import './home.css';
@@ -19,6 +20,19 @@ import './workbench.css';
 
 const FOCUS_LIMIT = 7;
 const RECENT_LIMIT = 6;
+const GALLERY_RECENT_LIMIT = 6;
+const WORKBENCH_VIEW_KEY = 'tideline.workbench.view.v1';
+
+type WorkbenchView = 'workbench' | 'boards';
+
+function loadWorkbenchView(): WorkbenchView {
+  if (typeof localStorage === 'undefined') return 'workbench';
+  try {
+    return localStorage.getItem(WORKBENCH_VIEW_KEY) === 'boards' ? 'boards' : 'workbench';
+  } catch {
+    return 'workbench';
+  }
+}
 
 function greetingForHour(hour: number): string {
   if (hour < 6) return '夜深了';
@@ -41,6 +55,20 @@ export function WorkbenchPage() {
 
   const [renameTarget, setRenameTarget] = useState<Board | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Board | null>(null);
+  const [viewMode, setViewMode] = useState<WorkbenchView>(loadWorkbenchView);
+
+  const switchView = (next: WorkbenchView) => {
+    setViewMode(next);
+    try {
+      localStorage.setItem(WORKBENCH_VIEW_KEY, next);
+    } catch {
+      // 本地存储不可用时保持内存态
+    }
+  };
+
+  const handleToggleStar = (board: Board) => {
+    void toggleStar(board.id).catch(() => undefined);
+  };
 
   const now = useMemo(() => new Date(), [snapshot.cards]);
   const today = useMemo(() => {
@@ -184,15 +212,44 @@ export function WorkbenchPage() {
         <div className="wb-head-main">
           <div className="page-eyebrow">工作台 · {todaySummary(now)}</div>
           <h1 className="wb-title">
-            {greetingForHour(now.getHours())}，今天有{' '}
-            <em>{focusCards.length > 0 ? focusCards.length : '没有'}</em> 件需要关注
+            {viewMode === 'boards' ? (
+              '所有看板'
+            ) : (
+              <>
+                {greetingForHour(now.getHours())}，今天有{' '}
+                <em>{focusCards.length > 0 ? focusCards.length : '没有'}</em> 件需要关注
+              </>
+            )}
           </h1>
           <p className="wb-sub">
-            {snapshot.boards.length} 个看板 · {openCards.length} 个进行中任务 ·{' '}
-            {activeGoals.length} 个目标进行中
+            {viewMode === 'boards'
+              ? `${snapshot.boards.length} 个看板 · ${snapshot.cards.length} 个任务 · 可切换回门户视图`
+              : `${snapshot.boards.length} 个看板 · ${openCards.length} 个进行中任务 · ${activeGoals.length} 个目标进行中`}
           </p>
         </div>
         <div className="wb-actions">
+          <div className="wb-view-switch" role="tablist" aria-label="工作台视图">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'workbench'}
+              className={`wb-view-btn${viewMode === 'workbench' ? ' is-active' : ''}`}
+              onClick={() => switchView('workbench')}
+            >
+              <Icon name="layout-grid" size={12} />
+              工作台
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'boards'}
+              className={`wb-view-btn${viewMode === 'boards' ? ' is-active' : ''}`}
+              onClick={() => switchView('boards')}
+            >
+              <Icon name="columns" size={12} />
+              看板列表
+            </button>
+          </div>
           <button type="button" className="btn btn-primary btn-sm" onClick={openNewBoard}>
             <Icon name="plus" size={14} />
             新建看板
@@ -208,6 +265,8 @@ export function WorkbenchPage() {
         </div>
       </header>
 
+      {viewMode === 'workbench' ? (
+        <>
       <section className="wb-kpis" aria-label="工作台指标">
         <button type="button" className="wb-kpi" onClick={() => navigate('/')}>
           <span className="wb-kpi-label">看板</span>
@@ -455,6 +514,18 @@ export function WorkbenchPage() {
           </div>
         </section>
       </div>
+        </>
+      ) : (
+        <BoardGallery
+          boards={snapshot.boards}
+          cards={snapshot.cards}
+          lists={snapshot.lists}
+          onToggleStar={handleToggleStar}
+          onRename={setRenameTarget}
+          onDelete={setDeleteTarget}
+          onNewBoard={openNewBoard}
+        />
+      )}
 
       {renameTarget ? (
         <RenameBoardDialog board={renameTarget} onClose={() => setRenameTarget(null)} />
@@ -468,5 +539,134 @@ export function WorkbenchPage() {
         />
       ) : null}
     </div>
+  );
+}
+
+/** 原首页的看板卡片视图：星标 / 最近 / 全部看板。 */
+function BoardGallery({
+  boards,
+  cards,
+  lists,
+  onToggleStar,
+  onRename,
+  onDelete,
+  onNewBoard,
+}: {
+  boards: Board[];
+  cards: Card[];
+  lists: List[];
+  onToggleStar: (board: Board) => void;
+  onRename: (board: Board) => void;
+  onDelete: (board: Board) => void;
+  onNewBoard: () => void;
+}) {
+  const taskCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const card of cards) counts.set(card.boardId, (counts.get(card.boardId) ?? 0) + 1);
+    return counts;
+  }, [cards]);
+  const byRecent = useMemo(
+    () => [...boards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [boards],
+  );
+  const starred = useMemo(() => byRecent.filter((board) => board.starred), [byRecent]);
+  const recent = useMemo(
+    () => byRecent.filter((board) => !board.starred).slice(0, GALLERY_RECENT_LIMIT),
+    [byRecent],
+  );
+  const taskCountOf = (boardId: string) => taskCounts.get(boardId) ?? 0;
+
+  return (
+    <div className="wb-gallery">
+      <p className="wb-gallery-hint">
+        原首页看板卡片视图 · 共 {boards.length} 个看板 / {lists.length} 个列表 · 点击卡片进入看板
+      </p>
+
+      {starred.length > 0 ? (
+        <GallerySection
+          icon="star-filled"
+          title="星标看板"
+          count={starred.length}
+          hint="置顶你常看的看板"
+          tone="star"
+        >
+          <div className="home-grid">
+            {starred.map((board) => (
+              <BoardCard
+                key={board.id}
+                board={board}
+                taskCount={taskCountOf(board.id)}
+                onToggleStar={onToggleStar}
+                onRename={onRename}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        </GallerySection>
+      ) : null}
+
+      {recent.length > 0 ? (
+        <GallerySection icon="clock" title="最近" count={recent.length} hint="按更新时间排序">
+          <div className="home-grid">
+            {recent.map((board) => (
+              <BoardCard
+                key={board.id}
+                board={board}
+                taskCount={taskCountOf(board.id)}
+                onToggleStar={onToggleStar}
+                onRename={onRename}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        </GallerySection>
+      ) : null}
+
+      <GallerySection icon="layout-grid" title="全部看板" count={boards.length}>
+        <div className="home-grid">
+          {byRecent.map((board) => (
+            <BoardCard
+              key={board.id}
+              board={board}
+              taskCount={taskCountOf(board.id)}
+              onToggleStar={onToggleStar}
+              onRename={onRename}
+              onDelete={onDelete}
+            />
+          ))}
+          <NewBoardCard onClick={onNewBoard} />
+        </div>
+      </GallerySection>
+    </div>
+  );
+}
+
+function GallerySection({
+  icon,
+  title,
+  count,
+  hint,
+  tone = 'muted',
+  children,
+}: {
+  icon: IconName;
+  title: string;
+  count: number;
+  hint?: string;
+  tone?: 'star' | 'muted';
+  children: ReactNode;
+}) {
+  return (
+    <section className="home-section">
+      <header className="section-head home-section-head">
+        <span className={`home-section-icon home-section-icon-${tone}`}>
+          <Icon name={icon} size={14} />
+        </span>
+        <h2 className="section-title">{title}</h2>
+        <span className="section-count">{count}</span>
+        {hint ? <span className="home-section-hint">{hint}</span> : null}
+      </header>
+      {children}
+    </section>
   );
 }

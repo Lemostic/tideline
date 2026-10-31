@@ -556,3 +556,52 @@
     font-size: 21px;
   }
 }
+
+/* 工作台 / 看板列表视图切换 */
+.wb-view-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+}
+
+.wb-view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 25px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-view-btn:hover {
+  color: var(--ink-2);
+}
+
+.wb-view-btn.is-active {
+  background: var(--surface);
+  color: var(--primary-strong);
+  font-weight: 600;
+  box-shadow: var(--shadow-xs);
+}
+
+.wb-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wb-gallery-hint {
+  margin: 0 2px 6px;
+  color: var(--faint);
+  font-size: 10.5px;
+}
