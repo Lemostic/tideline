@@ -70,6 +70,10 @@ export interface Card {
   subtasks: Subtask[];
   /** 同一列表内的排序序号，从 0 递增 */
   position: number;
+  /** V0.11：所属重复配置 id；非空表示这张任务由重复任务滚动而来 */
+  recurrenceId?: string | null;
+  /** V0.11：生成这张任务的上一次任务 id */
+  generatedFromId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -102,6 +106,10 @@ export interface Snapshot {
   projects: Project[];
   projectMetaFields: ProjectMetaField[];
   projectRoles: ProjectRole[];
+  /** 重复任务配置（V0.11） */
+  recurrences: Recurrence[];
+  /** 本地规则（V0.11） */
+  automationRules: AutomationRule[];
 }
 
 /** 任务依赖（V0.4）：`cardId` 被 `dependsOnCardId` 阻塞 */
@@ -472,6 +480,12 @@ export interface BackupFile {
   projects: Project[];
   projectMetaFields: ProjectMetaField[];
   projectRoles: ProjectRole[];
+  /** V0.11 新增；旧备份没有该字段时按空重复配置处理 */
+  recurrences: Recurrence[];
+  /** V0.11 新增；旧备份没有该字段时按空规则处理 */
+  automationRules: AutomationRule[];
+  /** V0.11 新增；旧备份没有该字段时按空活动日志处理 */
+  cardActivity: CardActivity[];
 }
 
 export interface BackupSummary {
@@ -490,6 +504,9 @@ export interface BackupSummary {
   projects: number;
   projectMetaFields: number;
   projectRoles: number;
+  recurrences: number;
+  automationRules: number;
+  cardActivity: number;
 }
 
 export interface BackupExport {
@@ -617,4 +634,125 @@ export interface UsageAppIncludedInput {
 export interface UsageSettingsInput {
   paused?: boolean;
   idleThresholdSeconds?: number;
+}
+
+/* ---------- 自动化与提醒（V0.11） ---------- */
+
+/** 重复频率 */
+export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'interval';
+
+/** 重复任务配置：一张任务最多挂一条 */
+export interface Recurrence {
+  id: string;
+  /** 触发滚动的任务 id */
+  cardId: string;
+  frequency: RecurrenceFrequency;
+  /** 自定义间隔天数（interval 使用，其它频率为 1） */
+  intervalValue: number;
+  /** 每周重复时指定的星期（0=周日 … 6=周六） */
+  weekdays: number[];
+  /** 下一次到期日期 YYYY-MM-DD */
+  nextDueDate: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewRecurrenceInput {
+  cardId: string;
+  frequency: RecurrenceFrequency;
+  intervalValue?: number;
+  weekdays?: number[];
+  nextDueDate?: string | null;
+}
+
+export type RecurrencePatch = Partial<
+  Pick<
+    Recurrence,
+    'frequency' | 'intervalValue' | 'weekdays' | 'nextDueDate' | 'enabled'
+  >
+>;
+
+/** 规则触发方式：只支持移动到指定列与完成任务 */
+export type RuleTrigger = 'move_to_list' | 'complete';
+
+/** 规则动作类型：固定的有限集合，不支持任意脚本 */
+export type RuleActionKind =
+  | 'set_due_date_offset'
+  | 'clear_due_date'
+  | 'set_priority'
+  | 'add_labels'
+  | 'append_subtasks';
+
+/** 一条规则动作 */
+export interface RuleAction {
+  kind: RuleActionKind;
+  /** 偏移天数（set_due_date_offset） */
+  offsetDays?: number;
+  /** 优先级（set_priority） */
+  priority?: Priority | null;
+  /** 标签（add_labels） */
+  labels?: string[];
+  /** 子任务标题（append_subtasks） */
+  subtasks?: string[];
+}
+
+/** 本地规则：触发条件 + 声明式动作，默认关闭 */
+export interface AutomationRule {
+  id: string;
+  name: string;
+  trigger: RuleTrigger;
+  /** move_to_list 触发时命中的列表 id */
+  listId: string | null;
+  actions: RuleAction[];
+  enabled: boolean;
+  /** 最近一次执行失败的可读原因；成功时为空串 */
+  lastError: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewAutomationRuleInput {
+  name: string;
+  trigger: RuleTrigger;
+  listId?: string | null;
+  actions: RuleAction[];
+  enabled?: boolean;
+}
+
+export type AutomationRulePatch = Partial<
+  Pick<AutomationRule, 'name' | 'trigger' | 'listId' | 'actions' | 'enabled'>
+>;
+
+/** 任务活动日志条目 */
+export interface CardActivity {
+  id: string;
+  cardId: string;
+  /** created / updated / moved / completed / deleted / restored / recurrence */
+  eventType: string;
+  /** 变化字段名；事件级动作为空串 */
+  field: string;
+  oldValue: string;
+  newValue: string;
+  createdAt: string;
+}
+
+/** 提醒设置：全部默认关闭 */
+export interface NotificationSettings {
+  dueEnabled: boolean;
+  overdueEnabled: boolean;
+  dailySummaryEnabled: boolean;
+  /** 每日摘要时间 HH:MM */
+  dailySummaryTime: string;
+  /** 提前几天算「即将到期」 */
+  leadDays: number;
+  updatedAt: string;
+}
+
+export interface NotificationSettingsInput {
+  dueEnabled?: boolean;
+  overdueEnabled?: boolean;
+  dailySummaryEnabled?: boolean;
+  dailySummaryTime?: string;
+  leadDays?: number;
 }

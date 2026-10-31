@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS cards (
     subtasks    TEXT NOT NULL DEFAULT '[]',
     position    INTEGER NOT NULL DEFAULT 0,
     deleted_at  TEXT,
+    recurrence_id      TEXT,
+    generated_from_id  TEXT,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -280,6 +282,72 @@ CREATE TABLE IF NOT EXISTS usage_settings (
     updated_at     TEXT NOT NULL
 );
 
+-- V0.11 重复任务配置：一张任务最多挂一条重复配置
+CREATE TABLE IF NOT EXISTS recurrences (
+    id             TEXT PRIMARY KEY NOT NULL,
+    card_id        TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+    frequency      TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly', 'interval')),
+    interval_value INTEGER NOT NULL DEFAULT 1,
+    weekdays       TEXT NOT NULL DEFAULT '[]',
+    next_due_date  TEXT,
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+
+-- V0.11 重复生成记录：完成事件幂等保护，重试不会重复生成下一次任务
+CREATE TABLE IF NOT EXISTS recurrence_runs (
+    recurrence_id      TEXT NOT NULL REFERENCES recurrences (id) ON DELETE CASCADE,
+    completed_card_id  TEXT NOT NULL,
+    generated_card_id  TEXT NOT NULL,
+    created_at         TEXT NOT NULL,
+    PRIMARY KEY (recurrence_id, completed_card_id)
+);
+
+-- V0.11 本地规则：移动到指定列 / 完成任务时执行声明式动作
+CREATE TABLE IF NOT EXISTS automation_rules (
+    id          TEXT PRIMARY KEY NOT NULL,
+    name        TEXT NOT NULL,
+    trigger     TEXT NOT NULL CHECK (trigger IN ('move_to_list', 'complete')),
+    list_id     TEXT,
+    actions     TEXT NOT NULL DEFAULT '[]',
+    enabled     INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- V0.11 活动日志：记录任务字段变化
+CREATE TABLE IF NOT EXISTS card_activity (
+    id         TEXT PRIMARY KEY NOT NULL,
+    card_id    TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    field      TEXT NOT NULL DEFAULT '',
+    old_value  TEXT NOT NULL DEFAULT '',
+    new_value  TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+-- V0.11 提醒设置：固定单行 id = 1
+CREATE TABLE IF NOT EXISTS notification_settings (
+    id                   INTEGER PRIMARY KEY CHECK (id = 1),
+    due_enabled          INTEGER NOT NULL DEFAULT 0,
+    overdue_enabled      INTEGER NOT NULL DEFAULT 0,
+    daily_summary_enabled INTEGER NOT NULL DEFAULT 0,
+    daily_summary_time   TEXT NOT NULL DEFAULT '09:00',
+    lead_days            INTEGER NOT NULL DEFAULT 1,
+    updated_at           TEXT NOT NULL
+);
+
+-- V0.11 通知投递记录：保证同一天同一条提醒只发一次
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+    kind         TEXT NOT NULL,
+    day          TEXT NOT NULL,
+    card_id      TEXT NOT NULL DEFAULT '',
+    delivered_at TEXT NOT NULL,
+    PRIMARY KEY (kind, day, card_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_lists_board_position ON lists (board_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_list_position ON cards (list_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_board ON cards (board_id);
@@ -298,6 +366,9 @@ CREATE INDEX IF NOT EXISTS idx_member_tenures_project ON member_tenures (project
 CREATE INDEX IF NOT EXISTS idx_overtime_member_date ON overtime_records (member_id, date);
 CREATE INDEX IF NOT EXISTS idx_performance_member_date ON performance_records (member_id, date);
 CREATE INDEX IF NOT EXISTS idx_usage_daily_day ON usage_daily (day);
+CREATE INDEX IF NOT EXISTS idx_recurrences_card ON recurrences (card_id);
+CREATE INDEX IF NOT EXISTS idx_automation_rules_trigger ON automation_rules (trigger, enabled);
+CREATE INDEX IF NOT EXISTS idx_card_activity_card ON card_activity (card_id, created_at DESC);
 "#;
 
 /// 打开磁盘数据库（生产路径）。
@@ -331,7 +402,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -351,6 +422,12 @@ const CARD_COLUMN_MIGRATIONS: &[(&str, &str)] = &[
     ),
     ("deleted_at", "ALTER TABLE cards ADD COLUMN deleted_at TEXT"),
     ("accent", "ALTER TABLE cards ADD COLUMN accent TEXT"),
+    // V0.11 自动化：重复任务配置与「由哪条重复配置生成」的溯源字段
+    ("recurrence_id", "ALTER TABLE cards ADD COLUMN recurrence_id TEXT"),
+    (
+        "generated_from_id",
+        "ALTER TABLE cards ADD COLUMN generated_from_id TEXT",
+    ),
 ];
 
 const LIST_COLUMN_MIGRATIONS: &[(&str, &str)] = &[
@@ -472,9 +549,33 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
     migrate_legacy_team_projects(connection)?;
     backfill_member_tenures(connection)?;
     ensure_usage_settings(connection)?;
+    ensure_notification_settings(connection)?;
     connection
         .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|error| format!("写入 user_version 失败：{error}"))?;
+    Ok(())
+}
+
+/// V0.11：保证 `notification_settings` 始终存在 id = 1 的单行默认设置。
+///
+/// 所有提醒默认关闭；重复执行不会覆盖用户已保存的设置。
+fn ensure_notification_settings(connection: &Connection) -> Result<(), String> {
+    let stamp: String = connection
+        .query_row(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("读取迁移时间失败：{error}"))?;
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO notification_settings \
+             (id, due_enabled, overdue_enabled, daily_summary_enabled, daily_summary_time, \
+              lead_days, updated_at) \
+             VALUES (1, 0, 0, 0, '09:00', 1, ?1)",
+            [&stamp],
+        )
+        .map_err(|error| format!("初始化提醒设置失败：{error}"))?;
     Ok(())
 }
 
@@ -645,6 +746,8 @@ mod tests {
             "subtasks",
             "position",
             "deleted_at",
+            "recurrence_id",
+            "generated_from_id",
         ] {
             assert!(
                 columns.iter().any(|name| name == expected),
@@ -667,6 +770,96 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("读取 user_version");
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    /// V0.11 新增的自动化表应存在，且提醒设置默认一行且全部关闭。
+    #[test]
+    fn new_database_has_automation_tables() {
+        let connection = open_in_memory().expect("内存数据库应可初始化");
+        for table in [
+            "recurrences",
+            "recurrence_runs",
+            "automation_rules",
+            "card_activity",
+            "notification_settings",
+            "notification_deliveries",
+        ] {
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("查询表是否存在");
+            assert_eq!(count, 1, "新库缺少表 {table}");
+        }
+        let (due, overdue, summary): (i64, i64, i64) = connection
+            .query_row(
+                "SELECT due_enabled, overdue_enabled, daily_summary_enabled \
+                 FROM notification_settings WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("读取提醒设置默认值");
+        assert_eq!((due, overdue, summary), (0, 0, 0), "提醒默认应全部关闭");
+    }
+
+    /// V0.11 迁移：旧库缺列时幂等补齐，且不丢用户数据。
+    #[test]
+    fn v11_database_migrates_to_v12_without_losing_cards() {
+        let connection = Connection::open_in_memory().expect("内存数据库应可初始化");
+        connection
+            .execute_batch(V01_SCHEMA)
+            .expect("创建 V0.1 表结构");
+        connection
+            .execute(
+                "INSERT INTO boards (id, title, description, color, starred, created_at, updated_at) \
+                 VALUES ('b_1', '旧看板', '', 'blue', 0, '2026-01-01T00:00:00.000Z', \
+                 '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .expect("插入旧看板");
+        connection
+            .execute(
+                "INSERT INTO lists (id, board_id, title, position, created_at) \
+                 VALUES ('l_1', 'b_1', '待办', 0, '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .expect("插入旧列表");
+        connection
+            .execute(
+                "INSERT INTO cards (id, board_id, list_id, title, description, due_date, priority, \
+                 completed, position, created_at, updated_at) \
+                 VALUES ('c_1', 'b_1', 'l_1', '旧任务', '', '2026-02-01', NULL, 0, 0, \
+                 '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .expect("插入旧任务");
+
+        init(&connection).expect("迁移旧库");
+
+        let columns = table_columns(&connection, "cards").expect("读取 cards 列名");
+        assert!(columns.iter().any(|name| name == "recurrence_id"));
+        assert!(columns.iter().any(|name| name == "generated_from_id"));
+
+        let title: String = connection
+            .query_row("SELECT title FROM cards WHERE id = 'c_1'", [], |row| {
+                row.get(0)
+            })
+            .expect("读取迁移后的任务");
+        assert_eq!(title, "旧任务");
+
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("读取 user_version");
+        assert_eq!(version, SCHEMA_VERSION);
+
+        // 幂等：重复迁移不报错，也不丢数据。
+        init(&connection).expect("重复迁移");
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
+            .expect("统计任务数");
+        assert_eq!(count, 1);
     }
 
     /// V0.1 的表结构（cards 还没有 start_date / labels / subtasks），用于迁移测试。

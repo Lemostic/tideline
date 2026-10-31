@@ -7,10 +7,12 @@
 //! `src-tauri/src/main.rs` 只调用这里的 `run()`。
 
 mod autostart;
+mod automation;
 mod backup;
 mod commands;
 mod db;
 mod models;
+mod reminders;
 mod repo;
 mod storage;
 mod usage;
@@ -22,6 +24,7 @@ use usage::UsageRuntime;
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // 默认 %APPDATA%\com.lemostic.tideline\，可在设置里改为自定义目录
             let data_dir = storage::data_dir(app.handle())
@@ -40,6 +43,8 @@ pub fn run() {
             ));
             // 启动后台采样线程：每 1 秒采样一次前台窗口所属进程，线程随进程退出而结束。
             usage::spawn_sampler(app.handle().clone());
+            // 启动后台提醒线程：每分钟检查一次到期 / 逾期 / 每日摘要。
+            reminders::spawn_scheduler(app.handle().clone());
             #[cfg(debug_assertions)]
             eprintln!("[tideline] SQLite 数据库：{}", db_path.display());
             Ok(())
@@ -107,6 +112,17 @@ pub fn run() {
             commands::get_usage_settings,
             commands::set_usage_settings,
             commands::clear_usage_records,
+            commands::get_card_activity,
+            commands::get_recurrences,
+            commands::create_recurrence,
+            commands::update_recurrence,
+            commands::delete_recurrence,
+            commands::get_automation_rules,
+            commands::create_automation_rule,
+            commands::update_automation_rule,
+            commands::delete_automation_rule,
+            commands::get_notification_settings,
+            commands::set_notification_settings,
         ])
         .run(tauri::generate_context!())
         .expect("启动潮线 tideline 失败");

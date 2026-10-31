@@ -128,7 +128,7 @@ fn subtasks_from_json(raw: &str) -> Vec<Subtask> {
 
 const BOARD_COLUMNS: &str = "id, title, description, color, starred, created_at, updated_at";
 const LIST_COLUMNS: &str = "id, board_id, title, color, wip_limit, position, created_at";
-const CARD_COLUMNS: &str = "id, board_id, list_id, title, description, due_date, start_date, priority, accent, completed, labels, subtasks, position, deleted_at, created_at, updated_at";
+const CARD_COLUMNS: &str = "id, board_id, list_id, title, description, due_date, start_date, priority, accent, completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, created_at, updated_at";
 const INBOX_COLUMNS: &str = "id, content, created_at";
 
 fn row_to_board(row: &Row<'_>) -> rusqlite::Result<Board> {
@@ -176,6 +176,8 @@ fn row_to_card(row: &Row<'_>) -> rusqlite::Result<Card> {
         subtasks: subtasks_from_json(&subtasks),
         position: row.get("position")?,
         deleted_at: row.get("deleted_at")?,
+        recurrence_id: row.get("recurrence_id")?,
+        generated_from_id: row.get("generated_from_id")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
@@ -349,6 +351,8 @@ pub fn get_snapshot(conn: &Connection) -> DbResult<Snapshot> {
         projects: get_projects(conn)?,
         project_meta_fields: get_all_project_meta(conn)?,
         project_roles: get_all_project_roles(conn)?,
+        recurrences: crate::automation::get_recurrences(conn)?,
+        automation_rules: crate::automation::get_automation_rules(conn)?,
     })
 }
 
@@ -2185,10 +2189,100 @@ pub fn delete_list(conn: &mut Connection, input: IdInput) -> DbResult<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// 活动日志（V0.11）
+// ---------------------------------------------------------------------------
+
+/// 把新旧卡片之间实际发生变化的字段写成活动日志。
+///
+/// 只记录真正变化的字段；调用方负责把这次调用放在写任务的事务里。
+pub fn record_card_changes(
+    conn: &Connection,
+    old: &Card,
+    new: &Card,
+) -> DbResult<()> {
+    let mut changes: Vec<(&str, String, String)> = Vec::new();
+    if old.title != new.title {
+        changes.push(("title", old.title.clone(), new.title.clone()));
+    }
+    if old.description != new.description {
+        changes.push(("description", old.description.clone(), new.description.clone()));
+    }
+    if old.list_id != new.list_id {
+        changes.push(("listId", old.list_id.clone(), new.list_id.clone()));
+    }
+    if old.completed != new.completed {
+        changes.push((
+            "completed",
+            old.completed.to_string(),
+            new.completed.to_string(),
+        ));
+    }
+    if old.due_date != new.due_date {
+        changes.push((
+            "dueDate",
+            old.due_date.clone().unwrap_or_default(),
+            new.due_date.clone().unwrap_or_default(),
+        ));
+    }
+    if old.start_date != new.start_date {
+        changes.push((
+            "startDate",
+            old.start_date.clone().unwrap_or_default(),
+            new.start_date.clone().unwrap_or_default(),
+        ));
+    }
+    if old.priority != new.priority {
+        changes.push((
+            "priority",
+            old.priority.map(|value| value.as_str().to_string()).unwrap_or_default(),
+            new.priority.map(|value| value.as_str().to_string()).unwrap_or_default(),
+        ));
+    }
+    if old.accent != new.accent {
+        changes.push((
+            "accent",
+            old.accent.map(|value| value.as_str().to_string()).unwrap_or_default(),
+            new.accent.map(|value| value.as_str().to_string()).unwrap_or_default(),
+        ));
+    }
+    if old.labels != new.labels {
+        changes.push(("labels", old.labels.join(","), new.labels.join(",")));
+    }
+    if old.subtasks != new.subtasks {
+        let old_titles = old
+            .subtasks
+            .iter()
+            .map(|item| item.title.clone())
+            .collect::<Vec<String>>()
+            .join(",");
+        let new_titles = new
+            .subtasks
+            .iter()
+            .map(|item| item.title.clone())
+            .collect::<Vec<String>>()
+            .join(",");
+        changes.push(("subtasks", old_titles, new_titles));
+    }
+    for (field, old_value, new_value) in changes {
+        crate::automation::insert_activity(conn, &new.id, "updated", field, &old_value, &new_value)?;
+    }
+    Ok(())
+}
+
+/// 记录一次事件级活动（创建、移动、完成、删除、恢复等）。
+pub fn record_card_event(
+    conn: &Connection,
+    card_id: &str,
+    event_type: &str,
+    detail: &str,
+) -> DbResult<()> {
+    crate::automation::insert_activity(conn, card_id, event_type, "", "", detail)
+}
+
 pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card> {
     let tx = conn.transaction().map_err(db_err)?;
-    get_list(&tx, &input.list_id)?;
-    let position: i64 = tx
+    get_list(&tx, &input.list_id)?;    let position: i64 = tx
         .query_row(
             "SELECT COALESCE(MAX(position), -1) + 1 FROM cards \
              WHERE list_id = ?1 AND deleted_at IS NULL",
@@ -2212,6 +2306,8 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
         labels: input.labels.unwrap_or_default(),
         subtasks: input.subtasks.unwrap_or_default(),
         position,
+        recurrence_id: None,
+        generated_from_id: None,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -2220,8 +2316,8 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
     tx.execute(
         "INSERT INTO cards \
          (id, board_id, list_id, title, description, due_date, start_date, priority, accent, completed, \
-         labels, subtasks, position, deleted_at, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, ?14, ?15)",
+         labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, NULL, NULL, ?14, ?15)",
         params![
             &card.id,
             &card.board_id,
@@ -2242,6 +2338,7 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
     )
     .map_err(db_err)?;
     touch_board(&tx, &card.board_id)?;
+    record_card_event(&tx, &card.id, "created", "")?;
     tx.commit().map_err(db_err)?;
     Ok(card)
 }
@@ -2249,6 +2346,7 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
 pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Card> {
     let tx = conn.transaction().map_err(db_err)?;
     let mut card = get_card(&tx, &input.id)?;
+    let previous = card.clone();
     if let Some(title) = input.patch.title {
         card.title = fallback_trimmed(&title, "未命名任务");
     }
@@ -2326,6 +2424,10 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
     )
     .map_err(db_err)?;
     touch_board(&tx, &card.board_id)?;
+    record_card_changes(&tx, &previous, &card)?;
+    if !previous.completed && card.completed {
+        record_card_event(&tx, &card.id, "completed", "")?;
+    }
     tx.commit().map_err(db_err)?;
     Ok(card)
 }
@@ -2349,6 +2451,7 @@ pub fn delete_card(conn: &mut Connection, input: IdInput) -> DbResult<()> {
         .map_err(db_err)?;
         normalize_card_positions(&tx, &card.list_id)?;
         touch_board(&tx, &card.board_id)?;
+        record_card_event(&tx, &card.id, "deleted", "")?;
     }
     tx.commit().map_err(db_err)?;
     Ok(())
@@ -2398,6 +2501,7 @@ pub fn restore_card(conn: &mut Connection, input: IdInput) -> DbResult<Card> {
     )
     .map_err(db_err)?;
     touch_board(&tx, &card.board_id)?;
+    record_card_event(&tx, &card.id, "restored", "")?;
     tx.commit().map_err(db_err)?;
     Ok(card)
 }
@@ -2465,6 +2569,9 @@ pub fn move_card(conn: &mut Connection, input: MoveCardInput) -> DbResult<Card> 
         normalize_card_positions(&tx, &old_list_id)?;
     }
     touch_board(&tx, &card.board_id)?;
+    if old_list_id != card.list_id {
+        record_card_event(&tx, &card.id, "moved", &card.list_id)?;
+    }
     tx.commit().map_err(db_err)?;
     Ok(card)
 }
@@ -2543,6 +2650,8 @@ pub fn convert_inbox_item(conn: &mut Connection, input: ConvertInboxInput) -> Db
         labels: Vec::new(),
         subtasks: Vec::new(),
         position,
+        recurrence_id: None,
+        generated_from_id: None,
         created_at: now.clone(),
         updated_at: now,
     };

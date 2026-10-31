@@ -8,9 +8,11 @@ use tauri::{AppHandle, State};
 use crate::autostart::{
     get_autostart as read_autostart, set_autostart as write_autostart, AutoStartInfo,
 };
+use crate::automation;
 use crate::backup;
 use crate::db::Db;
 use crate::models::*;
+use crate::reminders;
 use crate::repo;
 use crate::storage;
 use crate::usage::{self, UsageRuntime};
@@ -68,7 +70,22 @@ pub fn create_card(db: State<'_, Db>, input: NewCardInput) -> CmdResult<Card> {
 #[tauri::command]
 pub fn update_card(db: State<'_, Db>, input: UpdateCardInput) -> CmdResult<Card> {
     let mut conn = db.lock()?;
-    repo::update_card(&mut conn, input)
+    // 先记住完成状态，自动化只在「未完成 → 已完成」时触发。
+    let was_completed = repo::get_card(&conn, &input.id)
+        .map(|card| card.completed)
+        .unwrap_or(false);
+    let card = repo::update_card(&mut conn, input)?;
+    // 自动化在主写入成功之后执行：失败只记录，不影响本次修改的结果。
+    if !was_completed && card.completed {
+        let _ = automation::run_rules(
+            &mut conn,
+            &card,
+            RuleTrigger::Complete,
+            &automation::today_key(),
+        );
+        let _ = automation::roll_recurrence(&mut conn, &card.id);
+    }
+    Ok(card)
 }
 
 #[tauri::command]
@@ -80,7 +97,15 @@ pub fn delete_card(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
 #[tauri::command]
 pub fn move_card(db: State<'_, Db>, input: MoveCardInput) -> CmdResult<Card> {
     let mut conn = db.lock()?;
-    repo::move_card(&mut conn, input)
+    let card = repo::move_card(&mut conn, input)?;
+    // 移动到指定列表时执行对应的本地规则。
+    let _ = automation::run_rules(
+        &mut conn,
+        &card,
+        RuleTrigger::MoveToList,
+        &automation::today_key(),
+    );
+    Ok(card)
 }
 
 // ---------------------------------------------------------------------------
@@ -553,4 +578,102 @@ pub fn set_usage_settings(
 pub fn clear_usage_records(db: State<'_, Db>) -> CmdResult<()> {
     let conn = db.lock()?;
     usage::clear_records(&conn)
+}
+
+// ---------------------------------------------------------------------------
+// 自动化与提醒（V0.11）
+// ---------------------------------------------------------------------------
+
+/// 某张任务的最近活动（倒序）。
+#[tauri::command]
+pub fn get_card_activity(db: State<'_, Db>, input: IdInput) -> CmdResult<Vec<CardActivity>> {
+    let conn = db.lock()?;
+    automation::get_card_activity(&conn, &input.id, 100)
+}
+
+/// 全部重复配置。
+#[tauri::command]
+pub fn get_recurrences(db: State<'_, Db>) -> CmdResult<Vec<Recurrence>> {
+    let conn = db.lock()?;
+    automation::get_recurrences(&conn)
+}
+
+/// 新建重复配置（同一张任务只保留一条）。
+#[tauri::command]
+pub fn create_recurrence(
+    db: State<'_, Db>,
+    input: NewRecurrenceInput,
+) -> CmdResult<Recurrence> {
+    let mut conn = db.lock()?;
+    automation::create_recurrence(&mut conn, input)
+}
+
+/// 修改重复配置。
+#[tauri::command]
+pub fn update_recurrence(
+    db: State<'_, Db>,
+    id: String,
+    patch: RecurrencePatch,
+) -> CmdResult<Recurrence> {
+    let mut conn = db.lock()?;
+    automation::update_recurrence(&mut conn, &id, patch)
+}
+
+/// 删除重复配置。
+#[tauri::command]
+pub fn delete_recurrence(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let conn = db.lock()?;
+    automation::delete_recurrence(&conn, &input.id)
+}
+
+/// 全部本地规则。
+#[tauri::command]
+pub fn get_automation_rules(db: State<'_, Db>) -> CmdResult<Vec<AutomationRule>> {
+    let conn = db.lock()?;
+    automation::get_automation_rules(&conn)
+}
+
+/// 新建本地规则。
+#[tauri::command]
+pub fn create_automation_rule(
+    db: State<'_, Db>,
+    input: NewAutomationRuleInput,
+) -> CmdResult<AutomationRule> {
+    let mut conn = db.lock()?;
+    automation::create_automation_rule(&mut conn, input)
+}
+
+/// 修改本地规则。
+#[tauri::command]
+pub fn update_automation_rule(
+    db: State<'_, Db>,
+    id: String,
+    patch: AutomationRulePatch,
+) -> CmdResult<AutomationRule> {
+    let mut conn = db.lock()?;
+    automation::update_automation_rule(&mut conn, &id, patch)
+}
+
+/// 删除本地规则。
+#[tauri::command]
+pub fn delete_automation_rule(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let conn = db.lock()?;
+    automation::delete_automation_rule(&conn, &input.id)
+}
+
+/// 读取提醒设置。
+#[tauri::command]
+pub fn get_notification_settings(db: State<'_, Db>) -> CmdResult<NotificationSettings> {
+    let conn = db.lock()?;
+    reminders::get_settings(&conn)
+}
+
+/// 更新提醒设置：只更新传入的字段。
+#[tauri::command]
+pub fn set_notification_settings(
+    db: State<'_, Db>,
+    input: NotificationSettingsInput,
+) -> CmdResult<NotificationSettings> {
+    let conn = db.lock()?;
+    reminders::set_settings(&conn, &input)
 }

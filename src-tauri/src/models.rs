@@ -170,6 +170,112 @@ pub struct Subtask {
     pub done: bool,
 }
 
+/// 重复频率（V0.11）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecurrenceFrequency {
+    /// 每天
+    Daily,
+    /// 每周（按 `weekdays` 指定的星期，0=周日）
+    Weekly,
+    /// 每月（目标日不存在时收敛到当月最后一天）
+    Monthly,
+    /// 自定义间隔天数
+    Interval,
+}
+
+impl Default for RecurrenceFrequency {
+    fn default() -> Self {
+        Self::Daily
+    }
+}
+
+impl RecurrenceFrequency {
+    pub fn as_str(&self) -> &'static str {        match self {
+            Self::Daily => "daily",
+            Self::Weekly => "weekly",
+            Self::Monthly => "monthly",
+            Self::Interval => "interval",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "weekly" => Self::Weekly,
+            "monthly" => Self::Monthly,
+            "interval" => Self::Interval,
+            _ => Self::Daily,
+        }
+    }
+}
+
+/// 规则触发方式（V0.11）：只支持移动到指定列与完成任务两种。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleTrigger {
+    /// 任务被移动到指定列表
+    MoveToList,
+    /// 任务从未完成变为已完成
+    Complete,
+}
+
+impl Default for RuleTrigger {
+    fn default() -> Self {
+        Self::MoveToList
+    }
+}
+
+impl RuleTrigger {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::MoveToList => "move_to_list",
+            Self::Complete => "complete",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "complete" => Self::Complete,
+            _ => Self::MoveToList,
+        }
+    }
+}
+
+/// 规则动作类型（V0.11）：固定的有限集合，不支持任意脚本。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleActionKind {
+    /// 把截止日期设为「触发当天 + N 天」；N = 负数表示往前推
+    SetDueDateOffset,
+    /// 清除截止日期
+    ClearDueDate,
+    /// 设置优先级
+    SetPriority,
+    /// 追加标签（已存在则跳过）
+    AddLabels,
+    /// 追加子任务（标题相同则跳过）
+    AppendSubtasks,
+}
+
+/// 一条规则动作（V0.11）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleAction {
+    pub kind: RuleActionKind,
+    /// 偏移天数（`set_due_date_offset`）
+    #[serde(default)]
+    pub offset_days: i64,
+    /// 优先级（`set_priority`）
+    #[serde(default)]
+    pub priority: Option<Priority>,
+    /// 标签（`add_labels`）
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// 子任务标题（`append_subtasks`）
+    #[serde(default)]
+    pub subtasks: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Card {
@@ -192,6 +298,12 @@ pub struct Card {
     /// 子任务清单，数据库里存 JSON 数组文本。
     pub subtasks: Vec<Subtask>,
     pub position: i64,
+    /// V0.11：所属重复配置 id；非空表示这张任务由重复任务滚动而来。
+    #[serde(default)]
+    pub recurrence_id: Option<String>,
+    /// V0.11：生成这张任务的上一次任务 id。
+    #[serde(default)]
+    pub generated_from_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -525,6 +637,12 @@ pub struct Snapshot {
     pub project_meta_fields: Vec<ProjectMetaField>,
     #[serde(default)]
     pub project_roles: Vec<ProjectRole>,
+    /// 重复任务配置（V0.11）。
+    #[serde(default)]
+    pub recurrences: Vec<Recurrence>,
+    /// 本地规则（V0.11）。
+    #[serde(default)]
+    pub automation_rules: Vec<AutomationRule>,
 }
 
 // ---------------------------------------------------------------------------
@@ -569,6 +687,15 @@ pub struct BackupFile {
     pub project_meta_fields: Vec<ProjectMetaField>,
     #[serde(default)]
     pub project_roles: Vec<ProjectRole>,
+    /// V0.11 新增；旧备份没有该字段时按空重复配置处理。
+    #[serde(default)]
+    pub recurrences: Vec<Recurrence>,
+    /// V0.11 新增；旧备份没有该字段时按空规则处理。
+    #[serde(default)]
+    pub automation_rules: Vec<AutomationRule>,
+    /// V0.11 新增；旧备份没有该字段时按空活动日志处理。
+    #[serde(default)]
+    pub card_activity: Vec<CardActivity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -599,6 +726,13 @@ pub struct BackupSummary {
     pub project_meta_fields: usize,
     #[serde(default)]
     pub project_roles: usize,
+    /// V0.11 新增。
+    #[serde(default)]
+    pub recurrences: usize,
+    #[serde(default)]
+    pub automation_rules: usize,
+    #[serde(default)]
+    pub card_activity: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1197,6 +1331,157 @@ pub struct UsageSettingsInput {
 }
 
 // ---------------------------------------------------------------------------
+// 自动化与提醒（V0.11）
+// ---------------------------------------------------------------------------
+
+/// 重复任务配置（V0.11）：一张任务最多挂一条配置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recurrence {
+    pub id: String,
+    /// 触发滚动的任务 id
+    pub card_id: String,
+    pub frequency: RecurrenceFrequency,
+    /// 自定义间隔天数（`interval` 使用，其它频率为 1）
+    pub interval_value: i64,
+    /// 每周重复时指定的星期（0=周日 … 6=周六）
+    pub weekdays: Vec<i64>,
+    /// 下一次到期日期 `YYYY-MM-DD`
+    pub next_due_date: Option<String>,
+    pub enabled: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 新建重复配置的入参（V0.11）。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewRecurrenceInput {
+    pub card_id: String,
+    pub frequency: RecurrenceFrequency,
+    #[serde(default)]
+    pub interval_value: Option<i64>,
+    #[serde(default)]
+    pub weekdays: Option<Vec<i64>>,
+    /// 字段缺失=按任务截止日期推算，显式 null=不预填。
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub next_due_date: Option<Option<String>>,
+}
+
+/// 修改重复配置的入参（V0.11）。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecurrencePatch {
+    #[serde(default)]
+    pub frequency: Option<RecurrenceFrequency>,
+    #[serde(default)]
+    pub interval_value: Option<i64>,
+    #[serde(default)]
+    pub weekdays: Option<Vec<i64>>,
+    /// 字段缺失=保持原值，显式 null=清空下一次到期日期。
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub next_due_date: Option<Option<String>>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+/// 本地规则（V0.11）：触发条件 + 声明式动作，默认关闭。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRule {
+    pub id: String,
+    pub name: String,
+    pub trigger: RuleTrigger,
+    /// `move_to_list` 触发时命中的列表 id
+    pub list_id: Option<String>,
+    pub actions: Vec<RuleAction>,
+    pub enabled: bool,
+    /// 最近一次执行失败的可读原因；成功时为空串
+    pub last_error: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 新建规则的入参（V0.11）。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewAutomationRuleInput {
+    pub name: String,
+    pub trigger: RuleTrigger,
+    #[serde(default)]
+    pub list_id: Option<String>,
+    #[serde(default)]
+    pub actions: Vec<RuleAction>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+/// 修改规则的入参（V0.11）。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRulePatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub trigger: Option<RuleTrigger>,
+    /// 字段缺失=保持原值，显式 null=清空目标列表。
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub list_id: Option<Option<String>>,
+    #[serde(default)]
+    pub actions: Option<Vec<RuleAction>>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+/// 任务活动日志条目（V0.11）：记录字段变化。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardActivity {
+    pub id: String,
+    pub card_id: String,
+    /// `created` / `updated` / `moved` / `completed` / `deleted` / `restored` / `recurrence`
+    pub event_type: String,
+    /// 变化字段名；事件级动作为空串
+    pub field: String,
+    pub old_value: String,
+    pub new_value: String,
+    pub created_at: String,
+}
+
+/// 提醒设置（V0.11）：固定单行，全部默认关闭。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationSettings {
+    /// 到期提醒
+    pub due_enabled: bool,
+    /// 逾期提醒
+    pub overdue_enabled: bool,
+    /// 每日摘要
+    pub daily_summary_enabled: bool,
+    /// 每日摘要时间 `HH:MM`
+    pub daily_summary_time: String,
+    /// 提前几天算「即将到期」
+    pub lead_days: i64,
+    pub updated_at: String,
+}
+
+/// 更新提醒设置的入参（V0.11）。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationSettingsInput {
+    #[serde(default)]
+    pub due_enabled: Option<bool>,
+    #[serde(default)]
+    pub overdue_enabled: Option<bool>,
+    #[serde(default)]
+    pub daily_summary_enabled: Option<bool>,
+    #[serde(default)]
+    pub daily_summary_time: Option<String>,
+    #[serde(default)]
+    pub lead_days: Option<i64>,
+}
+
+// ---------------------------------------------------------------------------
 // 单元测试：锁定与前端 TypeScript 契约一致的 JSON 形态
 // ---------------------------------------------------------------------------
 
@@ -1224,6 +1509,8 @@ mod tests {
                 done: true,
             }],
             position: 0,
+            recurrence_id: None,
+            generated_from_id: None,
             created_at: "2026-01-01T00:00:00.000Z".to_string(),
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         }

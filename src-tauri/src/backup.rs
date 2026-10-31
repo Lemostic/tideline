@@ -39,6 +39,9 @@ pub fn build(conn: &Connection) -> Result<BackupFile, String> {
         projects: repo::get_projects(conn)?,
         project_meta_fields: repo::get_all_project_meta(conn)?,
         project_roles: repo::get_all_project_roles(conn)?,
+        recurrences: crate::automation::get_recurrences(conn)?,
+        automation_rules: crate::automation::get_automation_rules(conn)?,
+        card_activity: crate::automation::get_all_card_activity(conn)?,
     })
 }
 
@@ -60,6 +63,9 @@ impl BackupFile {
             projects: self.projects.len(),
             project_meta_fields: self.project_meta_fields.len(),
             project_roles: self.project_roles.len(),
+            recurrences: self.recurrences.len(),
+            automation_rules: self.automation_rules.len(),
+            card_activity: self.card_activity.len(),
         }
     }
 }
@@ -298,8 +304,46 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         card_board.insert(card.id.as_str(), card.board_id.as_str());
     }
 
-    let mut dependency_edges: HashMap<String, Vec<String>> = HashMap::new();
-    for dependency in &backup.dependencies {
+    // V0.11：重复配置与规则引用的任务、列表必须存在。
+    let mut recurrence_ids = HashSet::new();
+    for recurrence in &backup.recurrences {
+        if recurrence.id.trim().is_empty() {
+            return Err("备份中存在空的重复配置 id".to_string());
+        }
+        if !recurrence_ids.insert(recurrence.id.as_str()) {
+            return Err(format!("备份中存在重复的重复配置 id：{}", recurrence.id));
+        }
+        if !card_ids.contains(recurrence.card_id.as_str()) {
+            return Err(format!(
+                "重复配置引用了不存在的任务：{}",
+                recurrence.card_id
+            ));
+        }
+    }
+    let mut rule_ids = HashSet::new();
+    for rule in &backup.automation_rules {
+        if rule.id.trim().is_empty() {
+            return Err("备份中存在空的规则 id".to_string());
+        }
+        if !rule_ids.insert(rule.id.as_str()) {
+            return Err(format!("备份中存在重复的规则 id：{}", rule.id));
+        }
+        if let Some(list_id) = rule.list_id.as_ref() {
+            if !list_ids.contains(list_id.as_str()) {
+                return Err(format!("规则「{}」引用了不存在的列表", rule.name));
+            }
+        }
+    }
+    for activity in &backup.card_activity {
+        if !card_ids.contains(activity.card_id.as_str()) {
+            return Err(format!(
+                "任务活动引用了不存在的任务：{}",
+                activity.card_id
+            ));
+        }
+    }
+
+    let mut dependency_edges: HashMap<String, Vec<String>> = HashMap::new();    for dependency in &backup.dependencies {
         if dependency.card_id == dependency.depends_on_card_id {
             return Err("备份中存在任务依赖自己的数据".to_string());
         }
@@ -547,7 +591,11 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
     let backup = &normalized;
     validate(backup)?;
     let tx = conn.transaction().map_err(|error| format!("恢复失败：{error}"))?;
-    tx.execute("DELETE FROM goal_cards", [])
+    tx.execute("DELETE FROM recurrence_runs", [])
+        .and_then(|_| tx.execute("DELETE FROM card_activity", []))
+        .and_then(|_| tx.execute("DELETE FROM recurrences", []))
+        .and_then(|_| tx.execute("DELETE FROM automation_rules", []))
+        .and_then(|_| tx.execute("DELETE FROM goal_cards", []))
         .and_then(|_| tx.execute("DELETE FROM goals", []))
         .and_then(|_| tx.execute("DELETE FROM performance_records", []))
         .and_then(|_| tx.execute("DELETE FROM overtime_records", []))
@@ -662,8 +710,9 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
         tx.execute(
             "INSERT INTO cards \
              (id, board_id, list_id, title, description, due_date, start_date, priority, accent, \
-              completed, labels, subtasks, position, deleted_at, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+              completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, \
+              created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 &card.id,
                 &card.board_id,
@@ -679,11 +728,76 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
                 subtasks,
                 card.position,
                 &card.deleted_at,
+                &card.recurrence_id,
+                &card.generated_from_id,
                 &card.created_at,
                 &card.updated_at,
             ],
         )
         .map_err(|error| format!("写入任务「{}」失败：{error}", card.title))?;
+    }
+
+    for recurrence in &backup.recurrences {
+        let weekdays = serde_json::to_string(&recurrence.weekdays)
+            .map_err(|error| format!("重复配置星期序列化失败：{error}"))?;
+        tx.execute(
+            "INSERT INTO recurrences \
+             (id, card_id, frequency, interval_value, weekdays, next_due_date, enabled, \
+              created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &recurrence.id,
+                &recurrence.card_id,
+                recurrence.frequency.as_str(),
+                recurrence.interval_value,
+                weekdays,
+                &recurrence.next_due_date,
+                recurrence.enabled as i64,
+                &recurrence.created_at,
+                &recurrence.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入重复配置失败：{error}"))?;
+    }
+
+    for rule in &backup.automation_rules {
+        let actions = serde_json::to_string(&rule.actions)
+            .map_err(|error| format!("规则动作序列化失败：{error}"))?;
+        tx.execute(
+            "INSERT INTO automation_rules \
+             (id, name, trigger, list_id, actions, enabled, last_error, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &rule.id,
+                &rule.name,
+                rule.trigger.as_str(),
+                &rule.list_id,
+                actions,
+                rule.enabled as i64,
+                &rule.last_error,
+                &rule.created_at,
+                &rule.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入本地规则「{}」失败：{error}", rule.name))?;
+    }
+
+    for activity in &backup.card_activity {
+        tx.execute(
+            "INSERT INTO card_activity \
+             (id, card_id, event_type, field, old_value, new_value, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                &activity.id,
+                &activity.card_id,
+                &activity.event_type,
+                &activity.field,
+                &activity.old_value,
+                &activity.new_value,
+                &activity.created_at,
+            ],
+        )
+        .map_err(|error| format!("写入任务活动失败：{error}"))?;
     }
 
     for goal in &backup.goals {
@@ -998,6 +1112,9 @@ mod tests {
             projects: Vec::new(),
             project_meta_fields: Vec::new(),
             project_roles: Vec::new(),
+            recurrences: Vec::new(),
+            automation_rules: Vec::new(),
+            card_activity: Vec::new(),
         };
         let summary = restore(&mut conn, &empty).expect("恢复空备份");
         assert_eq!(summary.cards, 0);
@@ -1065,6 +1182,8 @@ mod tests {
                 labels: Vec::new(),
                 subtasks: Vec::new(),
                 position: 0,
+                recurrence_id: None,
+                generated_from_id: None,
                 created_at: repo::now_iso(),
                 updated_at: repo::now_iso(),
             });
