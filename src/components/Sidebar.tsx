@@ -15,7 +15,6 @@ const WORKSPACE_NAV: NavEntry[] = [
   { to: '/tasks', label: '我的任务', icon: 'check-circle' },
   { to: '/inbox', label: '收件箱', icon: 'inbox' },
   { to: '/templates', label: '模板中心', icon: 'layout-grid' },
-  { to: '/trash', label: '回收站', icon: 'trash' },
   { to: '/dashboard', label: '仪表盘', icon: 'chart' },
   { to: '/board-sets', label: '看板集', icon: 'layers' },
   { to: '/goals', label: '目标', icon: 'target' },
@@ -65,6 +64,16 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
+        <NavLink
+          to="/trash"
+          className={({ isActive }) => `sidebar-utility-link${isActive ? ' is-active' : ''}`}
+          title="回收站：恢复已删除的任务"
+          aria-label="回收站"
+        >
+          <Icon name="trash" size={14} />
+          <span>回收站</span>
+          <small>恢复已删除任务</small>
+        </NavLink>
         <NavLink
           to="/settings"
           className={({ isActive }) => `sidebar-profile${isActive ? ' is-active' : ''}`}

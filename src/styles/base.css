@@ -1759,3 +1759,51 @@ ol {
     font-size: 11px;
   }
 }
+
+/* 回收站等低频工具入口（V0.8.9）：不占用主业务导航 */
+.sidebar-utility-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--faint);
+  font-size: 10.5px;
+  text-decoration: none;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+}
+
+.sidebar-utility-link:hover {
+  background: var(--hover-wash);
+  color: var(--ink-2);
+}
+
+.sidebar-utility-link.is-active {
+  background: var(--surface);
+  color: var(--primary-strong);
+  box-shadow: var(--shadow-xs);
+}
+
+.sidebar-utility-link small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 8.5px;
+  font-weight: 400;
+}
+
+@media (max-width: 820px) {
+  .sidebar-utility-link {
+    width: 40px;
+    height: 34px;
+    min-height: 0;
+    justify-content: center;
+    margin: 0 auto;
+    padding: 0;
+  }
+
+  .sidebar-utility-link span,
+  .sidebar-utility-link small {
+    display: none;
+  }
+}
