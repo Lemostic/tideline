@@ -843,6 +843,9 @@ pub fn run_rules(
 }
 
 /// 把规则计算出的字段变更写回任务。
+///
+/// 每个字段配一个「是否改动」标记，用来区分「这次不动它」和「把它改成空」——
+/// 否则清除截止日期会被当成保持原值。
 fn apply_rule_patch(
     conn: &Connection,
     card_id: &str,
@@ -856,22 +859,32 @@ fn apply_rule_patch(
         Some(subtasks) => serde_json::to_string(subtasks).map_err(|error| error.to_string())?,
         None => String::new(),
     };
+    let due_touched = i64::from(outcome.due_date.is_some());
+    let due_value: Option<String> = outcome.due_date.clone().flatten();
+    let priority_touched = i64::from(outcome.priority.is_some());
+    let priority_value: Option<String> = outcome
+        .priority
+        .clone()
+        .flatten()
+        .map(|item| item.as_str().to_string());
+    let labels_touched = i64::from(outcome.labels.is_some());
+    let subtasks_touched = i64::from(outcome.subtasks.is_some());
     conn.execute(
         "UPDATE cards SET \
-         due_date = COALESCE(?1, due_date), \
-         priority = CASE WHEN ?2 = '' THEN priority ELSE ?2 END, \
-         labels = CASE WHEN ?3 = '' THEN labels ELSE ?3 END, \
-         subtasks = CASE WHEN ?4 = '' THEN subtasks ELSE ?4 END, \
-         updated_at = ?5 \
-         WHERE id = ?6",
+         due_date = CASE WHEN ?1 = 0 THEN due_date ELSE ?2 END, \
+         priority = CASE WHEN ?3 = 0 THEN priority ELSE ?4 END, \
+         labels = CASE WHEN ?5 = 0 THEN labels ELSE ?6 END, \
+         subtasks = CASE WHEN ?7 = 0 THEN subtasks ELSE ?8 END, \
+         updated_at = ?9 \
+         WHERE id = ?10",
         params![
-            outcome.due_date.clone().flatten(),
-            outcome
-                .priority
-                .flatten()
-                .map(|item| item.as_str().to_string())
-                .unwrap_or_default(),
+            due_touched,
+            due_value,
+            priority_touched,
+            priority_value,
+            labels_touched,
             labels_json,
+            subtasks_touched,
             subtasks_json,
             repo::now_iso(),
             card_id,
@@ -1396,7 +1409,42 @@ mod tests {
     }
 
     #[test]
-    fn rule_action_appplies_labels_and_subtasks() {
+    fn rule_can_clear_due_date() {
+        let mut conn = crate::db::open_in_memory().expect("内存库");
+        let (_, _, doing_id, card_id) = seed(&mut conn);
+        create_automation_rule(
+            &mut conn,
+            NewAutomationRuleInput {
+                name: "清除截止日期".to_string(),
+                trigger: RuleTrigger::MoveToList,
+                list_id: Some(doing_id.clone()),
+                actions: vec![RuleAction {
+                    kind: RuleActionKind::ClearDueDate,
+                    offset_days: 0,
+                    priority: None,
+                    labels: Vec::new(),
+                    subtasks: Vec::new(),
+                }],
+                enabled: Some(true),
+            },
+        )
+        .expect("创建规则");
+
+        crate::repo::move_card(
+            &mut conn,
+            crate::models::MoveCardInput {
+                card_id: card_id.clone(),
+                to_list_id: doing_id.clone(),
+                to_index: 0,
+            },
+        )
+        .expect("移动任务");
+        let card = crate::repo::get_card(&conn, &card_id).expect("读取任务");
+        assert_eq!(card.due_date, None, "规则应把截止日期清空");
+    }
+
+    #[test]
+    fn rule_action_applies_labels_and_subtasks() {
         let mut conn = crate::db::open_in_memory().expect("内存库");
         let (_, _, doing_id, card_id) = seed(&mut conn);
         create_automation_rule(
