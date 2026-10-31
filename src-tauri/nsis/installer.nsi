@@ -1,6 +1,6 @@
 ; 潮线 tideline 自定义 NSIS 模板（基于 Tauri CLI v2.12.4 官方模板）
-; 当前用户安装默认目录：%LOCALAPPDATA%\Programs\Tideline（不放 Roaming，避免漫游配置同步程序文件）。
-; 旧版本安装在 %APPDATA%\Tideline 或自定义目录时，会通过 InstallDir 注册表沿用旧路径。
+; 默认系统级安装目录：%ProgramFiles%\Tideline（perMachine，需要管理员权限）。
+; 从旧版 currentUser 安装升级时，会先静默卸载用户级副本，再安装到 Program Files；应用数据保留。
 ; 官方模板：https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.4/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
 Unicode true
 ManifestDPIAware true
@@ -80,6 +80,7 @@ Var UpdateMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
+Var LegacyInstallDir
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -542,14 +543,14 @@ Function .onInit
     !if "${INSTALLMODE}" == "perMachine"
       ${If} ${RunningX64}
         !if "${ARCH}" == "x64"
-          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
+          StrCpy $INSTDIR "$PROGRAMFILES64\Tideline"
         !else if "${ARCH}" == "arm64"
-          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
+          StrCpy $INSTDIR "$PROGRAMFILES64\Tideline"
         !else
-          StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
+          StrCpy $INSTDIR "$PROGRAMFILES\Tideline"
         !endif
       ${Else}
-        StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
+        StrCpy $INSTDIR "$PROGRAMFILES\Tideline"
       ${EndIf}
     !else if "${INSTALLMODE}" == "currentUser"
       StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Tideline"
@@ -557,6 +558,12 @@ Function .onInit
 
     Call RestorePreviousInstallLocation
   ${EndIf}
+
+  ; 旧版是按用户安装（Programs\Tideline / 自定义目录），新版改为 perMachine。
+  ; 先静默卸载旧副本并清理 HKCU 安装信息，再安装到 Program Files；应用数据目录不动。
+  !if "${INSTALLMODE}" == "perMachine"
+    Call MigrateLegacyPerUserInstall
+  !endif
 
 
   !if "${INSTALLMODE}" == "both"
@@ -983,6 +990,84 @@ Function RestorePreviousInstallLocation
     ReadRegStr $4 SHCTX "${UNINSTKEY}" "InstallLocation"
     Call TryRestorePreviousLocation
   ${EndIf}
+FunctionEnd
+
+; 去掉 $R4 首尾可能存在的引号（注册表中的 InstallLocation 常带引号）
+Function StripQuotesR4
+  StrCpy $R5 $R4 1
+  ${If} $R5 == "$\""
+    StrCpy $R4 $R4 "" 1
+  ${EndIf}
+  StrLen $R5 $R4
+  ${If} $R5 > 0
+    StrCpy $R6 $R4 1 -1
+    ${If} $R6 == "$\""
+      IntOp $R5 $R5 - 1
+      StrCpy $R4 $R4 $R5
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+; 旧版 currentUser 安装迁移：静默卸载旧副本，清理 HKCU 安装信息；
+; 应用数据（%APPDATA%\com.lemostic.tideline、%LOCALAPPDATA%\com.lemostic.tideline）保持不动。
+Function MigrateLegacyPerUserInstall
+  StrCpy $LegacyInstallDir ""
+  StrCpy $R4 ""
+
+  ; 1) Add/Remove Programs 的 InstallLocation
+  ReadRegStr $R4 HKCU "${UNINSTKEY}" "InstallLocation"
+  Call StripQuotesR4
+  ${If} $R4 != ""
+  ${AndIf} ${FileExists} "$R4\uninstall.exe"
+    StrCpy $LegacyInstallDir "$R4"
+    Goto legacy_install_found
+  ${EndIf}
+
+  ; 2) 旧版显式写入的 InstallDir
+  ReadRegStr $R4 HKCU "${MANUPRODUCTKEY}" "InstallDir"
+  Call StripQuotesR4
+  ${If} $R4 != ""
+  ${AndIf} ${FileExists} "$R4\uninstall.exe"
+    StrCpy $LegacyInstallDir "$R4"
+    Goto legacy_install_found
+  ${EndIf}
+
+  ; 3) 旧版默认注册表值
+  ReadRegStr $R4 HKCU "${MANUPRODUCTKEY}" ""
+  Call StripQuotesR4
+  ${If} $R4 != ""
+  ${AndIf} ${FileExists} "$R4\uninstall.exe"
+    StrCpy $LegacyInstallDir "$R4"
+    Goto legacy_install_found
+  ${EndIf}
+
+  ; 4) 历史默认安装位置
+  ${If} ${FileExists} "$LOCALAPPDATA\Programs\Tideline\uninstall.exe"
+    StrCpy $LegacyInstallDir "$LOCALAPPDATA\Programs\Tideline"
+  ${ElseIf} ${FileExists} "$APPDATA\Tideline\uninstall.exe"
+    StrCpy $LegacyInstallDir "$APPDATA\Tideline"
+  ${ElseIf} ${FileExists} "$LOCALAPPDATA\Tideline\uninstall.exe"
+    StrCpy $LegacyInstallDir "$LOCALAPPDATA\Tideline"
+  ${EndIf}
+
+  ${If} $LegacyInstallDir == ""
+    Goto legacy_migration_done
+  ${EndIf}
+
+  legacy_install_found:
+    DetailPrint "检测到旧版用户级安装：$LegacyInstallDir"
+    DetailPrint "正在迁移到 Program Files，应用数据会保留…"
+    ExecWait '"$LegacyInstallDir\uninstall.exe" /S' $0
+    Sleep 1200
+    Delete "$LegacyInstallDir\uninstall.exe"
+    RMDir /r /REBOOTOK "$LegacyInstallDir"
+    Delete "$DESKTOP\${PRODUCTNAME}.lnk"
+    Delete "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+    DeleteRegKey HKCU "${UNINSTKEY}"
+    DeleteRegKey HKCU "${MANUPRODUCTKEY}"
+    DeleteRegKey /ifempty HKCU "${MANUKEY}"
+
+  legacy_migration_done:
 FunctionEnd
 
 Function Skip
