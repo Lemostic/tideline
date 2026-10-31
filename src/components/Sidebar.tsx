@@ -20,8 +20,6 @@ const WORKSPACE_NAV: NavEntry[] = [
   { to: '/board-sets', label: '看板集', icon: 'layers' },
   { to: '/goals', label: '目标', icon: 'target' },
   { to: '/team', label: '项目组', icon: 'users' },
-  { to: '/data', label: '数据备份', icon: 'database' },
-  { to: '/settings', label: '设置', icon: 'sliders' },
 ];
 
 export function Sidebar() {
@@ -67,6 +65,14 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
+        <NavLink
+          to="/settings"
+          className={({ isActive }) => `sidebar-gear${isActive ? ' is-active' : ''}`}
+          title="设置"
+          aria-label="设置"
+        >
+          <Icon name="settings" size={17} />
+        </NavLink>
         <div className="storage-status">
           <span className="storage-dot" />
           数据保存在本机

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { Modal } from '@/components/Modal';
 import { api } from '@/lib/api';
@@ -9,6 +9,7 @@ import type { AutoStartInfo, StorageInfo } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUpdateStore } from '@/store/updateStore';
+import { DataPage } from './DataPage';
 import './settings.css';
 
 interface PendingStorage {
@@ -18,7 +19,8 @@ interface PendingStorage {
 
 /** 设置管理（V0.5）：全局偏好 + 自定义数据目录，修改立即生效。 */
 export function SettingsPage() {
-  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get('tab') === 'data' ? 'data' : 'preferences';
   const snapshot = useSnapshot();
   const settings = useSettingsStore();
   const reset = useSettingsStore((state) => state.reset);
@@ -120,13 +122,40 @@ export function SettingsPage() {
   return (
     <div className="page settings-page">
       <header className="settings-head">
-        <div className="page-eyebrow">偏好设置</div>
+        <div className="page-eyebrow">设置</div>
         <h1 className="settings-title">设置</h1>
         <p className="settings-sub">
-          设置自动保存在本机，不随备份导入导出。修改后立即生效，并对后续打开的所有看板生效。
+          {tab === 'data'
+            ? '导出或恢复本机全部数据。备份文件完全离线，不包含账号、网络或设备信息。'
+            : '设置自动保存在本机，不随备份导入导出。修改后立即生效，并对后续打开的所有看板生效。'}
         </p>
       </header>
 
+      <div className="settings-tabs" role="tablist" aria-label="设置分类">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'preferences'}
+          className={`settings-tab${tab === 'preferences' ? ' is-active' : ''}`}
+          onClick={() => setSearchParams({})}
+        >
+          <Icon name="sliders" size={14} />
+          偏好设置
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'data'}
+          className={`settings-tab${tab === 'data' ? ' is-active' : ''}`}
+          onClick={() => setSearchParams({ tab: 'data' })}
+        >
+          <Icon name="database" size={14} />
+          数据与备份
+        </button>
+      </div>
+
+      {tab === 'preferences' ? (
+        <>
       {storageFlash ? <div className="settings-flash">{storageFlash}</div> : null}
       {storageError ? <div className="settings-flash is-error">{storageError}</div> : null}
 
@@ -350,10 +379,10 @@ export function SettingsPage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              onClick={() => navigate('/data')}
+              onClick={() => setSearchParams({ tab: 'data' })}
             >
               <Icon name="database" size={14} />
-              打开数据备份
+              打开数据与备份
             </button>
           </div>
         </section>
@@ -515,6 +544,10 @@ export function SettingsPage() {
           </div>
         </Modal>
       ) : null}
+        </>
+      ) : (
+        <DataPage embedded />
+      )}
     </div>
   );
 }

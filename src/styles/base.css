@@ -1619,3 +1619,40 @@ ol {
 .topbar-update:hover {
   border-color: var(--primary);
 }
+
+/* 左下角设置入口（V0.8.4） */
+.sidebar-gear {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  margin: 0 8px 2px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--muted);
+  text-decoration: none;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+}
+
+.sidebar-gear:hover {
+  background: rgba(27, 42, 36, 0.06);
+  color: var(--ink);
+}
+
+.sidebar-gear.is-active {
+  background: var(--surface);
+  color: var(--primary-strong);
+  box-shadow: var(--shadow-xs);
+}
+
+@media (max-width: 820px) {
+  .sidebar-footer {
+    display: flex;
+    margin-top: auto;
+    padding-top: 8px;
+    border-top: 0;
+  }
+
+  .sidebar-gear {
+    margin: 0 auto;
+  }
+}

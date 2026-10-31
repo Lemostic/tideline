@@ -10,7 +10,6 @@ const SECTION_LABELS: Record<string, string> = {
   '/inbox': '收件箱',
   '/templates': '模板中心',
   '/trash': '回收站',
-  '/data': '数据备份',
   '/settings': '设置',
   '/dashboard': '仪表盘',
   '/board-sets': '看板集',

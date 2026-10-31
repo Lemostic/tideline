@@ -19,7 +19,7 @@ interface PendingImport {
  * 导入采用「先校验、再确认、事务替换」，失败不会破坏现有数据；
  * 恢复成功后重新拉取快照并清空回收站缓存，避免页面继续展示旧数据。
  */
-export function DataPage() {
+export function DataPage({ embedded = false }: { embedded?: boolean }) {
   const snapshot = useSnapshot();
   const trash = useAppStore((state) => state.trash);
   const loadTrash = useAppStore((state) => state.loadTrash);
@@ -102,14 +102,16 @@ export function DataPage() {
     storageInfo?.dbPath ?? '%APPDATA%\\com.lemostic.tideline\\tideline.db';
 
   return (
-    <div className="page data-page">
-      <header className="data-head">
-        <div className="page-eyebrow">数据与备份</div>
-        <h1 className="data-title">把数据握在自己手里</h1>
-        <p className="data-sub">
-          潮线只把数据保存在本机。定期导出一份 JSON 备份，换电脑或误操作时都能完整恢复。
-        </p>
-      </header>
+    <div className={embedded ? 'data-page data-page-embedded' : 'page data-page'}>
+      {embedded ? null : (
+        <header className="data-head">
+          <div className="page-eyebrow">数据与备份</div>
+          <h1 className="data-title">把数据握在自己手里</h1>
+          <p className="data-sub">
+            潮线只把数据保存在本机。定期导出一份 JSON 备份，换电脑或误操作时都能完整恢复。
+          </p>
+        </header>
+      )}
 
       {flash ? <div className="data-flash">{flash}</div> : null}
       {error ? <div className="data-flash is-error">{error}</div> : null}

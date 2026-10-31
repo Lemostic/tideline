@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { HashRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { BrandMark } from '@/components/Icon';
 import { NewBoardModal } from '@/components/NewBoardModal';
 import { SearchDialog } from '@/components/SearchDialog';
@@ -10,7 +10,6 @@ import { BoardPage } from '@/pages/BoardPage';
 import { BoardSetDetailPage } from '@/pages/BoardSetDetailPage';
 import { BoardSetsPage } from '@/pages/BoardSetsPage';
 import { DashboardPage } from '@/pages/DashboardPage';
-import { DataPage } from '@/pages/DataPage';
 import { GoalDetailPage } from '@/pages/GoalDetailPage';
 import { GoalsPage } from '@/pages/GoalsPage';
 import { InboxPage } from '@/pages/InboxPage';
@@ -80,7 +79,7 @@ export default function App() {
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/trash" element={<TrashPage />} />
-              <Route path="/data" element={<DataPage />} />
+              <Route path="/data" element={<Navigate to="/settings?tab=data" replace />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/board/:boardId" element={<BoardPage />} />
