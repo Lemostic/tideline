@@ -6,6 +6,14 @@
  */
 import { create } from 'zustand';
 import type { BoardView } from '@/lib/types';
+import {
+  DEFAULT_CUSTOM_THEME,
+  DEFAULT_THEME_ID,
+  normalizeCustomTheme,
+  normalizeThemeId,
+  type ThemeBaseColors,
+  type ThemeId,
+} from '@/lib/theme';
 
 export type StartPage = '/' | '/tasks' | '/inbox';
 
@@ -22,6 +30,10 @@ export interface Settings {
   startPage: StartPage;
   /** 启动时自动检查 GitHub 正式版本（每 24 小时最多一次） */
   autoCheckUpdates: boolean;
+  /** 主题预设或自定义主题 */
+  themeId: ThemeId;
+  /** 自定义主题的 5 个基础色，切换预设时也保留 */
+  customTheme: ThemeBaseColors;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -31,6 +43,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showDependencyLines: true,
   startPage: '/',
   autoCheckUpdates: false,
+  themeId: DEFAULT_THEME_ID,
+  customTheme: DEFAULT_CUSTOM_THEME,
 };
 
 const STORAGE_KEY = 'tideline.settings.v1';
@@ -49,6 +63,8 @@ function normalize(raw: unknown): Settings {
     ? (value.startPage as StartPage)
     : DEFAULT_SETTINGS.startPage;
   const autoCheckUpdates = Boolean(value.autoCheckUpdates);
+  const themeId = normalizeThemeId(value.themeId);
+  const customTheme = normalizeCustomTheme(value.customTheme);
   return {
     defaultView,
     weekStartsOn,
@@ -56,6 +72,8 @@ function normalize(raw: unknown): Settings {
     showDependencyLines,
     startPage,
     autoCheckUpdates,
+    themeId,
+    customTheme,
   };
 }
 

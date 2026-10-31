@@ -21,6 +21,7 @@ import { TemplatesPage } from '@/pages/TemplatesPage';
 import { TrashPage } from '@/pages/TrashPage';
 import { WorkbenchPage } from '@/pages/WorkbenchPage';
 import { useAppStore } from '@/store/appStore';
+import { applyTheme } from '@/lib/theme';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
 import { isUpdateCheckDue, useUpdateStore } from '@/store/updateStore';
@@ -31,10 +32,16 @@ export default function App() {
   const error = useAppStore((state) => state.error);
   const clearError = useAppStore((state) => state.clearError);
   const openSearch = useUiStore((state) => state.openSearch);
+  const themeId = useSettingsStore((state) => state.themeId);
+  const customTheme = useSettingsStore((state) => state.customTheme);
 
   useEffect(() => {
     void init();
   }, [init]);
+
+  useEffect(() => {
+    applyTheme(themeId, customTheme);
+  }, [themeId, customTheme]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

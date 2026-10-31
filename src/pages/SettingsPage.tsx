@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { Modal } from '@/components/Modal';
 import { api } from '@/lib/api';
+import { DEFAULT_CUSTOM_THEME, THEME_PRESETS, type ThemeBaseColors } from '@/lib/theme';
 import { formatRelativeTime } from '@/lib/date';
 import { RELEASES_PAGE } from '@/lib/update';
 import type { AutoStartInfo, StorageInfo } from '@/lib/types';
@@ -42,8 +43,14 @@ export function SettingsPage() {
   const [storageFlash, setStorageFlash] = useState<string | null>(null);
   const [updateActionError, setUpdateActionError] = useState<string | null>(null);
 
-  const handleOpenRelease = async () => {
-    setUpdateActionError(null);
+  const updateThemeColor = (key: keyof ThemeBaseColors, value: string) => {
+    settings.update({
+      themeId: 'custom',
+      customTheme: { ...settings.customTheme, [key]: value },
+    });
+  };
+
+  const handleOpenRelease = async () => {    setUpdateActionError(null);
     const url = updateResult?.latest?.url ?? RELEASES_PAGE;
     try {
       await api.openExternal(url);
@@ -317,6 +324,121 @@ export function SettingsPage() {
               <span className="settings-switch-knob" />
             </button>
           </label>
+        </section>
+
+        <section className="settings-card settings-theme-card">
+          <div className="settings-card-head">
+            <span className="settings-card-icon is-theme">
+              <Icon name="palette" size={17} />
+            </span>
+            <div>
+              <h2 className="settings-card-title">主题外观</h2>
+              <p className="settings-card-desc">
+                选择一套预设配色，或自行配置主色、强调色与背景色，立即生效并保存在本机。
+              </p>
+            </div>
+            <span className="settings-theme-current">
+              当前：{settings.themeId === 'custom' ? '自定义' : THEME_PRESETS.find((preset) => preset.id === settings.themeId)?.name ?? '自定义'}
+            </span>
+          </div>
+
+          <div className="theme-preset-grid">
+            {THEME_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className={`theme-preset${settings.themeId === preset.id ? ' is-active' : ''}`}
+                onClick={() => settings.update({ themeId: preset.id })}
+                aria-pressed={settings.themeId === preset.id}
+                aria-label={`主题：${preset.name}`}
+              >
+                <span className="theme-preset-swatches">
+                  <span style={{ background: preset.colors.background }} />
+                  <span style={{ background: preset.colors.primary }} />
+                  <span style={{ background: preset.colors.accent }} />
+                </span>
+                <span className="theme-preset-main">
+                  <strong>{preset.name}</strong>
+                  <small>{preset.description}</small>
+                </span>
+                {settings.themeId === preset.id ? (
+                  <span className="theme-preset-check">
+                    <Icon name="check" size={12} />
+                  </span>
+                ) : null}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`theme-preset theme-preset-custom${settings.themeId === 'custom' ? ' is-active' : ''}`}
+              onClick={() => settings.update({ themeId: 'custom' })}
+              aria-pressed={settings.themeId === 'custom'}
+              aria-label="主题：自定义"
+            >
+              <span className="theme-preset-swatches">
+                <span style={{ background: settings.customTheme.background }} />
+                <span style={{ background: settings.customTheme.primary }} />
+                <span style={{ background: settings.customTheme.accent }} />
+              </span>
+              <span className="theme-preset-main">
+                <strong>自定义</strong>
+                <small>用 5 个基础色生成完整配色</small>
+              </span>
+              {settings.themeId === 'custom' ? (
+                <span className="theme-preset-check">
+                  <Icon name="check" size={12} />
+                </span>
+              ) : null}
+            </button>
+          </div>
+
+          <div className={`theme-custom-panel${settings.themeId === 'custom' ? ' is-active' : ''}`}>
+            <div className="theme-custom-head">
+              <div>
+                <h3>自定义配色</h3>
+                <p>改任一颜色会自动切到「自定义」主题。</p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() =>
+                  settings.update({
+                    themeId: 'custom',
+                    customTheme: { ...DEFAULT_CUSTOM_THEME },
+                  })
+                }
+              >
+                恢复自定义默认
+              </button>
+            </div>
+            <div className="theme-color-grid">
+              {[
+                { key: 'primary', label: '主色', hint: '按钮 / 导航 / 进度' },
+                { key: 'accent', label: '强调色', hint: '星标 / 提醒 / 点缀' },
+                { key: 'background', label: '背景色', hint: '窗口 / 侧边栏底色' },
+                { key: 'surface', label: '卡片色', hint: '卡片 / 弹窗表面' },
+                { key: 'text', label: '文字色', hint: '正文与标题' },
+              ].map((field) => (
+                <label className="theme-color-field" key={field.key}>
+                  <span className="theme-color-swatch">
+                    <input
+                      type="color"
+                      value={settings.customTheme[field.key as keyof ThemeBaseColors]}
+                      onChange={(event) =>
+                        updateThemeColor(field.key as keyof ThemeBaseColors, event.target.value)
+                      }
+                      aria-label={`自定义主题${field.label}`}
+                    />
+                  </span>
+                  <span className="theme-color-text">
+                    <strong>{field.label}</strong>
+                    <small>{field.hint}</small>
+                  </span>
+                  <code>{settings.customTheme[field.key as keyof ThemeBaseColors]}</code>
+                </label>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section className="settings-card">

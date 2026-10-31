@@ -34,6 +34,8 @@
   /* 点缀：暖沙 */
   --accent: #e9a23b;
   --accent-soft: #fdf2df;
+  --hover-wash: rgba(27, 42, 36, 0.06);
+  --backdrop: rgba(20, 32, 27, 0.34);
 
   /* 语义色 */
   --danger: #d9534a;

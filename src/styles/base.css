@@ -207,7 +207,7 @@ ol {
 }
 
 .nav-item:hover {
-  background: rgba(27, 42, 36, 0.05);
+  background: var(--hover-wash);
 }
 
 .nav-item.active {
@@ -504,7 +504,7 @@ ol {
 }
 
 .btn-quiet:hover:not(:disabled) {
-  background: rgba(27, 42, 36, 0.055);
+  background: var(--hover-wash);
   color: var(--ink);
 }
 
@@ -540,7 +540,7 @@ ol {
 }
 
 .btn-icon:hover:not(:disabled) {
-  background: rgba(27, 42, 36, 0.06);
+  background: var(--hover-wash);
   color: var(--ink);
 }
 
@@ -773,7 +773,7 @@ ol {
 }
 
 .modal-close:hover {
-  background: rgba(27, 42, 36, 0.06);
+  background: var(--hover-wash);
   color: var(--ink);
 }
 
@@ -1480,7 +1480,7 @@ ol {
 .task-toggle.on {
   background: var(--success-soft);
   border-color: #cbe8d5;
-  color: #2f8a53;
+  color: var(--success);
   font-weight: 600;
 }
 
@@ -1634,7 +1634,7 @@ ol {
 }
 
 .sidebar-gear:hover {
-  background: rgba(27, 42, 36, 0.06);
+  background: var(--hover-wash);
   color: var(--ink);
 }
 
