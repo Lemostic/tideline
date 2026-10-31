@@ -26,3 +26,6 @@ Thumbs.db
 /screenshots/
 coverage/
 *.log
+
+# claude-flow 本地数据
+.claude-flow/
