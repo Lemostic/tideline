@@ -17,6 +17,7 @@ import {
   summarizeBackup,
 } from './backup';
 import { createId, nowISO } from './ids';
+import { todayKey } from './date';
 import type {
   AutoStartInfo,
   BackupExport,
@@ -72,6 +73,12 @@ import type {
   TeamMember,
   TeamMemberPatch,
   TenurePatch,
+  UsageApp,
+  UsageAppIncludedInput,
+  UsageOverview,
+  UsageRangeInput,
+  UsageSettings,
+  UsageSettingsInput,
 } from './types';
 
 export interface TidelineApi {
@@ -146,6 +153,19 @@ export interface TidelineApi {
   deleteProjectRole(input: IdInput): Promise<void>;
   /** 读取需求文档（V0.9）：桌面端走原生对话框，浏览器端用文件选择；取消返回 null */
   pickRequirementFile(): Promise<PickedTextFile | null>;
+  /* ---------- 桌面软件使用统计（V0.10） ---------- */
+  /** 区间使用统计总览（含每日趋势与应用排行） */
+  getUsageOverview(input: UsageRangeInput): Promise<UsageOverview>;
+  /** 已采集到的应用清单（含累计时长与纳入开关） */
+  getUsageApps(): Promise<UsageApp[]>;
+  /** 切换某个应用是否纳入统计 */
+  setUsageAppIncluded(input: UsageAppIncludedInput): Promise<UsageApp>;
+  /** 读取统计设置（暂停状态、空闲阈值） */
+  getUsageSettings(): Promise<UsageSettings>;
+  /** 更新统计设置 */
+  setUsageSettings(input: UsageSettingsInput): Promise<UsageSettings>;
+  /** 清空全部使用记录 */
+  clearUsageRecords(): Promise<void>;
 }
 
 export function isTauri(): boolean {
@@ -212,10 +232,55 @@ const tauriApi: TidelineApi = {
   updateProjectRole: (input) => invoke<ProjectRole>('update_project_role', { input }),
   deleteProjectRole: (input) => invoke<void>('delete_project_role', { input }),
   pickRequirementFile: () => invoke<PickedTextFile | null>('pick_requirement_file'),
+  getUsageOverview: (input) => invoke<UsageOverview>('get_usage_overview', { input }),
+  getUsageApps: () => invoke<UsageApp[]>('get_usage_apps'),
+  setUsageAppIncluded: (input) => invoke<UsageApp>('set_usage_app_included', { input }),
+  getUsageSettings: () => invoke<UsageSettings>('get_usage_settings'),
+  setUsageSettings: (input) => invoke<UsageSettings>('set_usage_settings', { input }),
+  clearUsageRecords: () => invoke<void>('clear_usage_records'),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
 const STORAGE_KEY = 'tideline.db.v1';
+
+/** 浏览器端使用统计的本地存储 key（V0.10） */
+const USAGE_STORAGE_KEY = 'tideline.usage.v1';
+
+/** 浏览器端没有采样器，只保留统计设置与手动切换过的应用 */
+interface LocalUsageStore {
+  settings: UsageSettings;
+  apps: UsageApp[];
+}
+
+/** 读取浏览器端的使用统计本地存储；数据损坏时回落到默认值 */
+function loadLocalUsageStore(): LocalUsageStore {
+  const fallback: LocalUsageStore = {
+    settings: { paused: false, idleThresholdSeconds: 300, updatedAt: nowISO() },
+    apps: [],
+  };
+  if (typeof localStorage === 'undefined') return fallback;
+  try {
+    const raw = localStorage.getItem(USAGE_STORAGE_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<LocalUsageStore>;
+    return {
+      settings: { ...fallback.settings, ...(parsed.settings ?? {}) },
+      apps: Array.isArray(parsed.apps) ? parsed.apps : [],
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/** 写入浏览器端的使用统计本地存储；隐私模式写入失败时静默忽略 */
+function saveLocalUsageStore(store: LocalUsageStore): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    /* 忽略写入失败，页面按空数据展示 */
+  }
+}
 
 const DEFAULT_PROJECT_ROLES: ReadonlyArray<{ name: string; color: string }> = [
   { name: '开发', color: '#2f6fd0' },
@@ -1627,6 +1692,67 @@ const localApi: TidelineApi = {
   async pickRequirementFile() {
     return pickLocalTextFile();
   },
+
+  async getUsageOverview(input) {
+    // 浏览器端没有采样器，只回一个空结构（默认区间为今天）
+    const today = todayKey();
+    return {
+      rangeFrom: input.from || today,
+      rangeTo: input.to || today,
+      totalSeconds: 0,
+      trackedApps: 0,
+      apps: [],
+      daily: [],
+    };
+  },
+
+  async getUsageApps() {
+    // 浏览器端无法采集前台应用，应用清单恒为空
+    return [];
+  },
+
+  async setUsageAppIncluded(input) {
+    const store = loadLocalUsageStore();
+    const existing = store.apps.find((item) => item.appKey === input.appKey);
+    const now = nowISO();
+    const app: UsageApp = existing
+      ? { ...existing, included: input.included }
+      : {
+          appKey: input.appKey,
+          appName: input.appKey,
+          exePath: '',
+          included: input.included,
+          totalSeconds: 0,
+          firstSeen: now,
+          lastSeen: now,
+        };
+    store.apps = [...store.apps.filter((item) => item.appKey !== input.appKey), app];
+    saveLocalUsageStore(store);
+    return app;
+  },
+
+  async getUsageSettings() {
+    return loadLocalUsageStore().settings;
+  },
+
+  async setUsageSettings(input) {
+    const store = loadLocalUsageStore();
+    const settings: UsageSettings = {
+      paused: input.paused ?? store.settings.paused,
+      idleThresholdSeconds: input.idleThresholdSeconds ?? store.settings.idleThresholdSeconds,
+      updatedAt: nowISO(),
+    };
+    store.settings = settings;
+    saveLocalUsageStore(store);
+    return settings;
+  },
+
+  async clearUsageRecords() {
+    // 浏览器端没有采样记录，清空即清掉手动切换过的应用，设置保留
+    const store = loadLocalUsageStore();
+    store.apps = [];
+    saveLocalUsageStore(store);
+  },
 };
 
 /**
@@ -1674,5 +1800,6 @@ export function resetLocalData(): void {
   if (typeof localStorage !== 'undefined') {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem('tideline.seeded');
+    localStorage.removeItem(USAGE_STORAGE_KEY);
   }
 }

@@ -1104,6 +1104,99 @@ pub struct PickedTextFile {
 }
 
 // ---------------------------------------------------------------------------
+// 桌面软件使用统计（V0.10）
+// ---------------------------------------------------------------------------
+
+/// 已发现的应用（V0.10）：`app_key` 是 exe 文件名去 `.exe` 后的小写形式，
+/// 例如 `C:\Program Files\...\chrome.exe` → `chrome`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageApp {
+    pub app_key: String,
+    /// 展示名：去掉 `.exe` 的原始文件名（保留原始大小写）
+    pub app_name: String,
+    pub exe_path: String,
+    /// 用户是否勾选纳入统计
+    pub included: bool,
+    /// 全时段累计使用秒数（不受查询区间影响）
+    pub total_seconds: i64,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+/// 使用统计设置（V0.10）：暂停开关 + 空闲阈值（秒）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSettings {
+    pub paused: bool,
+    pub idle_threshold_seconds: i64,
+    pub updated_at: String,
+}
+
+/// 区间内单个应用的统计（V0.10）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageAppStat {
+    pub app_key: String,
+    pub app_name: String,
+    pub seconds: i64,
+    /// 占区间总时长的比例（0..=1），总时长为 0 时为 0
+    pub share: f64,
+}
+
+/// 区间内某一天的总使用时长（V0.10）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageDailyStat {
+    /// 本地日期 `YYYY-MM-DD`
+    pub day: String,
+    pub seconds: i64,
+}
+
+/// 使用统计总览（V0.10）：区间闭区间 `[from, to]`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageOverview {
+    pub range_from: String,
+    pub range_to: String,
+    pub total_seconds: i64,
+    /// 区间内有使用记录（秒数 > 0）的已勾选应用数量
+    pub tracked_apps: i64,
+    /// 各应用统计，按秒数降序
+    pub apps: Vec<UsageAppStat>,
+    /// 逐日统计（缺失日期补 0），按日期升序
+    pub daily: Vec<UsageDailyStat>,
+}
+
+/// 查询区间（V0.10）：`from` / `to` 缺省时按「今天」处理。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageRangeInput {
+    #[serde(default)]
+    pub from: Option<String>,
+    #[serde(default)]
+    pub to: Option<String>,
+}
+
+/// 切换某个应用是否纳入统计（V0.10）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageAppIncludedInput {
+    pub app_key: String,
+    pub included: bool,
+}
+
+/// 更新使用统计设置（V0.10）：只更新传入的字段。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSettingsInput {
+    #[serde(default)]
+    pub paused: Option<bool>,
+    #[serde(default)]
+    pub idle_threshold_seconds: Option<i64>,
+}
+
+// ---------------------------------------------------------------------------
 // 单元测试：锁定与前端 TypeScript 契约一致的 JSON 形态
 // ---------------------------------------------------------------------------
 

@@ -13,6 +13,7 @@ use crate::db::Db;
 use crate::models::*;
 use crate::repo;
 use crate::storage;
+use crate::usage::{self, UsageRuntime};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -495,4 +496,61 @@ pub fn pick_requirement_file() -> CmdResult<Option<PickedTextFile>> {
         .unwrap_or_else(|| "需求文档".to_string());
 
     Ok(Some(PickedTextFile { name, content }))
+}
+
+// ---------------------------------------------------------------------------
+// 桌面软件使用统计（V0.10）
+// ---------------------------------------------------------------------------
+
+/// 使用统计总览；`from` / `to` 缺省按「今天」处理，区间为闭区间。
+#[tauri::command]
+pub fn get_usage_overview(db: State<'_, Db>, input: UsageRangeInput) -> CmdResult<UsageOverview> {
+    let conn = db.lock()?;
+    usage::get_overview(&conn, &input)
+}
+
+/// 应用清单（全量），附带全时段累计使用时长。
+#[tauri::command]
+pub fn get_usage_apps(db: State<'_, Db>) -> CmdResult<Vec<UsageApp>> {
+    let conn = db.lock()?;
+    usage::list_apps(&conn)
+}
+
+/// 设置某个应用是否纳入统计。
+#[tauri::command]
+pub fn set_usage_app_included(
+    db: State<'_, Db>,
+    input: UsageAppIncludedInput,
+) -> CmdResult<UsageApp> {
+    let conn = db.lock()?;
+    usage::set_app_included(&conn, &input)
+}
+
+/// 读取使用统计设置（暂停开关、空闲阈值）。
+#[tauri::command]
+pub fn get_usage_settings(db: State<'_, Db>) -> CmdResult<UsageSettings> {
+    let conn = db.lock()?;
+    usage::get_settings(&conn)
+}
+
+/// 更新使用统计设置：只更新传入的字段，并立即同步给正在运行的采样器。
+#[tauri::command]
+pub fn set_usage_settings(
+    db: State<'_, Db>,
+    runtime: State<'_, UsageRuntime>,
+    input: UsageSettingsInput,
+) -> CmdResult<UsageSettings> {
+    let conn = db.lock()?;
+    let settings = usage::set_settings(&conn, &input)?;
+    // 数据库是持久化真相，运行时状态只是给采样线程用的即时副本。
+    runtime.set_paused(settings.paused);
+    runtime.set_idle_threshold_seconds(settings.idle_threshold_seconds);
+    Ok(settings)
+}
+
+/// 清空使用记录：只清 `usage_daily`，保留应用清单与设置。
+#[tauri::command]
+pub fn clear_usage_records(db: State<'_, Db>) -> CmdResult<()> {
+    let conn = db.lock()?;
+    usage::clear_records(&conn)
 }

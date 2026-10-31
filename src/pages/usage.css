@@ -1,0 +1,475 @@
+/* 使用统计（V0.10） */
+
+.usage-page {
+  width: 100%;
+  max-width: none;
+}
+
+/* ---------- 头部与控制条 ---------- */
+
+.usage-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 6px 2px 18px;
+}
+
+.usage-title {
+  margin: 4px 0 5px;
+  color: var(--ink);
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.usage-sub {
+  max-width: 560px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.usage-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.usage-range {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-sunken);
+}
+
+.usage-range-btn {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.usage-range-btn:hover {
+  color: var(--ink);
+}
+
+.usage-range-btn.is-active {
+  background: var(--surface);
+  color: var(--primary-strong);
+  font-weight: 650;
+  box-shadow: var(--shadow-xs);
+}
+
+.usage-custom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-custom-sep {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.usage-clear-btn {
+  color: var(--danger);
+}
+
+/* ---------- 提示条 ---------- */
+
+.usage-notice,
+.usage-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--primary-soft-2);
+  border-radius: var(--radius-md);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.usage-notice-success {
+  border-color: var(--success-soft);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.usage-error {
+  border-color: var(--danger-soft);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.usage-notice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ---------- 概览卡片 ---------- */
+
+.usage-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 12px;
+}
+
+.usage-kpi {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+
+.usage-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--primary);
+}
+
+.usage-kpi-label {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.usage-kpi-value {
+  color: var(--ink);
+  font-size: 25px;
+  font-weight: 720;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-kpi-value.usage-status {
+  color: var(--primary-strong);
+}
+
+.usage-kpi-value.usage-status.is-paused {
+  color: var(--accent);
+}
+
+.usage-kpi-hint {
+  color: var(--faint);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-kpi-threshold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-threshold-input {
+  width: 88px;
+  padding: 4px 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-kpi-unit {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.usage-kpi-save {
+  align-self: flex-start;
+}
+
+/* ---------- 主体网格 ---------- */
+
+.usage-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.usage-card {
+  grid-column: span 12;
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.usage-rank {
+  grid-column: span 7;
+}
+
+.usage-trend-card {
+  grid-column: span 5;
+}
+
+.usage-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.usage-card-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.usage-card-sub {
+  color: var(--faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* ---------- 排行表 ---------- */
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.usage-table th {
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.usage-table td {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+
+.usage-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.usage-cell-num {
+  width: 96px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-cell-share {
+  width: 42%;
+}
+
+.usage-app-name {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.usage-share {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.usage-share-track {
+  flex: 1;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.usage-share-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+}
+
+.usage-share-value {
+  width: 48px;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 每日趋势（纯 CSS 柱状图） ---------- */
+
+.usage-trend {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 208px;
+  padding-top: 8px;
+}
+
+.usage-trend-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+.usage-trend-bar-wrap {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex: 1;
+  width: 100%;
+}
+
+.usage-trend-bar {
+  width: 100%;
+  max-width: 22px;
+  border-radius: 4px 4px 2px 2px;
+  background: var(--primary-soft-2);
+  transition: var(--transition);
+}
+
+.usage-trend-bar:hover {
+  background: var(--primary);
+}
+
+.usage-trend-label {
+  color: var(--faint);
+  font-size: 9.5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 应用清单 ---------- */
+
+.usage-app-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usage-app-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.usage-app-row:last-child {
+  border-bottom: 0;
+}
+
+.usage-app-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.usage-app-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--primary);
+}
+
+.usage-app-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.usage-app-path {
+  color: var(--faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-app-total {
+  color: var(--ink-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 加载态与弹窗 ---------- */
+
+.usage-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 26px 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.usage-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: usage-spin 0.7s linear infinite;
+}
+
+@keyframes usage-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.usage-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+.usage-modal-text {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+/* ---------- 窄屏适配 ---------- */
+
+@media (max-width: 1080px) {
+  .usage-rank,
+  .usage-trend-card {
+    grid-column: span 12;
+  }
+}

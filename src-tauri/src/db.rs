@@ -6,7 +6,11 @@
 //! V0.2 起任务表新增 `start_date / labels / subtasks` 三列，V0.3 再新增 `deleted_at`
 //! 软删除列：新库直接按最新结构建表，旧库（V0.1 / V0.2 已有用户数据）在启动时按列存在性
 //! 做幂等 `ALTER TABLE` 迁移，不重建表。V0.4 新增 `card_dependencies` 依赖表。
-//! 迁移完成后写入 `PRAGMA user_version = 4`。
+//! 迁移完成后写入 `PRAGMA user_version = 11`。
+//!
+//! V0.10 新增「桌面软件使用统计」三张表：`usage_apps`（应用清单与勾选状态）、
+//! `usage_daily`（按日聚合的使用秒数）、`usage_settings`（暂停开关与空闲阈值）。
+//! 这三张表不建外键：应用清单与统计数据互相独立，清空统计记录不会影响应用清单。
 
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
@@ -250,6 +254,32 @@ CREATE TABLE IF NOT EXISTS performance_records (
     created_at TEXT NOT NULL
 );
 
+-- V0.10 桌面软件使用统计：应用清单（app_key 为 exe 文件名去 .exe 后的小写形式）
+CREATE TABLE IF NOT EXISTS usage_apps (
+    app_key    TEXT PRIMARY KEY NOT NULL,
+    app_name   TEXT NOT NULL,
+    exe_path   TEXT NOT NULL DEFAULT '',
+    included   INTEGER NOT NULL DEFAULT 1,
+    first_seen TEXT NOT NULL,
+    last_seen  TEXT NOT NULL
+);
+
+-- V0.10 使用秒数按「应用 + 本地日期」聚合，PK 保证同一天重复写入只会累加
+CREATE TABLE IF NOT EXISTS usage_daily (
+    app_key TEXT NOT NULL,
+    day     TEXT NOT NULL,
+    seconds INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (app_key, day)
+);
+
+-- V0.10 统计设置：固定单行 id = 1
+CREATE TABLE IF NOT EXISTS usage_settings (
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    paused         INTEGER NOT NULL DEFAULT 0,
+    idle_threshold INTEGER NOT NULL DEFAULT 300,
+    updated_at     TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_lists_board_position ON lists (board_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_list_position ON cards (list_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_board ON cards (board_id);
@@ -267,6 +297,7 @@ CREATE INDEX IF NOT EXISTS idx_member_tenures_member ON member_tenures (member_i
 CREATE INDEX IF NOT EXISTS idx_member_tenures_project ON member_tenures (project_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_overtime_member_date ON overtime_records (member_id, date);
 CREATE INDEX IF NOT EXISTS idx_performance_member_date ON performance_records (member_id, date);
+CREATE INDEX IF NOT EXISTS idx_usage_daily_day ON usage_daily (day);
 "#;
 
 /// 打开磁盘数据库（生产路径）。
@@ -300,7 +331,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -440,9 +471,32 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
         .map_err(|error| format!("创建项目/角色/元数据表失败：{error}"))?;
     migrate_legacy_team_projects(connection)?;
     backfill_member_tenures(connection)?;
+    ensure_usage_settings(connection)?;
     connection
         .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|error| format!("写入 user_version 失败：{error}"))?;
+    Ok(())
+}
+
+/// V0.10：保证 `usage_settings` 始终存在 id = 1 的单行默认设置。
+///
+/// 设置表用 `CHECK (id = 1)` 保证只有一行，缺失时补一条默认记录：
+/// 不暂停、空闲阈值 300 秒。重复执行不会覆盖用户已保存的设置。
+fn ensure_usage_settings(connection: &Connection) -> Result<(), String> {
+    let stamp: String = connection
+        .query_row(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("读取迁移时间失败：{error}"))?;
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO usage_settings (id, paused, idle_threshold, updated_at) \
+             VALUES (1, 0, 300, ?1)",
+            [&stamp],
+        )
+        .map_err(|error| format!("初始化使用统计设置失败：{error}"))?;
     Ok(())
 }
 

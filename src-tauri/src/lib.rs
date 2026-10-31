@@ -13,10 +13,12 @@ mod db;
 mod models;
 mod repo;
 mod storage;
+mod usage;
 
 use tauri::Manager;
 
 use db::Db;
+use usage::UsageRuntime;
 
 pub fn run() {
     tauri::Builder::default()
@@ -28,7 +30,16 @@ pub fn run() {
             let db_path = storage::db_path(&data_dir);
             let connection =
                 db::open(&db_path).map_err(|error| Box::<dyn std::error::Error>::from(error))?;
+            // 使用统计的运行时状态以数据库里的设置为准（暂停开关、空闲阈值）。
+            let usage_settings = usage::get_settings(&connection)
+                .map_err(|error| Box::<dyn std::error::Error>::from(error))?;
             app.manage(Db::new(connection));
+            app.manage(UsageRuntime::new(
+                usage_settings.paused,
+                usage_settings.idle_threshold_seconds,
+            ));
+            // 启动后台采样线程：每 1 秒采样一次前台窗口所属进程，线程随进程退出而结束。
+            usage::spawn_sampler(app.handle().clone());
             #[cfg(debug_assertions)]
             eprintln!("[tideline] SQLite 数据库：{}", db_path.display());
             Ok(())
@@ -90,6 +101,12 @@ pub fn run() {
             commands::change_data_directory,
             commands::reset_data_directory,
             commands::pick_requirement_file,
+            commands::get_usage_overview,
+            commands::get_usage_apps,
+            commands::set_usage_app_included,
+            commands::get_usage_settings,
+            commands::set_usage_settings,
+            commands::clear_usage_records,
         ])
         .run(tauri::generate_context!())
         .expect("启动潮线 tideline 失败");

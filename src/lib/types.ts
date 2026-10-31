@@ -546,3 +546,75 @@ export const PRIORITY_META: ReadonlyArray<{
   { key: 'medium', label: '中', color: '#e9a23b' },
   { key: 'low', label: '低', color: '#4c8dff' },
 ];
+
+/* ---------- 桌面软件使用统计（V0.10） ---------- */
+
+/** 被统计到的桌面应用（累计口径，非区间口径） */
+export interface UsageApp {
+  /** 应用唯一键（桌面端按可执行文件路径归一化） */
+  appKey: string;
+  appName: string;
+  exePath: string;
+  /** 是否纳入统计 */
+  included: boolean;
+  /** 全时段累计使用时长（秒） */
+  totalSeconds: number;
+  /** 首次出现时间（ISO 字符串） */
+  firstSeen: string;
+  /** 最近一次出现时间（ISO 字符串） */
+  lastSeen: string;
+}
+
+/** 使用统计设置 */
+export interface UsageSettings {
+  /** 是否暂停采样 */
+  paused: boolean;
+  /** 空闲判定阈值（秒），低于该时长的片段视为空闲不计入 */
+  idleThresholdSeconds: number;
+  /** 最近一次修改时间（ISO 字符串） */
+  updatedAt: string;
+}
+
+/** 区间内单个应用的时长与占比 */
+export interface UsageAppStat {
+  appKey: string;
+  appName: string;
+  seconds: number;
+  /** 占比，0~1 之间的小数 */
+  share: number;
+}
+
+/** 区间内某一天的时长 */
+export interface UsageDailyStat {
+  /** YYYY-MM-DD（本地时区） */
+  day: string;
+  seconds: number;
+}
+
+/** 某个区间的使用统计总览 */
+export interface UsageOverview {
+  rangeFrom: string;
+  rangeTo: string;
+  totalSeconds: number;
+  trackedApps: number;
+  apps: UsageAppStat[];
+  daily: UsageDailyStat[];
+}
+
+/** 查询区间的入参（from / to 均为 YYYY-MM-DD，可只传其一） */
+export interface UsageRangeInput {
+  from?: string;
+  to?: string;
+}
+
+/** 切换某个应用是否纳入统计 */
+export interface UsageAppIncludedInput {
+  appKey: string;
+  included: boolean;
+}
+
+/** 更新使用统计设置的入参 */
+export interface UsageSettingsInput {
+  paused?: boolean;
+  idleThresholdSeconds?: number;
+}

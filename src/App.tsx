@@ -20,6 +20,7 @@ import { ProjectDetailPage } from '@/pages/ProjectDetailPage';
 import { RequirementPage } from '@/pages/RequirementPage';
 import { TemplatesPage } from '@/pages/TemplatesPage';
 import { TrashPage } from '@/pages/TrashPage';
+import { UsagePage } from '@/pages/UsagePage';
 import { WorkbenchPage } from '@/pages/WorkbenchPage';
 import { useAppStore } from '@/store/appStore';
 import { applyCardSize } from '@/lib/cardLayout';
@@ -101,6 +102,7 @@ export default function App() {
               <Route path="/data" element={<Navigate to="/settings?tab=data" replace />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/usage" element={<UsagePage />} />
               <Route path="/board/:boardId" element={<BoardPage />} />
               <Route path="/board-sets" element={<BoardSetsPage />} />
               <Route path="/board-sets/:setId" element={<BoardSetDetailPage />} />

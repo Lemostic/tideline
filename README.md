@@ -45,6 +45,7 @@
 - **目标**：公司 / 团队 / 个人三层目标树，关联任务后按完成度自动回写进度，支持子目标汇总。
 - **看板集**：把多个看板聚合成跨看板任务汇总表，支持筛选、排序、行内完成与成员编辑。
 - **项目管理**：多项目空间，自定义角色、元数据、成员多段投入记录、周末加班按周分组、绩效加减分与月度排名。
+- **使用统计**：桌面端在潮线运行期间按固定周期采样 Windows 前台窗口，把活跃前台软件的时长按天记到本机；空闲时不计时，后台软件不计入；应用清单默认全部纳入，可逐个取消勾选；支持今天 / 本周 / 最近 7 天 / 自定义区间查看各软件时长、占比与趋势；可随时暂停或清空记录，数据只存本机、不做上传。入口在侧边栏「使用统计」（`#/usage`），浏览器预览模式为占位空态。
 
 ### 外观与体验
 
@@ -83,7 +84,7 @@
 从 [GitHub Releases](https://github.com/Lemostic/tideline/releases/latest) 下载最新的 Windows 安装包：
 
 ```
-tideline-0.9.0-win64-setup.exe
+tideline-0.10.0-win64-setup.exe
 ```
 
 - 系统级安装，默认目录 **`C:\Program Files\Tideline`**，安装/卸载需要管理员权限。
@@ -115,19 +116,19 @@ pnpm typecheck                      # TypeScript
 pnpm tauri build --bundles nsis     # Windows NSIS 安装包
 ```
 
-前端 React 18 + TypeScript + Vite 6 + Zustand 5，后端 Tauri 2 + Rust + rusqlite，前后端通过 56 个命令通信，接口契约在 [`src/lib/api.ts`](src/lib/api.ts)。
+前端 React 18 + TypeScript + Vite 6 + Zustand 5，后端 Tauri 2 + Rust + rusqlite，前后端通过 62 个命令通信，接口契约在 [`src/lib/api.ts`](src/lib/api.ts)。
 
 ```text
 src/
   components/     通用组件：侧边栏 / 顶栏 / 弹窗 / 任务详情 / 日期选择器
   features/       board（看板·表格·甘特·日历·筛选）/ tasks
-  pages/          工作台 / 我的任务 / 收件箱 / 目标 / 仪表盘 / 项目管理等
+  pages/          工作台 / 我的任务 / 收件箱 / 目标 / 仪表盘 / 使用统计 / 项目管理等
   store/          appStore / uiStore / settingsStore / updateStore
 src-tauri/        Tauri 配置、Rust 命令、SQLite 迁移、NSIS 安装器
 docs/             开发计划 / 版本规划 / 发布说明 / 更新记录
 ```
 
-测试：Vitest 93 项、Rust `cargo test` 69 项、Playwright E2E（本地运行）。完整数据模型与验收标准见 [`docs/开发计划.md`](docs/开发计划.md)。
+测试：Vitest 129 项、Rust `cargo test` 81 项、Playwright E2E（本地运行）。完整数据模型与验收标准见 [`docs/开发计划.md`](docs/开发计划.md)。
 
 ## 已知限制
 
@@ -135,12 +136,14 @@ docs/             开发计划 / 版本规划 / 发布说明 / 更新记录
 - 自定义数据目录仅桌面端支持；浏览器开发模式仍使用 localStorage。
 - 偏好设置不随 JSON 备份导出/恢复；数据目录配置独立保存在 `storage.json`。
 - 看板/列表删除为硬删除，任务删除支持回收站；目前仅在 Windows 上构建验证。
+- 使用统计依赖 Windows 前台窗口接口，仅桌面端可用；浏览器开发模式不采样，用量数据只写在本机数据库。
 
 ## 更新记录
 
 | 版本 | 变更 |
 | --- | --- |
-| **V0.9.0** | 新增「需求拆解」：需求文档一键拆成看板任务与子任务，深度与拆解方式可调 |
+| **V0.10.0** | 新增「使用统计」：前台软件时长采样、应用清单勾选、区间时长与占比趋势 |
+| V0.9.0 | 新增「需求拆解」：需求文档一键拆成看板任务与子任务，深度与拆解方式可调 |
 | V0.8.16 | 系统级安装到 Program Files，自动迁移旧用户级安装，应用数据保留 |
 | V0.8.15 | 周末加班按周分组；全局日期选择器替换原生日期输入 |
 | V0.8.14 | 全局卡片尺寸配置，模板中心与工作台卡片统一 |
