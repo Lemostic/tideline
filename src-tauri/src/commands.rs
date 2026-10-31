@@ -462,3 +462,37 @@ pub fn reset_data_directory(
     let target = storage::default_dir(&app)?;
     storage::change_data_directory(&app, &db, &target)
 }
+
+// ---------------------------------------------------------------------------
+// 需求文档读取（V0.9）
+// ---------------------------------------------------------------------------
+
+/// 需求文档大小上限 2 MB：超出直接拒绝，避免一次性把超大文件读进内存。
+const MAX_REQUIREMENT_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+/// 打开原生文件选择框读取需求文档（.md/.txt）；用户取消时返回 null。
+#[tauri::command]
+pub fn pick_requirement_file() -> CmdResult<Option<PickedTextFile>> {
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("选择需求文档")
+        .add_filter("需求文档", &["md", "markdown", "txt"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+
+    let meta =
+        std::fs::metadata(&path).map_err(|error| format!("读取文件信息失败：{error}"))?;
+    if meta.len() > MAX_REQUIREMENT_FILE_BYTES {
+        return Err("需求文档超过 2 MB，请拆分后再导入".to_string());
+    }
+
+    let content =
+        std::fs::read_to_string(&path).map_err(|error| format!("读取文件失败：{error}"))?;
+    let name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "需求文档".to_string());
+
+    Ok(Some(PickedTextFile { name, content }))
+}

@@ -1093,6 +1093,16 @@ pub struct UpdatePerformanceInput {
     pub patch: PerformancePatch,
 }
 
+/// 从磁盘读取的需求文档（V0.9）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickedTextFile {
+    /// 文件名，用于界面回显
+    pub name: String,
+    /// 全文内容
+    pub content: String,
+}
+
 // ---------------------------------------------------------------------------
 // 单元测试：锁定与前端 TypeScript 契约一致的 JSON 形态
 // ---------------------------------------------------------------------------

@@ -53,6 +53,7 @@ import type {
   NewProjectRoleInput,
   NewTeamMemberInput,
   NewTenureInput,
+  PickedTextFile,
   OvertimePatch,
   OvertimeRecord,
   OvertimeStatus,
@@ -143,6 +144,8 @@ export interface TidelineApi {
   createProjectRole(input: NewProjectRoleInput): Promise<ProjectRole>;
   updateProjectRole(input: { id: string; patch: ProjectRolePatch }): Promise<ProjectRole>;
   deleteProjectRole(input: IdInput): Promise<void>;
+  /** 读取需求文档（V0.9）：桌面端走原生对话框，浏览器端用文件选择；取消返回 null */
+  pickRequirementFile(): Promise<PickedTextFile | null>;
 }
 
 export function isTauri(): boolean {
@@ -208,6 +211,7 @@ const tauriApi: TidelineApi = {
   createProjectRole: (input) => invoke<ProjectRole>('create_project_role', { input }),
   updateProjectRole: (input) => invoke<ProjectRole>('update_project_role', { input }),
   deleteProjectRole: (input) => invoke<void>('delete_project_role', { input }),
+  pickRequirementFile: () => invoke<PickedTextFile | null>('pick_requirement_file'),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
@@ -1619,7 +1623,49 @@ const localApi: TidelineApi = {
   async setAutoStart() {
     throw new Error('浏览器开发模式不支持开机自动启动，请使用桌面安装版');
   },
+
+  async pickRequirementFile() {
+    return pickLocalTextFile();
+  },
 };
+
+/**
+ * 浏览器开发态的需求文档读取：用隐藏的 file input 选文件并读出文本。
+ * 用户取消时返回 null；读取失败同样返回 null，由界面提示。
+ */
+function pickLocalTextFile(): Promise<PickedTextFile | null> {
+  if (typeof document === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.md,.markdown,.txt,text/plain,text/markdown';
+    input.style.display = 'none';
+    let settled = false;
+
+    const finish = (value: PickedTextFile | null) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(value);
+    };
+
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (!file) {
+        finish(null);
+        return;
+      }
+      file
+        .text()
+        .then((content) => finish({ name: file.name, content }))
+        .catch(() => finish(null));
+    });
+    input.addEventListener('cancel', () => finish(null));
+
+    document.body.appendChild(input);
+    input.click();
+  });
+}
 
 export const api: TidelineApi = isTauri() ? tauriApi : localApi;
 

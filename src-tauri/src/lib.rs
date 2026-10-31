@@ -89,6 +89,7 @@ pub fn run() {
             commands::pick_data_directory,
             commands::change_data_directory,
             commands::reset_data_directory,
+            commands::pick_requirement_file,
         ])
         .run(tauri::generate_context!())
         .expect("启动潮线 tideline 失败");

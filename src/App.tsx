@@ -17,6 +17,7 @@ import { MyTasksPage } from '@/pages/MyTasksPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TeamPage } from '@/pages/TeamPage';
 import { ProjectDetailPage } from '@/pages/ProjectDetailPage';
+import { RequirementPage } from '@/pages/RequirementPage';
 import { TemplatesPage } from '@/pages/TemplatesPage';
 import { TrashPage } from '@/pages/TrashPage';
 import { WorkbenchPage } from '@/pages/WorkbenchPage';
@@ -95,6 +96,7 @@ export default function App() {
               <Route path="/tasks" element={<MyTasksPage />} />
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="/templates" element={<TemplatesPage />} />
+              <Route path="/requirements" element={<RequirementPage />} />
               <Route path="/trash" element={<TrashPage />} />
               <Route path="/data" element={<Navigate to="/settings?tab=data" replace />} />
               <Route path="/settings" element={<SettingsPage />} />

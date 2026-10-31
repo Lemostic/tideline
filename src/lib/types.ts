@@ -403,6 +403,12 @@ export interface IdInput {
   id: string;
 }
 
+/** 从磁盘读取的需求文档（V0.9）：文件名 + 全文内容 */
+export interface PickedTextFile {
+  name: string;
+  content: string;
+}
+
 export interface ConvertInboxInput {
   id: string;
   boardId: string;

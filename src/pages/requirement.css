@@ -1,0 +1,354 @@
+/* 需求拆解：文档输入、拆解选项、预览清单、底部操作栏 */
+
+.req-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 24px;
+  min-height: 100%;
+}
+
+/* ---------- 两栏布局 ---------- */
+.req-layout {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(420px, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 1180px) {
+  .req-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.req-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.req-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.req-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.req-panel-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.req-panel-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------- 输入区 ---------- */
+.req-textarea {
+  width: 100%;
+  min-height: 240px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.req-file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- 选项区 ---------- */
+.req-options {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.req-depth {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.req-depth-btn {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 140ms var(--ease),
+    border-color 140ms var(--ease),
+    color 140ms var(--ease);
+}
+
+.req-depth-btn:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.req-depth-btn.active {
+  background: var(--primary-soft);
+  border-color: var(--primary-soft-2);
+  color: var(--primary-strong);
+  font-weight: 600;
+}
+
+.req-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .req-modes {
+    grid-template-columns: 1fr;
+  }
+}
+
+.req-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 140ms var(--ease),
+    border-color 140ms var(--ease),
+    box-shadow 140ms var(--ease);
+}
+
+.req-mode:hover {
+  border-color: var(--line-strong);
+}
+
+.req-mode strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.req-mode small {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.req-mode.active {
+  background: var(--primary-soft);
+  border-color: var(--primary-soft-2);
+  box-shadow: var(--shadow-xs);
+}
+
+.req-mode.active strong {
+  color: var(--primary-strong);
+}
+
+.req-targets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .req-targets {
+    grid-template-columns: 1fr;
+  }
+}
+
+.req-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.req-check input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+/* ---------- 预览区 ---------- */
+.req-panel-preview {
+  max-height: calc(100vh - 210px);
+}
+
+.req-plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.req-plan-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.req-plan-item.is-duplicate {
+  border-color: var(--danger-soft);
+  background: var(--danger-soft);
+}
+
+.req-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.req-plan-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.req-plan-path {
+  font-size: 11.5px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+}
+
+.req-plan-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.req-plan-subs {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.req-plan-subs li {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  padding-left: 12px;
+  position: relative;
+}
+
+.req-plan-subs li::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.req-plan-subs li.req-plan-more {
+  color: var(--faint);
+}
+
+.req-plan-subs li.req-plan-more::before {
+  display: none;
+}
+
+/* ---------- 底部操作栏 ---------- */
+.req-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.req-summary {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.req-error {
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+.req-result {
+  font-size: 12.5px;
+  color: var(--success);
+}
+
+.req-actions-buttons {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.req-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: req-spin 720ms linear infinite;
+}
+
+@keyframes req-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

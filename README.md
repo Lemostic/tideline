@@ -39,6 +39,7 @@
 
 ### 规划与项目资源
 
+- **需求拆解**：粘贴需求文档或读取 `.md` / `.txt`，按 Markdown 标题、编号与缩进解析层级；拆解深度 1–4 层可调，支持「单任务承载子任务」与「按章节拆成多个任务」两种方式，原文段落保留为任务描述，同名任务提前提示。解析全程在本机完成，不经过 AI 服务。
 - **工作台**：今日聚焦、目标进度、看板全景、最近更新与快速记录；可切换回顾首页的看板卡片视图。
 - **仪表盘**：核心指标、近 7/30/90 天趋势、状态环、优先级分布、看板健康度与重点关注任务。
 - **目标**：公司 / 团队 / 个人三层目标树，关联任务后按完成度自动回写进度，支持子目标汇总。
@@ -82,7 +83,7 @@
 从 [GitHub Releases](https://github.com/Lemostic/tideline/releases/latest) 下载最新的 Windows 安装包：
 
 ```
-tideline-0.8.16-win64-setup.exe
+tideline-0.9.0-win64-setup.exe
 ```
 
 - 系统级安装，默认目录 **`C:\Program Files\Tideline`**，安装/卸载需要管理员权限。
@@ -114,7 +115,7 @@ pnpm typecheck                      # TypeScript
 pnpm tauri build --bundles nsis     # Windows NSIS 安装包
 ```
 
-前端 React 18 + TypeScript + Vite 6 + Zustand 5，后端 Tauri 2 + Rust + rusqlite，前后端通过 55 个命令通信，接口契约在 [`src/lib/api.ts`](src/lib/api.ts)。
+前端 React 18 + TypeScript + Vite 6 + Zustand 5，后端 Tauri 2 + Rust + rusqlite，前后端通过 56 个命令通信，接口契约在 [`src/lib/api.ts`](src/lib/api.ts)。
 
 ```text
 src/
@@ -126,7 +127,7 @@ src-tauri/        Tauri 配置、Rust 命令、SQLite 迁移、NSIS 安装器
 docs/             开发计划 / 版本规划 / 发布说明 / 更新记录
 ```
 
-测试：Vitest 75 项、Rust `cargo test` 69 项、Playwright E2E（本地运行）。完整数据模型与验收标准见 [`docs/开发计划.md`](docs/开发计划.md)。
+测试：Vitest 93 项、Rust `cargo test` 69 项、Playwright E2E（本地运行）。完整数据模型与验收标准见 [`docs/开发计划.md`](docs/开发计划.md)。
 
 ## 已知限制
 
@@ -139,7 +140,8 @@ docs/             开发计划 / 版本规划 / 发布说明 / 更新记录
 
 | 版本 | 变更 |
 | --- | --- |
-| **V0.8.16** | 系统级安装到 Program Files，自动迁移旧用户级安装，应用数据保留 |
+| **V0.9.0** | 新增「需求拆解」：需求文档一键拆成看板任务与子任务，深度与拆解方式可调 |
+| V0.8.16 | 系统级安装到 Program Files，自动迁移旧用户级安装，应用数据保留 |
 | V0.8.15 | 周末加班按周分组；全局日期选择器替换原生日期输入 |
 | V0.8.14 | 全局卡片尺寸配置，模板中心与工作台卡片统一 |
 | V0.8.13 | 新增「雾蓝白」默认主题 |

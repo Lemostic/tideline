@@ -15,6 +15,7 @@ const WORKSPACE_NAV: NavEntry[] = [
   { to: '/tasks', label: '我的任务', icon: 'check-circle' },
   { to: '/inbox', label: '收件箱', icon: 'inbox' },
   { to: '/templates', label: '模板中心', icon: 'layout-grid' },
+  { to: '/requirements', label: '需求拆解', icon: 'file-text' },
   { to: '/dashboard', label: '仪表盘', icon: 'chart' },
   { to: '/board-sets', label: '看板集', icon: 'layers' },
   { to: '/goals', label: '目标', icon: 'target' },
