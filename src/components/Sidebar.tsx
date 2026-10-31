@@ -19,7 +19,7 @@ const WORKSPACE_NAV: NavEntry[] = [
   { to: '/dashboard', label: '仪表盘', icon: 'chart' },
   { to: '/board-sets', label: '看板集', icon: 'layers' },
   { to: '/goals', label: '目标', icon: 'target' },
-  { to: '/team', label: '项目组', icon: 'users' },
+  { to: '/team', label: '项目管理', icon: 'users' },
 ];
 
 export function Sidebar() {

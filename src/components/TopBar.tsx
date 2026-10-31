@@ -14,11 +14,11 @@ const SECTION_LABELS: Record<string, string> = {
   '/dashboard': '仪表盘',
   '/board-sets': '看板集',
   '/goals': '目标',
-  '/team': '项目组',
+  '/team': '项目管理',
 };
 
 function sectionLabelFor(pathname: string): string | undefined {
-  if (pathname.startsWith('/team')) return '项目组';
+  if (pathname.startsWith('/team')) return '项目管理';
   return SECTION_LABELS[pathname];
 }
 

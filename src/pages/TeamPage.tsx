@@ -66,7 +66,7 @@ export function TeamPage() {
     <div className="page team-page">
       <header className="team-head">
         <div>
-          <div className="page-eyebrow">项目组 · 多项目资源</div>
+          <div className="page-eyebrow">项目管理 · 多项目资源</div>
           <h1 className="team-title">项目空间</h1>
           <p className="team-sub">
             每个项目独立维护成员、角色、元数据、周末加班与绩效；像看板一样自由增删改，数据只在本机。
@@ -137,28 +137,73 @@ export function TeamPage() {
           </div>
         </section>
       ) : (
-        <div className="project-grid">
+        <section className="project-list-section">
+          <div className="project-list-head">
+            <div>
+              <h2>项目列表</h2>
+              <p>按项目维护资源、角色与投入；点击整行进入项目。</p>
+            </div>
+            <span>{projects.length} 个项目</span>
+          </div>
+          <div className="project-list">
           {projects.map((project, index) => {
             const stat = projectStats[index];
             return (
               <article
-                className={`project-card${project.status === 'archived' ? ' is-archived' : ''}`}
+                className={`project-card project-row${project.status === 'archived' ? ' is-archived' : ''}`}
                 key={project.id}
                 style={{ '--project-color': project.color } as React.CSSProperties}
                 onClick={() => navigate(`/team/${project.id}`)}
               >
-                <div className="project-card-top">
-                  <span className="project-color-dot" />
-                  <h2>{project.name}</h2>
-                  {project.status === 'archived' ? (
-                    <span className="project-status-badge">已归档</span>
-                  ) : null}
-                  {project.starred ? (
-                    <span className="project-star" aria-label="星标项目">
-                      ★
-                    </span>
-                  ) : null}
-                  <span className="grow" />
+                <div className="project-row-main">
+                  <div className="project-card-top">
+                    <span className="project-color-dot" />
+                    <h2>{project.name}</h2>
+                    {project.status === 'archived' ? (
+                      <span className="project-status-badge">已归档</span>
+                    ) : null}
+                    {project.starred ? (
+                      <span className="project-star" aria-label="星标项目">
+                        ★
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="project-description">
+                    {project.description || '还没有项目说明，点击进入项目设置补充。'}
+                  </p>
+                  <div className="project-meta-chips">
+                    {stat.meta.slice(0, 4).map((field) => (
+                      <span key={field.id}>
+                        {field.name}
+                        {field.value ? `：${field.value}` : ''}
+                      </span>
+                    ))}
+                    {stat.meta.length === 0 ? (
+                      <span className="is-muted">暂未配置元数据</span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="project-row-stats">
+                  <div>
+                    <strong>{stat.members}</strong>
+                    <span>在组成员</span>
+                  </div>
+                  <div>
+                    <strong>{stat.overtime}<em>h</em></strong>
+                    <span>累计加班</span>
+                  </div>
+                  <div>
+                    <strong>{stat.meta.length}</strong>
+                    <span>元数据</span>
+                  </div>
+                  <div>
+                    <strong>{formatDateCN(project.updatedAt)}</strong>
+                    <span>最近更新</span>
+                  </div>
+                </div>
+
+                <div className="project-row-actions">
                   <button
                     type="button"
                     className="btn btn-icon"
@@ -193,32 +238,13 @@ export function TeamPage() {
                   >
                     <Icon name="trash" size={13} />
                   </button>
-                </div>
-                <p className="project-description">
-                  {project.description || '还没有项目说明，点击进入项目设置补充。'}
-                </p>
-                <div className="project-meta-chips">
-                  {stat.meta.slice(0, 4).map((field) => (
-                    <span key={field.id}>
-                      {field.name}
-                      {field.value ? `：${field.value}` : ''}
-                    </span>
-                  ))}
-                  {stat.meta.length === 0 ? <span className="is-muted">暂未配置元数据</span> : null}
-                </div>
-                <div className="project-card-footer">
-                  <span>
-                    <Icon name="users" size={12} /> {stat.members} 人
-                  </span>
-                  <span>{stat.overtime}h 加班</span>
-                  <span>更新 {formatDateCN(project.updatedAt)}</span>
-                  <span className="grow" />
                   <span className="project-open">打开 →</span>
                 </div>
               </article>
             );
           })}
-        </div>
+          </div>
+        </section>
       )}
 
       <ProjectModal
