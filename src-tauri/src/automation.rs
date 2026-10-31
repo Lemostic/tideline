@@ -768,14 +768,13 @@ pub fn run_rules(
         return Ok(result);
     }
 
+    // 多条规则依次生效：后一条在前一条的结果上继续叠加。
+    let mut labels = card.labels.clone();
+    let mut subtasks = card.subtasks.clone();
+    let mut priority = card.priority;
+
     for rule in matching {
-        let outcome = apply_rule_actions(
-            &card.labels,
-            &card.subtasks,
-            card.priority,
-            &rule.actions,
-            today,
-        );
+        let outcome = apply_rule_actions(&labels, &subtasks, priority, &rule.actions, today);
         let mut patch_parts: Vec<(String, String)> = Vec::new();
         if let Some(due_date) = outcome.due_date.clone() {
             patch_parts.push((
@@ -813,6 +812,16 @@ pub fn run_rules(
                     insert_activity(conn, &card.id, "updated", field, "", value)?;
                 }
                 result.patch.extend(patch_parts);
+                // 把本条规则的结果带入下一条规则
+                if let Some(value) = outcome.priority.clone() {
+                    priority = value;
+                }
+                if let Some(value) = outcome.labels.clone() {
+                    labels = value;
+                }
+                if let Some(value) = outcome.subtasks.clone() {
+                    subtasks = value;
+                }
                 // 规则执行成功，清掉上次的失败提示
                 conn.execute(
                     "UPDATE automation_rules SET last_error = '' WHERE id = ?1",

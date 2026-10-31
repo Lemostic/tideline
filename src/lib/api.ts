@@ -18,8 +18,15 @@ import {
 } from './backup';
 import { createId, nowISO } from './ids';
 import { todayKey } from './date';
+import {
+  applyRuleActions,
+  nextRecurrenceDateFor,
+  validateRuleActions,
+} from './automation';
 import type {
   AutoStartInfo,
+  AutomationRule,
+  AutomationRulePatch,
   BackupExport,
   BackupSummary,
   Board,
@@ -27,6 +34,7 @@ import type {
   BoardSet,
   BoardSetPatch,
   Card,
+  CardActivity,
   CardDependency,
   CardPatch,
   Goal,
@@ -42,6 +50,7 @@ import type {
   MemberStatus,
   MemberTenure,
   MoveCardInput,
+  NewAutomationRuleInput,
   NewBoardInput,
   NewBoardSetInput,
   NewCardInput,
@@ -52,8 +61,11 @@ import type {
   NewProjectInput,
   NewProjectMetaInput,
   NewProjectRoleInput,
+  NewRecurrenceInput,
   NewTeamMemberInput,
   NewTenureInput,
+  NotificationSettings,
+  NotificationSettingsInput,
   PickedTextFile,
   OvertimePatch,
   OvertimeRecord,
@@ -67,6 +79,8 @@ import type {
   ProjectPatch,
   ProjectRole,
   ProjectRolePatch,
+  Recurrence,
+  RecurrencePatch,
   Snapshot,
   StorageInfo,
   Subtask,
@@ -166,6 +180,32 @@ export interface TidelineApi {
   setUsageSettings(input: UsageSettingsInput): Promise<UsageSettings>;
   /** 清空全部使用记录 */
   clearUsageRecords(): Promise<void>;
+  /* ---------- 自动化与提醒（V0.11） ---------- */
+  /** 某张任务的最近活动（倒序） */
+  getCardActivity(input: IdInput): Promise<CardActivity[]>;
+  /** 全部重复任务配置 */
+  getRecurrences(): Promise<Recurrence[]>;
+  /** 新建重复任务配置（同一张任务只保留一条） */
+  createRecurrence(input: NewRecurrenceInput): Promise<Recurrence>;
+  /** 修改重复任务配置 */
+  updateRecurrence(input: { id: string; patch: RecurrencePatch }): Promise<Recurrence>;
+  /** 删除重复任务配置 */
+  deleteRecurrence(input: IdInput): Promise<void>;
+  /** 全部本地规则 */
+  getAutomationRules(): Promise<AutomationRule[]>;
+  /** 新建本地规则（默认关闭，需逐条启用） */
+  createAutomationRule(input: NewAutomationRuleInput): Promise<AutomationRule>;
+  /** 修改本地规则 */
+  updateAutomationRule(input: {
+    id: string;
+    patch: AutomationRulePatch;
+  }): Promise<AutomationRule>;
+  /** 删除本地规则 */
+  deleteAutomationRule(input: IdInput): Promise<void>;
+  /** 读取提醒设置 */
+  getNotificationSettings(): Promise<NotificationSettings>;
+  /** 更新提醒设置（只更新传入的字段） */
+  setNotificationSettings(input: NotificationSettingsInput): Promise<NotificationSettings>;
 }
 
 export function isTauri(): boolean {
@@ -238,6 +278,20 @@ const tauriApi: TidelineApi = {
   getUsageSettings: () => invoke<UsageSettings>('get_usage_settings'),
   setUsageSettings: (input) => invoke<UsageSettings>('set_usage_settings', { input }),
   clearUsageRecords: () => invoke<void>('clear_usage_records'),
+  getCardActivity: (input) => invoke<CardActivity[]>('get_card_activity', { input }),
+  getRecurrences: () => invoke<Recurrence[]>('get_recurrences'),
+  createRecurrence: (input) => invoke<Recurrence>('create_recurrence', { input }),
+  updateRecurrence: (input) =>
+    invoke<Recurrence>('update_recurrence', { id: input.id, patch: input.patch }),
+  deleteRecurrence: (input) => invoke<void>('delete_recurrence', { input }),
+  getAutomationRules: () => invoke<AutomationRule[]>('get_automation_rules'),
+  createAutomationRule: (input) => invoke<AutomationRule>('create_automation_rule', { input }),
+  updateAutomationRule: (input) =>
+    invoke<AutomationRule>('update_automation_rule', { id: input.id, patch: input.patch }),
+  deleteAutomationRule: (input) => invoke<void>('delete_automation_rule', { input }),
+  getNotificationSettings: () => invoke<NotificationSettings>('get_notification_settings'),
+  setNotificationSettings: (input) =>
+    invoke<NotificationSettings>('set_notification_settings', { input }),
 };
 
 /** 浏览器降级实现：localStorage 单文件快照 */
@@ -290,7 +344,11 @@ const DEFAULT_PROJECT_ROLES: ReadonlyArray<{ name: string; color: string }> = [
   { name: '其他', color: '#64748b' },
 ];
 
-interface LocalDb extends Snapshot {}
+/** 浏览器端本地库：快照 + 活动日志 + 提醒设置（后两项不进备份） */
+interface LocalDb extends Snapshot {
+  cardActivity: CardActivity[];
+  notificationSettings?: NotificationSettings;
+}
 
 /**
  * 兼容 V0.1 写入的旧数据：补齐 V0.2 新增的 startDate / labels / subtasks。
@@ -316,7 +374,228 @@ function normalizeCard(raw: Card): Card {
     accent: raw.accent ?? null,
     labels,
     subtasks,
+    recurrenceId: raw.recurrenceId ?? null,
+    generatedFromId: raw.generatedFromId ?? null,
   };
+}
+
+/* ---------- 浏览器端自动化数据（V0.11） ---------- */
+
+const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
+  dueEnabled: false,
+  overdueEnabled: false,
+  dailySummaryEnabled: false,
+  dailySummaryTime: '09:00',
+  leadDays: 1,
+  updatedAt: '',
+};
+
+/** 补齐浏览器端可能缺失的自动化字段 */
+function normalizeRecurrence(raw: Recurrence): Recurrence {
+  return {
+    ...raw,
+    frequency: raw.frequency ?? 'daily',
+    intervalValue: typeof raw.intervalValue === 'number' ? raw.intervalValue : 1,
+    weekdays: Array.isArray(raw.weekdays)
+      ? raw.weekdays.filter((day): day is number => typeof day === 'number')
+      : [],
+    nextDueDate: raw.nextDueDate ?? null,
+    enabled: Boolean(raw.enabled),
+  };
+}
+
+function normalizeAutomationRule(raw: AutomationRule): AutomationRule {
+  return {
+    ...raw,
+    name: typeof raw.name === 'string' ? raw.name : '',
+    trigger: raw.trigger === 'complete' ? 'complete' : 'move_to_list',
+    listId: raw.listId ?? null,
+    actions: Array.isArray(raw.actions) ? raw.actions : [],
+    enabled: Boolean(raw.enabled),
+    lastError: typeof raw.lastError === 'string' ? raw.lastError : '',
+  };
+}
+
+function normalizeActivity(raw: CardActivity): CardActivity {
+  return {
+    ...raw,
+    eventType: typeof raw.eventType === 'string' ? raw.eventType : 'updated',
+    field: typeof raw.field === 'string' ? raw.field : '',
+    oldValue: typeof raw.oldValue === 'string' ? raw.oldValue : '',
+    newValue: typeof raw.newValue === 'string' ? raw.newValue : '',
+  };
+}
+
+/** 追加一条活动日志；浏览器端只保留最近 500 条，避免快照无限膨胀 */
+function pushActivity(db: LocalDb, activity: {
+  cardId: string;
+  eventType: string;
+  field?: string;
+  oldValue?: string;
+  newValue?: string;
+}): void {
+  db.cardActivity.unshift({
+    id: createId('a'),
+    cardId: activity.cardId,
+    eventType: activity.eventType,
+    field: activity.field ?? '',
+    oldValue: activity.oldValue ?? '',
+    newValue: activity.newValue ?? '',
+    createdAt: nowISO(),
+  });
+  if (db.cardActivity.length > 500) db.cardActivity.length = 500;
+}
+
+/** 比较任务新旧值，把真正变化的字段写进活动日志 */
+function recordLocalCardChanges(db: LocalDb, old: Card, next: Card): void {
+  const push = (field: string, oldValue: string, newValue: string) => {
+    pushActivity(db, { cardId: next.id, eventType: 'updated', field, oldValue, newValue });
+  };
+  if (old.title !== next.title) push('title', old.title, next.title);
+  if (old.description !== next.description) push('description', old.description, next.description);
+  if (old.listId !== next.listId) push('listId', old.listId, next.listId);
+  if (old.completed !== next.completed) {
+    push('completed', String(old.completed), String(next.completed));
+  }
+  if (old.dueDate !== next.dueDate) push('dueDate', old.dueDate ?? '', next.dueDate ?? '');
+  if (old.startDate !== next.startDate) {
+    push('startDate', old.startDate ?? '', next.startDate ?? '');
+  }
+  if (old.priority !== next.priority) push('priority', old.priority ?? '', next.priority ?? '');
+  if (old.accent !== next.accent) push('accent', old.accent ?? '', next.accent ?? '');
+  if (old.labels.join(',') !== next.labels.join(',')) {
+    push('labels', old.labels.join(','), next.labels.join(','));
+  }
+  const oldTitles = old.subtasks.map((item) => item.title).join(',');
+  const newTitles = next.subtasks.map((item) => item.title).join(',');
+  if (oldTitles !== newTitles) push('subtasks', oldTitles, newTitles);
+}
+
+/**
+ * 执行匹配的本地规则，把结果写回任务。
+ *
+ * 与 Rust 侧 `automation::run_rules` 保持同一语义：只跑启用的规则、
+ * 多条规则依次叠加、失败只记录到 `lastError` 不影响主流程。
+ */
+function runLocalRules(
+  db: LocalDb,
+  card: Card,
+  trigger: AutomationRule['trigger'],
+): void {
+  const today = todayKey();
+  const matching = db.automationRules.filter(
+    (rule) =>
+      rule.enabled &&
+      rule.trigger === trigger &&
+      (trigger !== 'move_to_list' || rule.listId === card.listId),
+  );
+  if (matching.length === 0) return;
+
+  let labels = [...card.labels];
+  let subtasks = [...card.subtasks];
+  let priority = card.priority;
+
+  for (const rule of matching) {
+    const error = validateRuleActions(rule.actions);
+    if (error) {
+      rule.lastError = error;
+      continue;
+    }
+    const patch = applyRuleActions(
+      { ...card, labels, subtasks, priority },
+      rule.actions,
+      today,
+    );
+    try {
+      if (patch.dueDate !== undefined) card.dueDate = patch.dueDate;
+      if (patch.priority !== undefined) card.priority = patch.priority;
+      if (patch.labels !== undefined) labels = patch.labels;
+      if (patch.subtasks !== undefined) subtasks = patch.subtasks;
+      card.labels = labels;
+      card.subtasks = subtasks;
+      priority = card.priority;
+      if (patch.dueDate !== undefined) {
+        pushActivity(db, {
+          cardId: card.id,
+          eventType: 'updated',
+          field: 'dueDate',
+          newValue: patch.dueDate ?? '',
+        });
+      }
+      if (patch.priority !== undefined) {
+        pushActivity(db, {
+          cardId: card.id,
+          eventType: 'updated',
+          field: 'priority',
+          newValue: patch.priority ?? '',
+        });
+      }
+      if (patch.labels !== undefined) {
+        pushActivity(db, {
+          cardId: card.id,
+          eventType: 'updated',
+          field: 'labels',
+          newValue: patch.labels.join(','),
+        });
+      }
+      if (patch.subtasks !== undefined) {
+        pushActivity(db, {
+          cardId: card.id,
+          eventType: 'updated',
+          field: 'subtasks',
+          newValue: patch.subtasks.map((item) => item.title).join(','),
+        });
+      }
+      rule.lastError = '';
+    } catch (cause) {
+      rule.lastError = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+}
+
+/**
+ * 浏览器端滚动重复任务：克隆原任务生成下一次未完成任务。
+ *
+ * 幂等性由 `generatedFromId` 保证：同一张任务只会被生成一次。
+ */
+function rollLocalRecurrence(db: LocalDb, card: Card): Card | null {
+  const recurrence = db.recurrences.find(
+    (item) => item.cardId === card.id || item.id === card.recurrenceId,
+  );
+  if (!recurrence || !recurrence.enabled) return null;
+  if (db.cards.some((item) => item.generatedFromId === card.id)) return null;
+
+  const base = recurrence.nextDueDate ?? card.dueDate ?? todayKey();
+  const generatedDue = recurrence.nextDueDate ?? nextRecurrenceDateFor(recurrence, base) ?? base;
+  const followingDue = nextRecurrenceDateFor(recurrence, generatedDue);
+
+  const now = nowISO();
+  const siblings = db.cards.filter((c) => c.listId === card.listId && !c.deletedAt);
+  const generated: Card = {
+    ...card,
+    id: createId('c'),
+    completed: false,
+    deletedAt: null,
+    dueDate: generatedDue,
+    startDate: null,
+    labels: [...card.labels],
+    subtasks: card.subtasks.map((item) => ({ ...item, done: false })),
+    position: siblings.length ? Math.max(...siblings.map((c) => c.position)) + 1 : 0,
+    recurrenceId: recurrence.id,
+    generatedFromId: card.id,
+    createdAt: now,
+    updatedAt: now,
+  };
+  db.cards.push(generated);
+  recurrence.nextDueDate = followingDue;
+  recurrence.updatedAt = now;
+  pushActivity(db, {
+    cardId: generated.id,
+    eventType: 'recurrence',
+    oldValue: '',
+    newValue: card.id,
+  });
+  return generated;
 }
 
 function normalizeGoalScope(value: unknown): GoalScope {
@@ -369,6 +648,9 @@ function loadLocalDb(): LocalDb {
       projects: [],
       projectMetaFields: [],
       projectRoles: [],
+      recurrences: [],
+      automationRules: [],
+      cardActivity: [],
     };
   }
   try {
@@ -389,6 +671,9 @@ function loadLocalDb(): LocalDb {
         projects: [],
         projectMetaFields: [],
         projectRoles: [],
+      recurrences: [],
+      automationRules: [],
+      cardActivity: [],
       };
     }
     const parsed = JSON.parse(raw) as Partial<LocalDb>;
@@ -553,6 +838,32 @@ function loadLocalDb(): LocalDb {
               position: typeof item.position === 'number' ? item.position : 0,
             }))
         : [],
+      recurrences: Array.isArray(parsed.recurrences)
+        ? parsed.recurrences
+            .filter(
+              (item): item is Recurrence =>
+                Boolean(item) && typeof item.id === 'string' && typeof item.cardId === 'string',
+            )
+            .map(normalizeRecurrence)
+        : [],
+      automationRules: Array.isArray(parsed.automationRules)
+        ? parsed.automationRules
+            .filter(
+              (item): item is AutomationRule =>
+                Boolean(item) && typeof item.id === 'string' && typeof item.name === 'string',
+            )
+            .map(normalizeAutomationRule)
+        : [],
+      cardActivity: Array.isArray(parsed.cardActivity)
+        ? parsed.cardActivity
+            .filter(
+              (item): item is CardActivity =>
+                Boolean(item) &&
+                typeof item.id === 'string' &&
+                typeof item.cardId === 'string',
+            )
+            .map(normalizeActivity)
+        : [],
     };
   } catch {
     return {
@@ -570,6 +881,9 @@ function loadLocalDb(): LocalDb {
       projects: [],
       projectMetaFields: [],
       projectRoles: [],
+      recurrences: [],
+      automationRules: [],
+      cardActivity: [],
     };
   }
 }
@@ -826,6 +1140,12 @@ const localApi: TidelineApi = {
       projectRoles: [...db.projectRoles].sort(
         (a, b) => a.projectId.localeCompare(b.projectId) || a.position - b.position,
       ),
+      recurrences: [...db.recurrences].sort((a, b) =>
+        a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+      ),
+      automationRules: [...db.automationRules].sort((a, b) =>
+        a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+      ),
     };
   },
 
@@ -946,10 +1266,13 @@ const localApi: TidelineApi = {
       labels: input.labels ? [...input.labels] : [],
       subtasks: input.subtasks ? input.subtasks.map((item) => ({ ...item })) : [],
       position: siblings.length ? Math.max(...siblings.map((c) => c.position)) + 1 : 0,
+      recurrenceId: null,
+      generatedFromId: null,
       createdAt: now,
       updatedAt: now,
     };
     db.cards.push(card);
+    pushActivity(db, { cardId: card.id, eventType: 'created' });
     touchBoard(db, input.boardId);
     saveLocalDb(db);
     return card;
@@ -958,6 +1281,7 @@ const localApi: TidelineApi = {
   async updateCard({ id, patch }) {
     const db = loadLocalDb();
     const card = requireCard(db, id);
+    const previous = { ...card, labels: [...card.labels], subtasks: card.subtasks.map((item) => ({ ...item })) };
     if (patch.title !== undefined) card.title = patch.title.trim() || '未命名任务';
     if (patch.description !== undefined) card.description = patch.description;
     if (patch.dueDate !== undefined) card.dueDate = patch.dueDate;
@@ -978,6 +1302,18 @@ const localApi: TidelineApi = {
       ).length;
     }
     card.updatedAt = nowISO();
+    recordLocalCardChanges(db, previous, card);
+
+    const becameComplete = !previous.completed && card.completed;
+    if (becameComplete) {
+      pushActivity(db, { cardId: card.id, eventType: 'completed' });
+      runLocalRules(db, card, 'complete');
+      rollLocalRecurrence(db, card);
+    }
+    if (patch.listId !== undefined && patch.listId !== previous.listId) {
+      pushActivity(db, { cardId: card.id, eventType: 'moved' });
+      runLocalRules(db, card, 'move_to_list');
+    }
     touchBoard(db, card.boardId);
     saveLocalDb(db);
     return card;
@@ -989,6 +1325,7 @@ const localApi: TidelineApi = {
     if (card.deletedAt) return;
     card.deletedAt = nowISO();
     card.updatedAt = card.deletedAt;
+    pushActivity(db, { cardId: card.id, eventType: 'deleted' });
     pruneDependencies(db, new Set([card.id]));
     normalizePositions(db, card.listId);
     touchBoard(db, card.boardId);
@@ -1016,6 +1353,7 @@ const localApi: TidelineApi = {
       ? Math.max(...activeSiblings.map((c) => c.position)) + 1
       : 0;
     card.updatedAt = nowISO();
+    pushActivity(db, { cardId: card.id, eventType: 'restored' });
     touchBoard(db, card.boardId);
     saveLocalDb(db);
     return card;
@@ -1055,8 +1393,9 @@ const localApi: TidelineApi = {
     });
     if (oldListId !== toListId) {
       normalizePositions(db, oldListId);
+      pushActivity(db, { cardId: card.id, eventType: 'moved' });
+      runLocalRules(db, card, 'move_to_list');
     }
-    card.updatedAt = nowISO();
     touchBoard(db, card.boardId);
     saveLocalDb(db);
     return card;
@@ -1193,6 +1532,10 @@ const localApi: TidelineApi = {
       projects: backup.projects,
       projectMetaFields: backup.projectMetaFields,
       projectRoles: backup.projectRoles,
+      recurrences: backup.recurrences,
+      automationRules: backup.automationRules,
+      cardActivity: backup.cardActivity,
+      notificationSettings: DEFAULT_NOTIFICATION_SETTINGS,
     });
     return summarizeBackup(backup);
   },
@@ -1752,6 +2095,182 @@ const localApi: TidelineApi = {
     const store = loadLocalUsageStore();
     store.apps = [];
     saveLocalUsageStore(store);
+  },
+
+  /* ---------- 自动化与提醒（V0.11） ---------- */
+
+  async getCardActivity({ id }) {
+    const db = loadLocalDb();
+    return db.cardActivity
+      .filter((item) => item.cardId === id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 100);
+  },
+
+  async getRecurrences() {
+    const db = loadLocalDb();
+    return [...db.recurrences].sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+    );
+  },
+
+  async createRecurrence(input) {
+    const db = loadLocalDb();
+    const card = requireCard(db, input.cardId);
+    if (card.deletedAt) throw new Error('回收站中的任务不能设置重复');
+    const intervalValue =
+      input.frequency === 'interval' ? Math.max(1, Math.floor(input.intervalValue ?? 1)) : 1;
+    const weekdays =
+      input.frequency === 'weekly'
+        ? (input.weekdays ?? []).filter((day) => day >= 0 && day <= 6)
+        : [];
+    if (input.frequency === 'weekly' && weekdays.length === 0) {
+      throw new Error('每周重复至少要选择一个星期');
+    }
+    const base = input.nextDueDate ?? card.dueDate ?? todayKey();
+    const now = nowISO();
+    const recurrence: Recurrence = {
+      id: createId('r'),
+      cardId: input.cardId,
+      frequency: input.frequency,
+      intervalValue,
+      weekdays,
+      nextDueDate: nextRecurrenceDateFor(
+        { frequency: input.frequency, intervalValue, weekdays },
+        base,
+      ),
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.recurrences = db.recurrences.filter((item) => item.cardId !== input.cardId);
+    db.recurrences.push(recurrence);
+    card.recurrenceId = recurrence.id;
+    saveLocalDb(db);
+    return recurrence;
+  },
+
+  async updateRecurrence({ id, patch }) {
+    const db = loadLocalDb();
+    const recurrence = db.recurrences.find((item) => item.id === id);
+    if (!recurrence) throw new Error(`重复配置不存在：${id}`);
+    if (patch.frequency !== undefined) {
+      recurrence.frequency = patch.frequency;
+      if (patch.frequency !== 'interval') recurrence.intervalValue = 1;
+      if (patch.frequency !== 'weekly') recurrence.weekdays = [];
+    }
+    if (patch.intervalValue !== undefined) {
+      recurrence.intervalValue =
+        recurrence.frequency === 'interval' ? Math.max(1, Math.floor(patch.intervalValue)) : 1;
+    }
+    if (patch.weekdays !== undefined) {
+      recurrence.weekdays = patch.weekdays.filter((day) => day >= 0 && day <= 6);
+    }
+    if (recurrence.frequency === 'weekly' && recurrence.weekdays.length === 0) {
+      throw new Error('每周重复至少要选择一个星期');
+    }
+    if (patch.nextDueDate !== undefined) recurrence.nextDueDate = patch.nextDueDate;
+    if (patch.enabled !== undefined) recurrence.enabled = patch.enabled;
+    recurrence.updatedAt = nowISO();
+    saveLocalDb(db);
+    return recurrence;
+  },
+
+  async deleteRecurrence({ id }) {
+    const db = loadLocalDb();
+    db.recurrences = db.recurrences.filter((item) => item.id !== id);
+    for (const card of db.cards) {
+      if (card.recurrenceId === id) card.recurrenceId = null;
+    }
+    saveLocalDb(db);
+  },
+
+  async getAutomationRules() {
+    const db = loadLocalDb();
+    return [...db.automationRules].sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+    );
+  },
+
+  async createAutomationRule(input) {
+    const db = loadLocalDb();
+    const error = validateRuleActions(input.actions);
+    if (error) throw new Error(error);
+    if (input.trigger === 'move_to_list' && !input.listId) {
+      throw new Error('移动触发需要选择一个目标列表');
+    }
+    const now = nowISO();
+    const rule: AutomationRule = {
+      id: createId('au'),
+      name: input.name.trim() || '未命名规则',
+      trigger: input.trigger,
+      listId: input.trigger === 'move_to_list' ? (input.listId ?? null) : null,
+      actions: input.actions.map((action) => ({ ...action })),
+      // 自动化默认关闭，需要用户逐条启用
+      enabled: input.enabled ?? false,
+      lastError: '',
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.automationRules.push(rule);
+    saveLocalDb(db);
+    return rule;
+  },
+
+  async updateAutomationRule({ id, patch }) {
+    const db = loadLocalDb();
+    const rule = db.automationRules.find((item) => item.id === id);
+    if (!rule) throw new Error(`规则不存在：${id}`);
+    if (patch.name !== undefined) rule.name = patch.name.trim() || '未命名规则';
+    if (patch.trigger !== undefined) rule.trigger = patch.trigger;
+    if (patch.listId !== undefined) rule.listId = patch.listId;
+    if (patch.actions !== undefined) {
+      const error = validateRuleActions(patch.actions);
+      if (error) throw new Error(error);
+      rule.actions = patch.actions.map((action) => ({ ...action }));
+    }
+    if (patch.enabled !== undefined) rule.enabled = patch.enabled;
+    if (rule.trigger === 'move_to_list' && !rule.listId) {
+      throw new Error('移动触发需要选择一个目标列表');
+    }
+    rule.updatedAt = nowISO();
+    saveLocalDb(db);
+    return rule;
+  },
+
+  async deleteAutomationRule({ id }) {
+    const db = loadLocalDb();
+    db.automationRules = db.automationRules.filter((item) => item.id !== id);
+    saveLocalDb(db);
+  },
+
+  async getNotificationSettings() {
+    const db = loadLocalDb();
+    const stored = (db as LocalDb & { notificationSettings?: NotificationSettings })
+      .notificationSettings;
+    return { ...DEFAULT_NOTIFICATION_SETTINGS, ...(stored ?? {}) };
+  },
+
+  async setNotificationSettings(input) {
+    const db = loadLocalDb();
+    const current = await localApi.getNotificationSettings();
+    const next: NotificationSettings = {
+      dueEnabled: input.dueEnabled ?? current.dueEnabled,
+      overdueEnabled: input.overdueEnabled ?? current.overdueEnabled,
+      dailySummaryEnabled: input.dailySummaryEnabled ?? current.dailySummaryEnabled,
+      dailySummaryTime: input.dailySummaryTime ?? current.dailySummaryTime,
+      leadDays: input.leadDays ?? current.leadDays,
+      updatedAt: nowISO(),
+    };
+    if (!/^\d{2}:\d{2}$/.test(next.dailySummaryTime)) {
+      throw new Error('每日摘要时间格式应为 HH:MM');
+    }
+    if (!Number.isInteger(next.leadDays) || next.leadDays < 0 || next.leadDays > 30) {
+      throw new Error('提前天数应为 0 到 30 之间的整数');
+    }
+    (db as LocalDb & { notificationSettings?: NotificationSettings }).notificationSettings = next;
+    saveLocalDb(db);
+    return next;
   },
 };
 

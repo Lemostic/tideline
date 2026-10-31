@@ -6,11 +6,13 @@
  * cards 包含回收站任务（deletedAt 非空），恢复时整体替换。
  */
 import type {
+  AutomationRule,
   BackupFile,
   BackupSummary,
   Board,
   BoardSet,
   Card,
+  CardActivity,
   CardDependency,
   Goal,
   InboxItem,
@@ -20,6 +22,7 @@ import type {
   Project,
   ProjectMetaField,
   ProjectRole,
+  Recurrence,
   TeamMember,
   MemberTenure,
 } from './types';
@@ -44,6 +47,10 @@ export interface BackupData {
   projects: Project[];
   projectMetaFields: ProjectMetaField[];
   projectRoles: ProjectRole[];
+  /** V0.11 新增 */
+  recurrences: Recurrence[];
+  automationRules: AutomationRule[];
+  cardActivity: CardActivity[];
 }
 
 export function summarizeBackup(
@@ -51,7 +58,7 @@ export function summarizeBackup(
     BackupFile,
     'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets' | 'goals' |
       'teamMembers' | 'overtimeRecords' | 'performanceRecords' | 'memberTenures' | 'projects' |
-      'projectMetaFields' | 'projectRoles'
+      'projectMetaFields' | 'projectRoles' | 'recurrences' | 'automationRules' | 'cardActivity'
   >,
 ): BackupSummary {
   return {
@@ -70,6 +77,9 @@ export function summarizeBackup(
     projects: backup.projects.length,
     projectMetaFields: backup.projectMetaFields.length,
     projectRoles: backup.projectRoles.length,
+    recurrences: backup.recurrences.length,
+    automationRules: backup.automationRules.length,
+    cardActivity: backup.cardActivity.length,
   };
 }
 
@@ -93,6 +103,9 @@ export function createBackup(data: BackupData): BackupFile {
     projects: data.projects,
     projectMetaFields: data.projectMetaFields,
     projectRoles: data.projectRoles,
+    recurrences: data.recurrences,
+    automationRules: data.automationRules,
+    cardActivity: data.cardActivity,
   };
 }
 
@@ -621,6 +634,83 @@ export function parseBackup(text: string): BackupFile {
     });
   }
 
+  // V0.11 新增的三组数据，旧备份没有这些字段时按空数组处理。
+  const rawRecurrences = raw.recurrences === undefined ? [] : requireArray(raw.recurrences, 'recurrences');
+  const recurrences: Recurrence[] = [];
+  const recurrenceIds = new Set<string>();
+  for (const item of rawRecurrences) {
+    if (!isRecord(item)) throw new Error('备份中的重复任务配置格式不正确');
+    const id = requireString(item.id, 'recurrences[].id');
+    if (recurrenceIds.has(id)) throw new Error(`备份中存在重复的重复配置 id：${id}`);
+    recurrenceIds.add(id);
+    const cardId = requireString(item.cardId, 'recurrences[].cardId');
+    if (!cardIds.has(cardId)) throw new Error(`重复配置引用了不存在的任务：${cardId}`);
+    const frequency =
+      item.frequency === 'weekly' || item.frequency === 'monthly' || item.frequency === 'interval'
+        ? item.frequency
+        : 'daily';
+    recurrences.push({
+      id,
+      cardId,
+      frequency,
+      intervalValue: typeof item.intervalValue === 'number' ? Math.max(1, Math.floor(item.intervalValue)) : 1,
+      weekdays: Array.isArray(item.weekdays)
+        ? item.weekdays.filter((day): day is number => typeof day === 'number' && day >= 0 && day <= 6)
+        : [],
+      nextDueDate: typeof item.nextDueDate === 'string' ? item.nextDueDate : null,
+      enabled: item.enabled !== false,
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
+  const rawRules = raw.automationRules === undefined ? [] : requireArray(raw.automationRules, 'automationRules');
+  const automationRules: AutomationRule[] = [];
+  const ruleIds = new Set<string>();
+  for (const item of rawRules) {
+    if (!isRecord(item)) throw new Error('备份中的本地规则格式不正确');
+    const id = requireString(item.id, 'automationRules[].id');
+    if (ruleIds.has(id)) throw new Error(`备份中存在重复的规则 id：${id}`);
+    ruleIds.add(id);
+    const trigger = item.trigger === 'complete' ? 'complete' : 'move_to_list';
+    const listId = typeof item.listId === 'string' ? item.listId : null;
+    if (trigger === 'move_to_list' && listId && !listBoard.has(listId)) {
+      throw new Error(`本地规则引用了不存在的列表：${listId}`);
+    }
+    automationRules.push({
+      id,
+      name: typeof item.name === 'string' ? item.name : '',
+      trigger,
+      listId,
+      actions: Array.isArray(item.actions) ? (item.actions as AutomationRule['actions']) : [],
+      enabled: item.enabled === true,
+      lastError: '',
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
+  const rawActivity = raw.cardActivity === undefined ? [] : requireArray(raw.cardActivity, 'cardActivity');
+  const cardActivity: CardActivity[] = [];
+  const activityIds = new Set<string>();
+  for (const item of rawActivity) {
+    if (!isRecord(item)) throw new Error('备份中的活动日志格式不正确');
+    const id = requireString(item.id, 'cardActivity[].id');
+    if (activityIds.has(id)) throw new Error(`备份中存在重复的活动日志 id：${id}`);
+    activityIds.add(id);
+    const cardId = requireString(item.cardId, 'cardActivity[].cardId');
+    if (!cardIds.has(cardId)) throw new Error(`活动日志引用了不存在的任务：${cardId}`);
+    cardActivity.push({
+      id,
+      cardId,
+      eventType: typeof item.eventType === 'string' ? item.eventType : 'updated',
+      field: typeof item.field === 'string' ? item.field : '',
+      oldValue: typeof item.oldValue === 'string' ? item.oldValue : '',
+      newValue: typeof item.newValue === 'string' ? item.newValue : '',
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+    });
+  }
+
   return {
     app: BACKUP_APP,
     formatVersion: BACKUP_FORMAT_VERSION,
@@ -639,5 +729,8 @@ export function parseBackup(text: string): BackupFile {
     projects,
     projectMetaFields,
     projectRoles,
+    recurrences,
+    automationRules,
+    cardActivity,
   };
 }

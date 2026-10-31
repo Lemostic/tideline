@@ -2436,6 +2436,16 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
         );
         let _ = crate::automation::roll_recurrence(&tx, &card.id);
     }
+    if previous.list_id != card.list_id {
+        record_card_event(&tx, &card.id, "moved", "")?;
+        // 直接改 list_id 也算移动到某一列，触发 move_to_list 规则。
+        let _ = crate::automation::run_rules(
+            &tx,
+            &card,
+            crate::models::RuleTrigger::MoveToList,
+            &crate::automation::today_key(),
+        );
+    }
     tx.commit().map_err(db_err)?;
     Ok(card)
 }

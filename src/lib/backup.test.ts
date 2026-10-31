@@ -69,6 +69,9 @@ const validBackup = () =>
     projects: [],
     projectMetaFields: [],
     projectRoles: [],
+    recurrences: [],
+    automationRules: [],
+    cardActivity: [],
   });
 
 describe('backup helpers', () => {
@@ -90,6 +93,9 @@ describe('backup helpers', () => {
       projects: 0,
       projectMetaFields: 0,
       projectRoles: 0,
+      recurrences: 0,
+      automationRules: 0,
+      cardActivity: 0,
     });
   });
 

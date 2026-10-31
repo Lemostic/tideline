@@ -45,6 +45,15 @@ import type {
   ProjectRole,
   ProjectRolePatch,
   Snapshot,
+  AutomationRule,
+  AutomationRulePatch,
+  CardActivity,
+  NewAutomationRuleInput,
+  NewRecurrenceInput,
+  NotificationSettings,
+  NotificationSettingsInput,
+  Recurrence,
+  RecurrencePatch,
   TeamMember,
   TeamMemberPatch,
   TenurePatch,
@@ -65,6 +74,8 @@ const EMPTY_SNAPSHOT: Snapshot = {
   projects: [],
   projectMetaFields: [],
   projectRoles: [],
+  recurrences: [],
+  automationRules: [],
 };
 const SEED_FLAG = 'tideline.seeded';
 
@@ -145,6 +156,26 @@ export interface AppState {
   addInbox: (content: string) => Promise<void>;
   deleteInbox: (id: string) => Promise<void>;
   convertInbox: (id: string, boardId: string, listId?: string) => Promise<Card>;
+
+  /* ---------- 自动化与提醒（V0.11） ---------- */
+  /** 某张任务的最近活动（倒序），由任务详情按需加载 */
+  loadCardActivity: (cardId: string) => Promise<CardActivity[]>;
+  /** 新建重复任务配置 */
+  createRecurrence: (input: NewRecurrenceInput) => Promise<Recurrence>;
+  /** 修改重复任务配置 */
+  updateRecurrence: (id: string, patch: RecurrencePatch) => Promise<void>;
+  /** 删除重复任务配置 */
+  deleteRecurrence: (id: string) => Promise<void>;
+  /** 新建本地规则（默认关闭） */
+  createAutomationRule: (input: NewAutomationRuleInput) => Promise<AutomationRule>;
+  /** 修改本地规则 */
+  updateAutomationRule: (id: string, patch: AutomationRulePatch) => Promise<void>;
+  /** 删除本地规则 */
+  deleteAutomationRule: (id: string) => Promise<void>;
+  /** 读取提醒设置 */
+  loadNotificationSettings: () => Promise<NotificationSettings>;
+  /** 更新提醒设置 */
+  updateNotificationSettings: (patch: NotificationSettingsInput) => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -250,6 +281,10 @@ export const useAppStore = create<AppState>((set, get) => {
               projects: state.snapshot.projects,
               projectMetaFields: state.snapshot.projectMetaFields,
               projectRoles: state.snapshot.projectRoles,
+              recurrences: state.snapshot.recurrences.filter(
+                (item) => !removedCardIds.has(item.cardId),
+              ),
+              automationRules: state.snapshot.automationRules,
             },
           };
         });
@@ -905,6 +940,125 @@ export const useAppStore = create<AppState>((set, get) => {
         return card;
       } catch (error) {
         return fail(error);
+      }
+    },
+
+    /* ---------- 自动化与提醒（V0.11） ---------- */
+
+    loadCardActivity: async (cardId) => {
+      try {
+        return await api.getCardActivity({ id: cardId });
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    createRecurrence: async (input) => {
+      try {
+        const recurrence = await api.createRecurrence(input);
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            recurrences: [
+              ...state.snapshot.recurrences.filter((item) => item.cardId !== input.cardId),
+              recurrence,
+            ],
+          },
+        }));
+        return recurrence;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateRecurrence: async (id, patch) => {
+      try {
+        const recurrence = await api.updateRecurrence({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            recurrences: state.snapshot.recurrences.map((item) =>
+              item.id === id ? recurrence : item,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteRecurrence: async (id) => {
+      try {
+        await api.deleteRecurrence({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            recurrences: state.snapshot.recurrences.filter((item) => item.id !== id),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    createAutomationRule: async (input) => {
+      try {
+        const rule = await api.createAutomationRule(input);
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            automationRules: [...state.snapshot.automationRules, rule],
+          },
+        }));
+        return rule;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateAutomationRule: async (id, patch) => {
+      try {
+        const rule = await api.updateAutomationRule({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            automationRules: state.snapshot.automationRules.map((item) =>
+              item.id === id ? rule : item,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteAutomationRule: async (id) => {
+      try {
+        await api.deleteAutomationRule({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            automationRules: state.snapshot.automationRules.filter((item) => item.id !== id),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    loadNotificationSettings: async () => {
+      try {
+        return await api.getNotificationSettings();
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateNotificationSettings: async (patch) => {
+      try {
+        await api.setNotificationSettings(patch);
+      } catch (error) {
+        fail(error);
       }
     },
   };
