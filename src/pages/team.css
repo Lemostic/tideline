@@ -5,33 +5,9 @@
   max-width: none;
 }
 
-.team-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 6px 2px 18px;
-}
-
-.team-title {
-  margin: 4px 0 5px;
-  color: var(--ink);
-  font-size: 24px;
-  line-height: 1.25;
-}
-
-.team-sub {
-  max-width: 760px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.65;
-}
-
 .team-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 11px;
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { Modal } from '@/components/Modal';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { api } from '@/lib/api';
 import { parseBackup, summarizeBackup } from '@/lib/backup';
 import type { BackupExport, BackupSummary, StorageInfo } from '@/lib/types';
@@ -104,13 +105,11 @@ export function DataPage({ embedded = false }: { embedded?: boolean }) {
   return (
     <div className={embedded ? 'data-page data-page-embedded' : 'page data-page'}>
       {embedded ? null : (
-        <header className="data-head">
-          <div className="page-eyebrow">数据与备份</div>
-          <h1 className="data-title">把数据握在自己手里</h1>
-          <p className="data-sub">
-            潮线只把数据保存在本机。定期导出一份 JSON 备份，换电脑或误操作时都能完整恢复。
-          </p>
-        </header>
+        <PageHeadBand
+          eyebrow="数据与备份"
+          title="把数据握在自己手里"
+          description="潮线只把数据保存在本机。定期导出一份 JSON 备份，换电脑或误操作时都能完整恢复。"
+        />
       )}
 
       {flash ? <div className="data-flash">{flash}</div> : null}

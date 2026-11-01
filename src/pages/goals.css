@@ -5,33 +5,9 @@
   max-width: none;
 }
 
-.goals-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 6px 2px 18px;
-}
-
-.goals-title {
-  margin: 4px 0 5px;
-  color: var(--ink);
-  font-size: 24px;
-  line-height: 1.25;
-}
-
-.goals-sub {
-  max-width: 720px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.65;
-}
-
 .goals-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -801,7 +777,7 @@ button.goal-child {
 
 .goal-form-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 

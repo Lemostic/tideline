@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { api } from '@/lib/api';
 import { createId } from '@/lib/ids';
 import {
@@ -174,12 +175,14 @@ export function RequirementPage() {
 
   return (
     <div className="page req-page">
-      <div className="page-head">
-        <h1 className="page-title">需求拆解</h1>
-        <p className="page-sub">
-          把需求文档贴进来，按标题、编号和缩进拆成看板任务与子任务；解析全部在本机完成，不经过任何 AI 服务。
-        </p>
-      </div>
+      <PageHeadBand
+        title="需求拆解"
+        description="把需求文档贴进来，按标题、编号和缩进拆成看板任务与子任务；解析全部在本机完成，不经过任何 AI 服务。"
+        readouts={[
+          { label: '识别节点', value: nodeCount, tone: nodeCount > 0 ? 'default' : 'muted' },
+          { label: '最深层级', value: deepest, tone: 'muted' },
+        ]}
+      />
 
       <div className="req-layout">
         <section className="req-panel req-panel-input">

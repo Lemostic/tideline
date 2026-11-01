@@ -5,25 +5,6 @@
   max-width: none;
 }
 
-.settings-head {
-  padding: 6px 2px 18px;
-}
-
-.settings-title {
-  margin: 4px 0 6px;
-  font-size: 24px;
-  line-height: 1.25;
-  color: var(--ink);
-}
-
-.settings-sub {
-  max-width: 760px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.65;
-}
-
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

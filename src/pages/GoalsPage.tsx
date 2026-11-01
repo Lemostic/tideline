@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import {
   GoalFormModal,
   goalScopeLabel,
@@ -110,29 +111,24 @@ export function GoalsPage() {
 
   return (
     <div className="page goals-page">
-      <header className="goals-head">
-        <div>
-          <div className="page-eyebrow">目标</div>
-          <h1 className="goals-title">目标与进度</h1>
-          <p className="goals-sub">
-            用公司、团队、个人三层目标组织工作；关联任务完成后，目标进度会自动回写。
-          </p>
-        </div>
-        <button type="button" className="btn btn-primary" onClick={() => setFormOpen(true)}>
-          <Icon name="plus" size={14} />
-          新建目标
-        </button>
-      </header>
+      <PageHeadBand
+        eyebrow="目标"
+        title="目标与进度"
+        description="用公司、团队、个人三层目标组织工作；关联任务完成后，目标进度会自动回写。"
+        readouts={[
+          { label: '进行中', value: stats.active },
+          { label: '已达成', value: stats.completed, tone: 'muted' },
+          { label: '平均进度', value: `${stats.average}%` },
+        ]}
+        actions={
+          <button type="button" className="btn btn-primary" onClick={() => setFormOpen(true)}>
+            <Icon name="plus" size={14} />
+            新建目标
+          </button>
+        }
+      />
 
       <section className="goals-stats" aria-label="目标概览">
-        <div className="goal-stat">
-          <span>进行中目标</span>
-          <strong>{stats.active}</strong>
-        </div>
-        <div className="goal-stat">
-          <span>已达成</span>
-          <strong>{stats.completed}</strong>
-        </div>
         <div className="goal-stat">
           <span>关联任务</span>
           <strong>{stats.linked}</strong>

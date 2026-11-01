@@ -5,25 +5,6 @@
   max-width: none;
 }
 
-.data-head {
-  padding: 6px 2px 18px;
-}
-
-.data-title {
-  margin: 4px 0 6px;
-  font-size: 24px;
-  line-height: 1.25;
-  color: var(--ink);
-}
-
-.data-sub {
-  max-width: 720px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.65;
-}
-
 .data-flash {
   display: flex;
   align-items: center;

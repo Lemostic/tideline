@@ -5,30 +5,6 @@
   max-width: none;
 }
 
-.board-sets-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 6px 2px 18px;
-}
-
-.board-sets-title {
-  margin: 4px 0 5px;
-  color: var(--ink);
-  font-size: 24px;
-  line-height: 1.25;
-}
-
-.board-sets-sub {
-  max-width: 720px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.65;
-}
-
 .board-sets-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--card-min-width, 252px)), 1fr));

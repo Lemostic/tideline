@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { formatDueLabel, todaySummary } from '@/lib/date';
 import { blockersFor } from '@/lib/dependencies';
 import {
@@ -101,77 +102,56 @@ export function DashboardPage() {
 
   return (
     <div className="page dashboard-page">
-      <header className="dashboard-head">
-        <div className="dashboard-head-text">
-          <div className="page-eyebrow">仪表盘 · {todaySummary(now)}</div>
-          <h1 className="dashboard-title">
-            {data.board ? `${data.board.title} · 仪表盘` : '全部看板 · 仪表盘'}
-          </h1>
-          <p className="dashboard-sub">
-            共 {snapshot.boards.length} 个看板 · {data.kpis.total} 个任务 · 已完成{' '}
-            {data.kpis.completed} · 近 {rangeDays} 天新建 {data.kpis.createdInRange}
-          </p>
-        </div>
-
-        <div className="dashboard-controls">
-          <label className="dashboard-select">
-            <Icon name="layout-grid" size={13} />
-            <select
-              value={boardFilter}
-              onChange={(event) => setBoardFilter(event.target.value)}
-              aria-label="选择看板"
-            >
-              <option value="all">全部看板</option>
-              {snapshot.boards.map((board) => (
-                <option key={board.id} value={board.id}>
-                  {board.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="dashboard-range" role="tablist" aria-label="统计时间范围">
-            {DASHBOARD_RANGES.map((days) => (
-              <button
-                key={days}
-                type="button"
-                role="tab"
-                aria-selected={rangeDays === days}
-                className={`dashboard-range-btn${rangeDays === days ? ' is-active' : ''}`}
-                onClick={() => setRangeDays(days)}
+      <PageHeadBand
+        eyebrow={`仪表盘 · ${todaySummary(now)}`}
+        title={data.board ? `${data.board.title} · 仪表盘` : '全部看板 · 仪表盘'}
+        description="按看板与时间范围统计本机任务，趋势、状态与风险都从快照实时算出。"
+        readouts={[
+          { label: '任务', value: data.kpis.total },
+          { label: '完成率', value: percent(data.kpis.completionRate) },
+          { label: '已逾期', value: data.kpis.overdue, tone: data.kpis.overdue > 0 ? 'danger' : 'muted' },
+        ]}
+        actions={
+          <div className="dashboard-controls">
+            <label className="dashboard-select">
+              <Icon name="layout-grid" size={13} />
+              <select
+                value={boardFilter}
+                onChange={(event) => setBoardFilter(event.target.value)}
+                aria-label="选择看板"
               >
-                {days} 天
-              </button>
-            ))}
+                <option value="all">全部看板</option>
+                {snapshot.boards.map((board) => (
+                  <option key={board.id} value={board.id}>
+                    {board.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="dashboard-range" role="tablist" aria-label="统计时间范围">
+              {DASHBOARD_RANGES.map((days) => (
+                <button
+                  key={days}
+                  type="button"
+                  role="tab"
+                  aria-selected={rangeDays === days}
+                  className={`dashboard-range-btn${rangeDays === days ? ' is-active' : ''}`}
+                  onClick={() => setRangeDays(days)}
+                >
+                  {days} 天
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      </header>
+        }
+      />
 
+      {/* 任务总数、完成率、已逾期已在读数条里呈现，这里只放剩下的三项，避免同一数字出现两次 */}
       <section className="dashboard-kpis" aria-label="核心指标">
-        <KpiCard
-          label="任务总数"
-          value={String(data.kpis.total)}
-          sub={`已完成 ${data.kpis.completed} 个`}
-          icon="list"
-        />
-        <KpiCard
-          label="完成率"
-          value={percent(data.kpis.completionRate)}
-          sub={`子任务 ${data.kpis.subtaskDone}/${data.kpis.subtaskTotal}`}
-          icon="check-circle"
-          tone="primary"
-          progress={data.kpis.completionRate}
-        />
-        <KpiCard
-          label="已逾期"
-          value={String(data.kpis.overdue)}
-          sub={`今天到期 ${data.kpis.dueToday} 个`}
-          icon="clock"
-          tone="danger"
-        />
         <KpiCard
           label="本周到期"
           value={String(data.kpis.dueWeek)}
-          sub={`无截止日期 ${data.kpis.noDue} 个`}
+          sub={`今天到期 ${data.kpis.dueToday} 个`}
           icon="calendar"
           tone="warn"
         />

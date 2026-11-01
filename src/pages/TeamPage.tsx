@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { EmptyState, Modal } from '@/components/Modal';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { PROJECT_COLORS, projectMeta, projectMembers, projectOvertime } from '@/lib/team';
 import type { Project } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
@@ -67,37 +68,31 @@ export function TeamPage() {
 
   return (
     <div className="page team-page">
-      <header className="team-head">
-        <div>
-          <div className="page-eyebrow">项目管理 · 多项目资源</div>
-          <h1 className="team-title">项目空间</h1>
-          <p className="team-sub">
-            每个项目独立维护成员、角色、元数据、周末加班与绩效；像看板一样自由增删改，数据只在本机。
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          onClick={() => {
-            setEditing(null);
-            setModalOpen(true);
-          }}
-        >
-          <Icon name="plus" size={14} /> 新建项目
-        </button>
-      </header>
+      <PageHeadBand
+        eyebrow="项目管理 · 多项目资源"
+        title="项目空间"
+        description="每个项目独立维护成员、角色、元数据、周末加班与绩效；像看板一样自由增删改，数据只在本机。"
+        readouts={[
+          { label: '项目', value: projects.length },
+          { label: '进行中', value: activeCount },
+          { label: '已归档', value: archivedCount, tone: 'muted' },
+          { label: '在组资源', value: totalActiveMembers },
+        ]}
+        actions={
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => {
+              setEditing(null);
+              setModalOpen(true);
+            }}
+          >
+            <Icon name="plus" size={14} /> 新建项目
+          </button>
+        }
+      />
 
       <section className="team-stats" aria-label="项目概览">
-        <div className="team-stat">
-          <span>项目总数</span>
-          <strong>{projects.length}</strong>
-          <div className="team-stat-hint">进行中 {activeCount} · 已归档 {archivedCount}</div>
-        </div>
-        <div className="team-stat">
-          <span>在组资源</span>
-          <strong>{totalActiveMembers}</strong>
-          <div className="team-stat-hint">全部项目成员 {snapshot.teamMembers.length}</div>
-        </div>
         <div className="team-stat">
           <span>累计加班</span>
           <strong>

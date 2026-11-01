@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DatePicker } from '@/components/DatePicker';
 import { Icon } from '@/components/Icon';
 import { EmptyState, Modal } from '@/components/Modal';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { api, isTauri } from '@/lib/api';
 import { formatDateCN } from '@/lib/date';
 import {
@@ -182,50 +183,53 @@ export function UsagePage() {
 
   return (
     <div className="page usage-page">
-      <header className="usage-head">
-        <div className="usage-head-text">
-          <div className="page-eyebrow">本地统计</div>
-          <h1 className="usage-title">使用统计</h1>
-          <p className="usage-sub">
-            统计你在电脑上使用各应用的时间。数据只保存在本机数据库里，不会上传到任何服务器。
-          </p>
-        </div>
-        <div className="usage-controls">
-          <div className="usage-range" role="tablist" aria-label="统计区间">
-            {RANGE_OPTIONS.map((option) => (
-              <button
-                key={option.kind}
-                type="button"
-                role="tab"
-                aria-selected={rangeKind === option.kind}
-                className={`usage-range-btn${rangeKind === option.kind ? ' is-active' : ''}`}
-                onClick={() => setRangeKind(option.kind)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          {rangeKind === 'custom' ? (
-            <div className="usage-custom">
-              <DatePicker value={customFrom} onChange={setCustomFrom} ariaLabel="开始日期" />
-              <span className="usage-custom-sep">至</span>
-              <DatePicker value={customTo} onChange={setCustomTo} ariaLabel="结束日期" />
+      <PageHeadBand
+        eyebrow={`本地统计 · ${formatUsageRangeLabel(range.from, range.to)}`}
+        title="使用统计"
+        description="统计你在电脑上使用各应用的时间。数据只保存在本机数据库里，不会上传到任何服务器。"
+        readouts={[
+          { label: '区间总时长', value: formatDuration(summary.totalSeconds) },
+          { label: '应用', value: summary.trackedApps, tone: 'muted' },
+          { label: '状态', value: paused ? '已暂停' : '运行中', tone: paused ? 'muted' : 'default' },
+        ]}
+        actions={
+          <div className="usage-controls">
+            <div className="usage-range" role="tablist" aria-label="统计区间">
+              {RANGE_OPTIONS.map((option) => (
+                <button
+                  key={option.kind}
+                  type="button"
+                  role="tab"
+                  aria-selected={rangeKind === option.kind}
+                  className={`usage-range-btn${rangeKind === option.kind ? ' is-active' : ''}`}
+                  onClick={() => setRangeKind(option.kind)}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
-          ) : null}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={togglePause} disabled={busy}>
-            {paused ? '继续统计' : '暂停统计'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-quiet btn-sm usage-clear-btn"
-            onClick={() => setConfirmClear(true)}
-            disabled={busy}
-          >
-            <Icon name="trash" size={14} />
-            清空记录
-          </button>
-        </div>
-      </header>
+            {rangeKind === 'custom' ? (
+              <div className="usage-custom">
+                <DatePicker value={customFrom} onChange={setCustomFrom} ariaLabel="开始日期" />
+                <span className="usage-custom-sep">至</span>
+                <DatePicker value={customTo} onChange={setCustomTo} ariaLabel="结束日期" />
+              </div>
+            ) : null}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={togglePause} disabled={busy}>
+              {paused ? '继续统计' : '暂停统计'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-quiet btn-sm usage-clear-btn"
+              onClick={() => setConfirmClear(true)}
+              disabled={busy}
+            >
+              <Icon name="trash" size={14} />
+              清空记录
+            </button>
+          </div>
+        }
+      />
 
       {!desktop ? (
         <div className="usage-notice">
@@ -253,23 +257,6 @@ export function UsagePage() {
       ) : null}
 
       <section className="usage-kpis">
-        <div className="usage-kpi">
-          <span className="usage-kpi-label">区间总时长</span>
-          <strong className="usage-kpi-value">{formatDuration(summary.totalSeconds)}</strong>
-          <span className="usage-kpi-hint">{formatUsageRangeLabel(range.from, range.to)}</span>
-        </div>
-        <div className="usage-kpi">
-          <span className="usage-kpi-label">纳入统计应用</span>
-          <strong className="usage-kpi-value">{summary.trackedApps}</strong>
-          <span className="usage-kpi-hint">个应用</span>
-        </div>
-        <div className="usage-kpi">
-          <span className="usage-kpi-label">统计状态</span>
-          <strong className={`usage-kpi-value usage-status${paused ? ' is-paused' : ''}`}>
-            {paused ? '已暂停' : '运行中'}
-          </strong>
-          <span className="usage-kpi-hint">{paused ? '不会继续记录' : '正在记录前台应用'}</span>
-        </div>
         <div className="usage-kpi">
           <span className="usage-kpi-label">空闲阈值</span>
           <div className="usage-kpi-threshold">

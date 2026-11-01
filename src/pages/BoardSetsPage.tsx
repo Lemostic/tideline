@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { BoardSetFormModal } from '@/components/BoardSetFormModal';
 import { formatRelativeTime } from '@/lib/date';
 import { boardColorValue, type BoardSet } from '@/lib/types';
@@ -69,23 +70,30 @@ export function BoardSetsPage() {
 
   return (
     <div className="page board-sets-page">
-      <header className="board-sets-head">
-        <div>
-          <div className="page-eyebrow">看板集</div>
-          <h1 className="board-sets-title">多个看板，一处查看</h1>
-          <p className="board-sets-sub">
-            把跨项目的看板收进同一个看板集，用汇总表对比任务、完成进度与风险。任务仍归属原看板，不做复制。
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={() => setFormOpen(true)}
-        >
-          <Icon name="plus" size={14} />
-          新建看板集
-        </button>
-      </header>
+      <PageHeadBand
+        eyebrow="看板集"
+        title="多个看板，一处查看"
+        description="把跨项目的看板收进同一个看板集，用汇总表对比任务、完成进度与风险。任务仍归属原看板，不做复制。"
+        readouts={[
+          { label: '看板集', value: sets.length },
+          { label: '任务', value: sets.reduce((sum, item) => sum + item.stats.taskCount, 0) },
+          {
+            label: '逾期',
+            value: sets.reduce((sum, item) => sum + item.stats.overdue, 0),
+            tone: sets.some((item) => item.stats.overdue > 0) ? 'danger' : 'muted',
+          },
+        ]}
+        actions={
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setFormOpen(true)}
+          >
+            <Icon name="plus" size={14} />
+            新建看板集
+          </button>
+        }
+      />
 
       {snapshot.boardSets.length === 0 ? (
         <div className="board-sets-blank">

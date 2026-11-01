@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { Modal } from '@/components/Modal';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { AutomationSettings } from '@/components/AutomationSettings';
 import { api } from '@/lib/api';
 import { CARD_SIZE_OPTIONS } from '@/lib/cardLayout';
@@ -130,15 +131,15 @@ export function SettingsPage() {
 
   return (
     <div className="page settings-page">
-      <header className="settings-head">
-        <div className="page-eyebrow">设置</div>
-        <h1 className="settings-title">设置</h1>
-        <p className="settings-sub">
-          {tab === 'data'
+      <PageHeadBand
+        eyebrow="设置"
+        title="设置"
+        description={
+          tab === 'data'
             ? '导出或恢复本机全部数据。备份文件完全离线，不包含账号、网络或设备信息。'
-            : '设置自动保存在本机，不随备份导入导出。修改后立即生效，并对后续打开的所有看板生效。'}
-        </p>
-      </header>
+            : '设置自动保存在本机，不随备份导入导出。修改后立即生效，并对后续打开的所有看板生效。'
+        }
+      />
 
       <div className="settings-tabs" role="tablist" aria-label="设置分类">
         <button
