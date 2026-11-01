@@ -14,6 +14,10 @@ import type {
   Card,
   CardActivity,
   CardDependency,
+  CardFieldValue,
+  CustomField,
+  CustomFieldOption,
+  CustomFieldType,
   Goal,
   InboxItem,
   List,
@@ -52,6 +56,9 @@ export interface BackupData {
   recurrences: Recurrence[];
   automationRules: AutomationRule[];
   cardActivity: CardActivity[];
+  /** V0.13.0 新增 */
+  customFields: CustomField[];
+  cardFieldValues: CardFieldValue[];
 }
 
 export function summarizeBackup(
@@ -59,7 +66,8 @@ export function summarizeBackup(
     BackupFile,
     'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets' | 'goals' |
       'teamMembers' | 'overtimeRecords' | 'performanceRecords' | 'memberTenures' | 'projects' |
-      'projectMetaFields' | 'projectRoles' | 'recurrences' | 'automationRules' | 'cardActivity'
+      'projectMetaFields' | 'projectRoles' | 'recurrences' | 'automationRules' | 'cardActivity' |
+      'customFields' | 'cardFieldValues'
   >,
 ): BackupSummary {
   return {
@@ -81,6 +89,8 @@ export function summarizeBackup(
     recurrences: backup.recurrences.length,
     automationRules: backup.automationRules.length,
     cardActivity: backup.cardActivity.length,
+    customFields: backup.customFields.length,
+    cardFieldValues: backup.cardFieldValues.length,
   };
 }
 
@@ -107,6 +117,8 @@ export function createBackup(data: BackupData): BackupFile {
     recurrences: data.recurrences,
     automationRules: data.automationRules,
     cardActivity: data.cardActivity,
+    customFields: data.customFields,
+    cardFieldValues: data.cardFieldValues,
   };
 }
 
@@ -733,6 +745,103 @@ export function parseBackup(text: string): BackupFile {
     });
   }
 
+  // V0.13.0 新增的自定义字段；旧备份没有这两项时按空数组处理。
+  const rawCustomFields =
+    raw.customFields === undefined ? [] : requireArray(raw.customFields, 'customFields');
+  const customFields: CustomField[] = [];
+  const customFieldIds = new Set<string>();
+  const customFieldNames = new Set<string>();
+  for (const item of rawCustomFields) {
+    if (!isRecord(item)) throw new Error('备份中的自定义字段格式不正确');
+    const id = requireString(item.id, 'customFields[].id');
+    if (customFieldIds.has(id)) throw new Error(`备份中存在重复的自定义字段 id：${id}`);
+    customFieldIds.add(id);
+    const boardId = requireString(item.boardId, 'customFields[].boardId');
+    if (!boardIds.has(boardId)) throw new Error('自定义字段引用了不存在的看板');
+    const name = requireString(item.name, 'customFields[].name');
+    const nameKey = boardId + '::' + name;
+    if (customFieldNames.has(nameKey)) throw new Error(`看板内存在同名的自定义字段：${name}`);
+    customFieldNames.add(nameKey);
+    const fieldType: CustomFieldType = item.fieldType === 'number' ? 'number' : 'select';
+    const rawOptions =
+      item.options === undefined ? [] : requireArray(item.options, 'customFields[].options');
+    const options: CustomFieldOption[] = [];
+    const optionIds = new Set<string>();
+    for (const rawOption of rawOptions) {
+      if (!isRecord(rawOption)) throw new Error('备份中的自定义字段选项格式不正确');
+      const optionId = requireString(rawOption.id, 'customFields[].options[].id');
+      if (optionIds.has(optionId)) {
+        throw new Error(`自定义字段「${name}」中存在重复的选项 id`);
+      }
+      optionIds.add(optionId);
+      options.push({
+        id: optionId,
+        label:
+          typeof rawOption.label === 'string' && rawOption.label.trim() !== ''
+            ? rawOption.label
+            : optionId,
+        color:
+          typeof rawOption.color === 'string' && rawOption.color.trim() !== ''
+            ? rawOption.color
+            : '#64748b',
+      });
+    }
+    if (fieldType === 'number' && options.length > 0) {
+      throw new Error(`数值字段「${name}」不应带选项`);
+    }
+    if (fieldType === 'select' && options.length === 0) {
+      throw new Error(`单选字段「${name}」至少需要一个选项`);
+    }
+    customFields.push({
+      id,
+      boardId,
+      name,
+      fieldType,
+      options,
+      sortOrder: typeof item.sortOrder === 'number' ? item.sortOrder : customFields.length,
+      createdAt:
+        typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt:
+        typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
+  const rawFieldValues =
+    raw.cardFieldValues === undefined ? [] : requireArray(raw.cardFieldValues, 'cardFieldValues');
+  const cardFieldValues: CardFieldValue[] = [];
+  const fieldValueKeys = new Set<string>();
+  const fieldById = new Map(customFields.map((field) => [field.id, field]));
+  for (const item of rawFieldValues) {
+    if (!isRecord(item)) throw new Error('备份中的自定义字段值格式不正确');
+    const cardId = requireString(item.cardId, 'cardFieldValues[].cardId');
+    const fieldId = requireString(item.fieldId, 'cardFieldValues[].fieldId');
+    if (!cardIds.has(cardId)) throw new Error(`字段值引用了不存在的任务：${cardId}`);
+    const field = fieldById.get(fieldId);
+    if (!field) throw new Error(`字段值引用了不存在的自定义字段：${fieldId}`);
+    const owner = cards.find((card) => card.id === cardId);
+    if (owner && owner.boardId !== field.boardId) {
+      throw new Error(`字段值引用了其它看板的任务：${cardId}`);
+    }
+    const key = cardId + '::' + fieldId;
+    if (fieldValueKeys.has(key)) throw new Error('同一个任务的同一个字段存在重复取值');
+    fieldValueKeys.add(key);
+    const valueText = typeof item.valueText === 'string' ? item.valueText : null;
+    const valueNumber =
+      typeof item.valueNumber === 'number' && Number.isFinite(item.valueNumber)
+        ? item.valueNumber
+        : null;
+    if (field.fieldType === 'select') {
+      if (valueNumber !== null) throw new Error(`单选字段「${field.name}」的取值不能是数字`);
+      if (valueText !== null && !field.options.some((option) => option.id === valueText)) {
+        throw new Error(`单选字段「${field.name}」的取值指向了不存在的选项`);
+      }
+    } else {
+      if (valueText !== null) throw new Error(`数值字段「${field.name}」的取值不能是文本`);
+    }
+    if (valueText === null && valueNumber === null) continue;
+    cardFieldValues.push({ cardId, fieldId, valueText, valueNumber });
+  }
+
   return {
     app: BACKUP_APP,
     formatVersion: BACKUP_FORMAT_VERSION,
@@ -754,5 +863,7 @@ export function parseBackup(text: string): BackupFile {
     recurrences,
     automationRules,
     cardActivity,
+    customFields,
+    cardFieldValues,
   };
 }

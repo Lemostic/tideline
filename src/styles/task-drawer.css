@@ -1144,3 +1144,45 @@
   font-size: 10.5px;
   white-space: nowrap;
 }
+
+/* ---------- 自定义字段（V0.13.0） ---------- */
+.td-custom-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.td-custom-field {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.td-custom-field-name {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.td-custom-field-input,
+.td-custom-field-select {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12.5px;
+}
+
+.td-custom-field-input:focus,
+.td-custom-field-select:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-wash);
+}

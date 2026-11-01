@@ -7,6 +7,7 @@ import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
 import { BoardFilterBar } from '@/features/board/BoardFilterBar';
+import { CustomFieldsModal } from '@/features/board/CustomFieldsModal';
 import { BoardHeader } from '@/features/board/BoardHeader';
 import { CalendarView } from '@/features/board/CalendarView';
 import { EmptyBoard } from '@/features/board/EmptyBoard';
@@ -34,6 +35,7 @@ export function BoardPage() {
   const [view, setView] = useState<BoardView>(() => defaultView);
   const [filters, setFilters] = useState<BoardFilters>(EMPTY_FILTERS);
   const [batchMode, setBatchMode] = useState(false);
+  const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
   const board = useMemo(
@@ -172,6 +174,7 @@ export function BoardPage() {
         batchMode={batchMode}
         onToggleBatchMode={toggleBatchMode}
         showDependencyLegend={view === 'board' && hasBoardDependencies}
+        onOpenCustomFields={() => setCustomFieldsOpen(true)}
       />
       <BoardFilterBar
         filters={filters}
@@ -281,6 +284,13 @@ export function BoardPage() {
           </div>
         </div>
       ) : null}
+
+      <CustomFieldsModal
+        open={customFieldsOpen}
+        boardId={board.id}
+        boardTitle={board.title}
+        onClose={() => setCustomFieldsOpen(false)}
+      />
     </div>
   );
 }

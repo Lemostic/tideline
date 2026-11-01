@@ -115,6 +115,10 @@ export interface Snapshot {
   recurrences: Recurrence[];
   /** 本地规则（V0.11） */
   automationRules: AutomationRule[];
+  /** 自定义字段定义（V0.13.0），按看板隔离 */
+  customFields: CustomField[];
+  /** 任务在自定义字段上的取值（V0.13.0） */
+  cardFieldValues: CardFieldValue[];
 }
 
 /**
@@ -151,6 +155,84 @@ export interface CardDependency {
   dependsOnCardId: string;
   /** V0.12 新增；旧备份缺少该字段时按 `blocks` 处理。 */
   relationType?: RelationType;
+}
+
+/* ---------- 自定义字段（V0.13.0） ---------- */
+
+/** 自定义字段类型：只做单选下拉与数值两类，其余类型明确不做 */
+export type CustomFieldType = 'select' | 'number';
+
+/** 自定义字段的一个选项 */
+export interface CustomFieldOption {
+  /** 选项稳定 id：改标签不改 id，保证已有任务的值不失效 */
+  id: string;
+  label: string;
+  /** 十六进制颜色，例如 #0f766e */
+  color: string;
+}
+
+/** 自定义字段定义，按看板隔离 */
+export interface CustomField {
+  id: string;
+  boardId: string;
+  name: string;
+  fieldType: CustomFieldType;
+  /** 仅 select 类型有选项；number 类型恒为空数组 */
+  options: CustomFieldOption[];
+  /** 同一看板内的展示顺序 */
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 任务在某个自定义字段上的取值 */
+export interface CardFieldValue {
+  cardId: string;
+  fieldId: string;
+  /** select 字段存选项 id；number 字段恒为 null */
+  valueText: string | null;
+  /** number 字段存数字；select 字段恒为 null */
+  valueNumber: number | null;
+}
+
+export interface NewCustomFieldInput {
+  boardId: string;
+  name: string;
+  fieldType: CustomFieldType;
+  /** select 类型必填且至少一项；number 类型必须为空 */
+  options?: CustomFieldOption[];
+}
+
+export type CustomFieldPatch = Partial<
+  Pick<CustomField, 'name' | 'options' | 'sortOrder'>
+>;
+
+export interface CardFieldValueInput {
+  fieldId: string;
+  /** select 字段存选项 id；number 字段存数字；两者都为 null 表示清空 */
+  valueText?: string | null;
+  valueNumber?: number | null;
+}
+
+export interface SetCardFieldValuesInput {
+  cardId: string;
+  values: CardFieldValueInput[];
+}
+
+/** 字段类型的中文标签与说明，供界面展示 */
+export const CUSTOM_FIELD_TYPE_META: ReadonlyArray<{
+  key: CustomFieldType;
+  label: string;
+  hint: string;
+}> = [
+  { key: 'select', label: '单选下拉', hint: '从一组固定选项里选一个' },
+  { key: 'number', label: '数值', hint: '填数字，适合评分、计数与工时' },
+];
+
+export function customFieldTypeMeta(
+  type: CustomFieldType,
+): (typeof CUSTOM_FIELD_TYPE_META)[number] {
+  return CUSTOM_FIELD_TYPE_META.find((item) => item.key === type) ?? CUSTOM_FIELD_TYPE_META[0];
 }
 
 /** 看板集（V0.5.4）：把多个看板聚合成一张跨看板汇总表 */
@@ -528,6 +610,10 @@ export interface BackupFile {
   automationRules: AutomationRule[];
   /** V0.11 新增；旧备份没有该字段时按空活动日志处理 */
   cardActivity: CardActivity[];
+  /** V0.13.0 新增；旧备份没有该字段时按空自定义字段处理 */
+  customFields: CustomField[];
+  /** V0.13.0 新增；旧备份没有该字段时按空字段值处理 */
+  cardFieldValues: CardFieldValue[];
 }
 
 export interface BackupSummary {
@@ -549,6 +635,8 @@ export interface BackupSummary {
   recurrences: number;
   automationRules: number;
   cardActivity: number;
+  customFields: number;
+  cardFieldValues: number;
 }
 
 export interface BackupExport {

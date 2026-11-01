@@ -36,6 +36,7 @@ import type {
   Card,
   CardActivity,
   CardDependency,
+  CardFieldValue,
   CardPatch,
   RelationType,
   Goal,
@@ -43,6 +44,10 @@ import type {
   GoalScope,
   GoalStatus,
   ConvertInboxInput,
+  CustomField,
+  CustomFieldOption,
+  CustomFieldPatch,
+  CustomFieldType,
   IdInput,
   InboxItem,
   List,
@@ -55,6 +60,7 @@ import type {
   NewBoardInput,
   NewBoardSetInput,
   NewCardInput,
+  NewCustomFieldInput,
   NewGoalInput,
   NewListInput,
   NewOvertimeInput,
@@ -82,6 +88,7 @@ import type {
   ProjectRolePatch,
   Recurrence,
   RecurrencePatch,
+  SetCardFieldValuesInput,
   Snapshot,
   StorageInfo,
   Subtask,
@@ -122,6 +129,15 @@ export interface TidelineApi {
     dependsOn: string[];
     relationTypes?: RelationType[];
   }): Promise<CardDependency[]>;
+  /* ---------- 自定义字段（V0.13.0） ---------- */
+  /** 新建自定义字段（按看板隔离） */
+  createCustomField(input: NewCustomFieldInput): Promise<CustomField>;
+  /** 修改自定义字段（改名、替换选项、调整排序） */
+  updateCustomField(input: { id: string; patch: CustomFieldPatch }): Promise<CustomField>;
+  /** 删除自定义字段（连带清理该字段的取值） */
+  deleteCustomField(input: IdInput): Promise<void>;
+  /** 设置某张任务在一组字段上的取值 */
+  setCardFieldValues(input: SetCardFieldValuesInput): Promise<CardFieldValue[]>;
   /** 导出全量 JSON 备份（桌面端写入「文档」目录，浏览器端触发下载） */
   exportBackup(): Promise<BackupExport>;
   /** 用 JSON 备份替换全部数据（失败时不应修改原数据） */
@@ -239,6 +255,11 @@ const tauriApi: TidelineApi = {
   convertInboxItem: (input) => invoke<Card>('convert_inbox_item', { input }),
   setCardDependencies: (input) =>
     invoke<CardDependency[]>('set_card_dependencies', { input }),
+  createCustomField: (input) => invoke<CustomField>('create_custom_field', { input }),
+  updateCustomField: (input) => invoke<CustomField>('update_custom_field', { input }),
+  deleteCustomField: (input) => invoke<void>('delete_custom_field', { input }),
+  setCardFieldValues: (input) =>
+    invoke<CardFieldValue[]>('set_card_field_values', { input }),
   exportBackup: () => invoke<BackupExport>('export_backup'),
   importBackup: (json) => invoke<BackupSummary>('import_backup', { input: { json } }),
   getStorageInfo: () => invoke<StorageInfo>('get_storage_info'),
@@ -667,6 +688,8 @@ function loadLocalDb(): LocalDb {
       projectRoles: [],
       recurrences: [],
       automationRules: [],
+      customFields: [],
+      cardFieldValues: [],
       cardActivity: [],
     };
   }
@@ -690,6 +713,8 @@ function loadLocalDb(): LocalDb {
         projectRoles: [],
       recurrences: [],
       automationRules: [],
+      customFields: [],
+      cardFieldValues: [],
       cardActivity: [],
       };
     }
@@ -879,6 +904,44 @@ function loadLocalDb(): LocalDb {
             )
             .map(normalizeAutomationRule)
         : [],
+      customFields: Array.isArray(parsed.customFields)
+        ? parsed.customFields
+            .filter(
+              (item): item is CustomField =>
+                Boolean(item) &&
+                typeof item.id === 'string' &&
+                typeof item.boardId === 'string' &&
+                (item.fieldType === 'select' || item.fieldType === 'number'),
+            )
+            .map((item) => ({
+              ...item,
+              name: typeof item.name === 'string' ? item.name : '未命名字段',
+              options: Array.isArray(item.options)
+                ? item.options.filter(
+                    (option): option is CustomFieldOption =>
+                      Boolean(option) && typeof option.id === 'string',
+                  )
+                : [],
+              sortOrder: typeof item.sortOrder === 'number' ? item.sortOrder : 0,
+            }))
+        : [],
+      cardFieldValues: Array.isArray(parsed.cardFieldValues)
+        ? parsed.cardFieldValues
+            .filter(
+              (item): item is CardFieldValue =>
+                Boolean(item) &&
+                typeof item.cardId === 'string' &&
+                typeof item.fieldId === 'string',
+            )
+            .map((item) => ({
+              ...item,
+              valueText: typeof item.valueText === 'string' ? item.valueText : null,
+              valueNumber:
+                typeof item.valueNumber === 'number' && Number.isFinite(item.valueNumber)
+                  ? item.valueNumber
+                  : null,
+            }))
+        : [],
       cardActivity: Array.isArray(parsed.cardActivity)
         ? parsed.cardActivity
             .filter(
@@ -908,6 +971,8 @@ function loadLocalDb(): LocalDb {
       projectRoles: [],
       recurrences: [],
       automationRules: [],
+      customFields: [],
+      cardFieldValues: [],
       cardActivity: [],
     };
   }
@@ -1124,6 +1189,43 @@ function dependencyReaches(
   return false;
 }
 
+/** 规整自定义字段的选项列表：单选至少一项，数值字段不允许带选项。 */
+function normalizeLocalFieldOptions(
+  fieldType: CustomFieldType,
+  raw: CustomFieldOption[],
+): CustomFieldOption[] {
+  if (fieldType === 'number') {
+    if (raw.length > 0) throw new Error('数值字段不支持选项');
+    return [];
+  }
+  const options: CustomFieldOption[] = [];
+  for (const option of raw) {
+    const id = option.id.trim();
+    if (!id) continue;
+    if (options.some((item) => item.id === id)) continue;
+    options.push({
+      id,
+      label: option.label.trim() || id,
+      color: option.color.trim() || '#64748b',
+    });
+  }
+  if (options.length === 0) throw new Error('单选字段至少需要一个选项');
+  return options;
+}
+
+function requireCustomField(db: LocalDb, id: string): CustomField {
+  const field = db.customFields.find((item) => item.id === id);
+  if (!field) throw new Error('自定义字段不存在：' + id);
+  return field;
+}
+
+/** 清理已删除任务残留的字段取值，避免留下孤儿行。 */
+function pruneCardFieldValues(db: LocalDb, removedCardIds: Set<string>): void {
+  db.cardFieldValues = db.cardFieldValues.filter(
+    (value) => !removedCardIds.has(value.cardId),
+  );
+}
+
 const localApi: TidelineApi = {
   async getSnapshot() {
     const db = loadLocalDb();
@@ -1170,6 +1272,15 @@ const localApi: TidelineApi = {
       ),
       automationRules: [...db.automationRules].sort((a, b) =>
         a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+      ),
+      customFields: [...db.customFields].sort(
+        (a, b) =>
+          a.boardId.localeCompare(b.boardId) ||
+          a.sortOrder - b.sortOrder ||
+          a.createdAt.localeCompare(b.createdAt),
+      ),
+      cardFieldValues: [...db.cardFieldValues].sort((a, b) =>
+        `${a.cardId}:${a.fieldId}`.localeCompare(`${b.cardId}:${b.fieldId}`),
       ),
     };
   },
@@ -1223,6 +1334,7 @@ const localApi: TidelineApi = {
       cardIds: goal.cardIds.filter((cardId) => !removedCardIds.has(cardId)),
     }));
     pruneDependencies(db, removedCardIds);
+    pruneCardFieldValues(db, removedCardIds);
     saveLocalDb(db);
   },
 
@@ -1267,6 +1379,7 @@ const localApi: TidelineApi = {
     db.lists = db.lists.filter((l) => l.id !== id);
     db.cards = db.cards.filter((c) => c.listId !== id);
     pruneDependencies(db, removedCardIds);
+    pruneCardFieldValues(db, removedCardIds);
     normalizeListPositions(db, list.boardId);
     touchBoard(db, list.boardId);
     saveLocalDb(db);
@@ -1359,6 +1472,7 @@ const localApi: TidelineApi = {
     card.updatedAt = card.deletedAt;
     pushActivity(db, { cardId: card.id, eventType: 'deleted' });
     pruneDependencies(db, new Set([card.id]));
+    pruneCardFieldValues(db, new Set([card.id]));
     normalizePositions(db, card.listId);
     touchBoard(db, card.boardId);
     saveLocalDb(db);
@@ -1395,6 +1509,7 @@ const localApi: TidelineApi = {
     const db = loadLocalDb();
     db.cards = db.cards.filter((card) => card.id !== id);
     pruneDependencies(db, new Set([id]));
+    pruneCardFieldValues(db, new Set([id]));
     pruneGoalCards(db, new Set([id]));
     saveLocalDb(db);
   },
@@ -1478,6 +1593,118 @@ const localApi: TidelineApi = {
       dependsOnCardId: relation.id,
       relationType: relation.type,
     }));
+  },
+
+  /* ---------- 自定义字段（V0.13.0） ---------- */
+
+  async createCustomField(input) {
+    const db = loadLocalDb();
+    requireBoard(db, input.boardId);
+    const name = input.name.trim() || '未命名字段';
+    if (db.customFields.some((f) => f.boardId === input.boardId && f.name === name)) {
+      throw new Error('该看板已存在同名字段');
+    }
+    const options = normalizeLocalFieldOptions(input.fieldType, input.options ?? []);
+    const now = nowISO();
+    const field: CustomField = {
+      id: createId('cf'),
+      boardId: input.boardId,
+      name,
+      fieldType: input.fieldType,
+      options,
+      sortOrder: db.customFields.filter((f) => f.boardId === input.boardId).length,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.customFields.push(field);
+    touchBoard(db, input.boardId);
+    saveLocalDb(db);
+    return field;
+  },
+
+  async updateCustomField({ id, patch }) {
+    const db = loadLocalDb();
+    const field = requireCustomField(db, id);
+    if (patch.name !== undefined) {
+      const name = patch.name.trim() || '未命名字段';
+      if (
+        db.customFields.some(
+          (item) => item.id !== id && item.boardId === field.boardId && item.name === name,
+        )
+      ) {
+        throw new Error('该看板已存在同名字段');
+      }
+      field.name = name;
+    }
+    if (patch.options !== undefined) {
+      const options = normalizeLocalFieldOptions(field.fieldType, patch.options);
+      const kept = new Set(options.map((option) => option.id));
+      // 被移除的选项不再合法，指向它们的取值一并清理
+      db.cardFieldValues = db.cardFieldValues.filter(
+        (value) =>
+          value.fieldId !== field.id ||
+          value.valueText === null ||
+          kept.has(value.valueText),
+      );
+      field.options = options;
+    }
+    if (patch.sortOrder !== undefined) field.sortOrder = patch.sortOrder;
+    field.updatedAt = nowISO();
+    touchBoard(db, field.boardId);
+    saveLocalDb(db);
+    return field;
+  },
+
+  async deleteCustomField({ id }) {
+    const db = loadLocalDb();
+    const field = requireCustomField(db, id);
+    db.cardFieldValues = db.cardFieldValues.filter((value) => value.fieldId !== field.id);
+    db.customFields = db.customFields.filter((item) => item.id !== field.id);
+    touchBoard(db, field.boardId);
+    saveLocalDb(db);
+  },
+
+  async setCardFieldValues({ cardId, values }) {
+    const db = loadLocalDb();
+    const card = requireCard(db, cardId);
+    if (card.deletedAt) throw new Error('回收站中的任务不能设置字段值');
+    const seen = new Set<string>();
+    for (const item of values) {
+      if (seen.has(item.fieldId)) throw new Error('同一字段不能重复赋值');
+      seen.add(item.fieldId);
+      const field = requireCustomField(db, item.fieldId);
+      if (field.boardId !== card.boardId) throw new Error('不能给其它看板的任务设置字段值');
+      const hasText = item.valueText !== undefined && item.valueText !== null;
+      const hasNumber = item.valueNumber !== undefined && item.valueNumber !== null;
+      if (field.fieldType === 'select') {
+        if (hasNumber) throw new Error('单选字段只能保存选项');
+        if (hasText && !field.options.some((option) => option.id === item.valueText)) {
+          throw new Error('选项不存在：' + item.valueText);
+        }
+      } else if (field.fieldType === 'number') {
+        if (hasText) throw new Error('数值字段只能保存数字');
+        if (hasNumber && !Number.isFinite(item.valueNumber as number)) {
+          throw new Error('数值字段必须是有限数字');
+        }
+      }
+    }
+    for (const item of values) {
+      db.cardFieldValues = db.cardFieldValues.filter(
+        (value) => !(value.cardId === card.id && value.fieldId === item.fieldId),
+      );
+      const hasText = item.valueText !== undefined && item.valueText !== null;
+      const hasNumber = item.valueNumber !== undefined && item.valueNumber !== null;
+      if (!hasText && !hasNumber) continue;
+      db.cardFieldValues.push({
+        cardId: card.id,
+        fieldId: item.fieldId,
+        valueText: hasText ? (item.valueText as string) : null,
+        valueNumber: hasNumber ? (item.valueNumber as number) : null,
+      });
+    }
+    touchBoard(db, card.boardId);
+    saveLocalDb(db);
+    return db.cardFieldValues.filter((value) => value.cardId === card.id);
   },
 
   async addInboxItem({ content }) {
@@ -1580,6 +1807,8 @@ const localApi: TidelineApi = {
       recurrences: backup.recurrences,
       automationRules: backup.automationRules,
       cardActivity: backup.cardActivity,
+      customFields: backup.customFields,
+      cardFieldValues: backup.cardFieldValues,
       notificationSettings: DEFAULT_NOTIFICATION_SETTINGS,
     });
     return summarizeBackup(backup);

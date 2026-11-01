@@ -42,6 +42,8 @@ pub fn build(conn: &Connection) -> Result<BackupFile, String> {
         recurrences: crate::automation::get_recurrences(conn)?,
         automation_rules: crate::automation::get_automation_rules(conn)?,
         card_activity: crate::automation::get_all_card_activity(conn)?,
+        custom_fields: repo::get_all_custom_fields(conn)?,
+        card_field_values: repo::get_all_card_field_values(conn)?,
     })
 }
 
@@ -66,6 +68,8 @@ impl BackupFile {
             recurrences: self.recurrences.len(),
             automation_rules: self.automation_rules.len(),
             card_activity: self.card_activity.len(),
+            custom_fields: self.custom_fields.len(),
+            card_field_values: self.card_field_values.len(),
         }
     }
 }
@@ -587,6 +591,119 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         }
     }
 
+    // V0.13.0：自定义字段与任务字段取值。
+    let mut custom_field_ids = HashSet::new();
+    let mut custom_field_types: HashMap<&str, CustomFieldType> = HashMap::new();
+    let mut custom_field_options: HashMap<&str, HashSet<&str>> = HashMap::new();
+    let mut custom_field_boards: HashMap<&str, &str> = HashMap::new();
+    let mut custom_field_names: HashMap<&str, HashSet<&str>> = HashMap::new();
+    for field in &backup.custom_fields {
+        if field.id.trim().is_empty() {
+            return Err("备份中存在空的自定义字段 id".to_string());
+        }
+        if !custom_field_ids.insert(field.id.as_str()) {
+            return Err(format!("备份中存在重复的自定义字段 id：{}", field.id));
+        }
+        if !board_ids.contains(field.board_id.as_str()) {
+            return Err(format!("自定义字段「{}」引用了不存在的看板", field.name));
+        }
+        let name = field.name.trim();
+        if name.is_empty() {
+            return Err("备份中存在未命名的自定义字段".to_string());
+        }
+        let names = custom_field_names.entry(field.board_id.as_str()).or_default();
+        if !names.insert(name) {
+            return Err(format!("看板中存在同名的自定义字段：{name}"));
+        }
+        let mut option_ids = HashSet::new();
+        for option in &field.options {
+            if option.id.trim().is_empty() {
+                return Err(format!("自定义字段「{name}」中存在空的选项 id"));
+            }
+            if !option_ids.insert(option.id.as_str()) {
+                return Err(format!(
+                    "自定义字段「{name}」中存在重复的选项 id：{}",
+                    option.id
+                ));
+            }
+            if option.label.trim().is_empty() {
+                return Err(format!("自定义字段「{name}」中存在未命名的选项"));
+            }
+        }
+        match field.field_type {
+            CustomFieldType::Select => {
+                if field.options.is_empty() {
+                    return Err(format!("单选自定义字段「{name}」缺少选项"));
+                }
+            }
+            CustomFieldType::Number => {
+                if !field.options.is_empty() {
+                    return Err(format!("数值自定义字段「{name}」不应带选项"));
+                }
+            }
+        }
+        custom_field_types.insert(field.id.as_str(), field.field_type);
+        custom_field_options.insert(field.id.as_str(), option_ids);
+        custom_field_boards.insert(field.id.as_str(), field.board_id.as_str());
+    }
+
+    let mut card_field_value_keys = HashSet::new();
+    for value in &backup.card_field_values {
+        if !card_ids.contains(value.card_id.as_str()) {
+            return Err(format!("字段值引用了不存在的任务：{}", value.card_id));
+        }
+        let Some(field_type) = custom_field_types.get(value.field_id.as_str()) else {
+            return Err(format!("字段值引用了不存在的自定义字段：{}", value.field_id));
+        };
+        if !card_field_value_keys.insert((value.card_id.as_str(), value.field_id.as_str())) {
+            return Err(format!(
+                "备份中存在重复的任务字段值：{} / {}",
+                value.card_id, value.field_id
+            ));
+        }
+        let field_board = custom_field_boards
+            .get(value.field_id.as_str())
+            .copied()
+            .unwrap_or_default();
+        let card_board_id = card_board
+            .get(value.card_id.as_str())
+            .copied()
+            .unwrap_or_default();
+        if field_board != card_board_id {
+            return Err("任务字段值与自定义字段不属于同一看板".to_string());
+        }
+        match field_type {
+            CustomFieldType::Select => {
+                let Some(option_id) = value.value_text.as_deref() else {
+                    return Err("单选自定义字段的字段值缺少选项".to_string());
+                };
+                let option_exists = custom_field_options
+                    .get(value.field_id.as_str())
+                    .map(|options| options.contains(option_id))
+                    .unwrap_or(false);
+                if !option_exists {
+                    return Err(format!(
+                        "单选自定义字段的字段值引用了不存在的选项：{option_id}"
+                    ));
+                }
+                if value.value_number.is_some() {
+                    return Err("单选自定义字段的字段值不应包含数值".to_string());
+                }
+            }
+            CustomFieldType::Number => {
+                if value.value_text.is_some() {
+                    return Err("数值自定义字段的字段值不应包含文本".to_string());
+                }
+                let Some(number) = value.value_number else {
+                    return Err("数值自定义字段的字段值缺少数值".to_string());
+                };
+                if !number.is_finite() {
+                    return Err("数值自定义字段的字段值必须是有限数".to_string());
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -597,7 +714,9 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
     let backup = &normalized;
     validate(backup)?;
     let tx = conn.transaction().map_err(|error| format!("恢复失败：{error}"))?;
-    tx.execute("DELETE FROM recurrence_runs", [])
+    tx.execute("DELETE FROM card_field_values", [])
+        .and_then(|_| tx.execute("DELETE FROM custom_fields", []))
+        .and_then(|_| tx.execute("DELETE FROM recurrence_runs", []))
         .and_then(|_| tx.execute("DELETE FROM card_activity", []))
         .and_then(|_| tx.execute("DELETE FROM recurrences", []))
         .and_then(|_| tx.execute("DELETE FROM automation_rules", []))
@@ -692,6 +811,27 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
         .map_err(|error| format!("写入看板「{}」失败：{error}", board.title))?;
     }
 
+    for field in &backup.custom_fields {
+        let options_json = serde_json::to_string(&field.options)
+            .map_err(|error| format!("字段选项序列化失败：{error}"))?;
+        tx.execute(
+            "INSERT INTO custom_fields \
+             (id, board_id, name, field_type, options_json, sort_order, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &field.id,
+                &field.board_id,
+                &field.name,
+                field.field_type.as_str(),
+                options_json,
+                field.sort_order,
+                &field.created_at,
+                &field.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入自定义字段「{}」失败：{error}", field.name))?;
+    }
+
     for list in &backup.lists {
         tx.execute(
             "INSERT INTO lists (id, board_id, title, color, wip_limit, position, created_at) \
@@ -744,6 +884,25 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
             ],
         )
         .map_err(|error| format!("写入任务「{}」失败：{error}", card.title))?;
+    }
+
+    for value in &backup.card_field_values {
+        tx.execute(
+            "INSERT INTO card_field_values (card_id, field_id, value_text, value_number) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                &value.card_id,
+                &value.field_id,
+                &value.value_text,
+                &value.value_number,
+            ],
+        )
+        .map_err(|error| {
+            format!(
+                "写入任务字段值失败（{} / {}）：{error}",
+                value.card_id, value.field_id
+            )
+        })?;
     }
 
     for recurrence in &backup.recurrences {
@@ -987,7 +1146,9 @@ mod tests {
     use super::*;
     use crate::db;
     use crate::models::{
-        IdInput, NewBoardInput, NewCardInput, NewListInput, Priority, SetDependenciesInput,
+        CardFieldValueInput, CustomField, CustomFieldOption, CustomFieldType, IdInput,
+        NewBoardInput, NewCardInput, NewCustomFieldInput, NewListInput, Priority,
+        SetCardFieldValuesInput, SetDependenciesInput,
     };
 
     fn seed(conn: &mut Connection) -> Card {
@@ -1174,6 +1335,8 @@ mod tests {
             recurrences: Vec::new(),
             automation_rules: Vec::new(),
             card_activity: Vec::new(),
+            custom_fields: Vec::new(),
+            card_field_values: Vec::new(),
         };
         let summary = restore(&mut conn, &empty).expect("恢复空备份");
         assert_eq!(summary.cards, 0);
@@ -1457,5 +1620,73 @@ mod tests {
         assert_eq!(snapshot.member_tenures[0].ended_at, None);
         assert_eq!(snapshot.overtime_records[0].member_id, member.id);
         assert_eq!(snapshot.performance_records[0].member_id, member.id);
+    }
+
+    #[test]
+    fn custom_fields_round_trip_through_backup() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        let card = seed(&mut conn);
+        let field = repo::create_custom_field(
+            &mut conn,
+            NewCustomFieldInput {
+                board_id: card.board_id.clone(),
+                name: "优先级".to_string(),
+                field_type: CustomFieldType::Select,
+                options: vec![CustomFieldOption {
+                    id: "opt_high".to_string(),
+                    label: "高".to_string(),
+                    color: "#0f766e".to_string(),
+                }],
+            },
+        )
+        .expect("创建自定义字段");
+        repo::set_card_field_values(
+            &mut conn,
+            SetCardFieldValuesInput {
+                card_id: card.id.clone(),
+                values: vec![CardFieldValueInput {
+                    field_id: field.id.clone(),
+                    value_text: Some("opt_high".to_string()),
+                    value_number: None,
+                }],
+            },
+        )
+        .expect("写入字段取值");
+
+        let backup = build(&conn).expect("构建备份");
+        assert_eq!(backup.summary().custom_fields, 1);
+        assert_eq!(backup.summary().card_field_values, 1);
+
+        let restored = restore(&mut conn, &backup).expect("恢复备份");
+        assert_eq!(restored.custom_fields, 1);
+        assert_eq!(restored.card_field_values, 1);
+
+        let snapshot = repo::get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.custom_fields.len(), 1);
+        assert_eq!(snapshot.custom_fields[0].options.len(), 1);
+        assert_eq!(snapshot.card_field_values.len(), 1);
+        assert_eq!(
+            snapshot.card_field_values[0].value_text.as_deref(),
+            Some("opt_high")
+        );
+    }
+
+    #[test]
+    fn backup_with_dangling_custom_field_is_rejected() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        seed(&mut conn);
+        let mut backup = build(&conn).expect("构建备份");
+        backup.custom_fields.push(CustomField {
+            id: "cf_missing".to_string(),
+            board_id: "board_missing".to_string(),
+            name: "缺失看板字段".to_string(),
+            field_type: CustomFieldType::Number,
+            options: Vec::new(),
+            sort_order: 0,
+            created_at: "2026-11-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-11-01T00:00:00.000Z".to_string(),
+        });
+        let error = validate(&backup).expect_err("引用不存在看板的字段应被拒绝");
+        assert!(error.contains("引用了不存在的看板"));
     }
 }

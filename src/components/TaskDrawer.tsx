@@ -20,7 +20,9 @@ import {
   RELATION_META,
   relationMeta,
   type Card,
+  type CardFieldValue,
   type CardPatch,
+  type CustomField,
   type Priority,
   type RelationType,
 } from '@/lib/types';
@@ -49,6 +51,7 @@ export function TaskDrawer() {
   const updateBoard = useAppStore((state) => state.updateBoard);
   const deleteCard = useAppStore((state) => state.deleteCard);
   const setDependencies = useAppStore((state) => state.setDependencies);
+  const setCardFieldValues = useAppStore((state) => state.setCardFieldValues);
 
   const card = useMemo(
     () => snapshot.cards.find((item) => item.id === editingCardId),
@@ -66,6 +69,35 @@ export function TaskDrawer() {
     () => (card ? snapshot.goals.filter((goal) => goal.cardIds.includes(card.id)) : []),
     [snapshot.goals, card],
   );
+  /** 当前看板定义的自定义字段（按展示顺序） */
+  const boardFields = useMemo(
+    () =>
+      snapshot.customFields
+        .filter((field) => field.boardId === card?.boardId)
+        .sort((a, b) => a.sortOrder - b.sortOrder),
+    [snapshot.customFields, card?.boardId],
+  );
+
+  /** 本张任务在自定义字段上的取值，键为字段 id */
+  const fieldValueMap = useMemo(() => {
+    const map = new Map<string, CardFieldValue>();
+    for (const value of snapshot.cardFieldValues) {
+      if (value.cardId === card?.id) map.set(value.fieldId, value);
+    }
+    return map;
+  }, [snapshot.cardFieldValues, card?.id]);
+
+  /** 写入单个字段的取值：单选存选项 id，数值存数字，空值表示清空 */
+  const changeFieldValue = (field: CustomField, next: string | number | null) => {
+    if (!card) return;
+    void setCardFieldValues(card.id, [
+      {
+        fieldId: field.id,
+        valueText: field.fieldType === 'select' ? (next as string | null) : null,
+        valueNumber: field.fieldType === 'number' ? (next as number | null) : null,
+      },
+    ]);
+  };
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -154,9 +186,6 @@ export function TaskDrawer() {
   const unfinishedBlockers = blockers.filter((blocker) => !blocker.completed);
   // V0.12：全部关系（前置 / 相关 / 重复），按目标 id 索引便于统一增删。
   const relations = snapshot.dependencies.filter((item) => item.cardId === card.id);
-  const relationTargets = new Map(
-    relations.map((item) => [item.dependsOnCardId, relationTypeOf(item)]),
-  );
   const relationRows = relations
     .map((item) => ({
       id: item.dependsOnCardId,
@@ -742,6 +771,64 @@ export function TaskDrawer() {
               <p className="td-dependency-empty">当前没有可关联的任务。</p>
             )}
           </div>
+
+          {boardFields.length > 0 ? (
+            <div className="td-section">
+              <div className="td-section-head">
+                <div className="drawer-section-title">
+                  <Icon name="sliders" size={13} />
+                  自定义字段
+                </div>
+              </div>
+              <div className="td-custom-fields">
+                {boardFields.map((field) => {
+                  const current = fieldValueMap.get(field.id);
+                  return (
+                    <label className="td-custom-field" key={field.id}>
+                      <span className="td-custom-field-name" title={field.name}>
+                        {field.name}
+                      </span>
+                      {field.fieldType === 'select' ? (
+                        <select
+                          className="td-custom-field-select"
+                          value={current?.valueText ?? ''}
+                          aria-label={`${field.name} 取值`}
+                          onChange={(event) =>
+                            changeFieldValue(field, event.target.value || null)
+                          }
+                        >
+                          <option value="">未设置</option>
+                          {field.options.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="td-custom-field-input"
+                          type="number"
+                          value={current?.valueNumber ?? ''}
+                          placeholder="未设置"
+                          aria-label={`${field.name} 取值`}
+                          onChange={(event) => {
+                            const raw = event.target.value.trim();
+                            if (raw === '') {
+                              changeFieldValue(field, null);
+                              return;
+                            }
+                            const parsed = Number(raw);
+                            if (!Number.isFinite(parsed)) return;
+                            changeFieldValue(field, parsed);
+                          }}
+                        />
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           <div className="td-section">
             <div className="td-section-head">

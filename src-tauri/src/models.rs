@@ -657,6 +657,75 @@ pub struct PerformanceRecord {
     pub created_at: String,
 }
 
+// ---------------------------------------------------------------------------
+// 自定义字段（V0.13.0）
+// ---------------------------------------------------------------------------
+
+/// 自定义字段类型（V0.13.0）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CustomFieldType {
+    /// 单选下拉：值是选项 id
+    Select,
+    /// 数值
+    Number,
+}
+
+impl CustomFieldType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Select => "select",
+            Self::Number => "number",
+        }
+    }
+
+    /// 从数据库文本还原类型；遇到脏数据返回 `None`，由调用方兜底。
+    pub fn from_db(raw: &str) -> Option<Self> {
+        match raw {
+            "select" => Some(Self::Select),
+            "number" => Some(Self::Number),
+            _ => None,
+        }
+    }
+}
+
+/// 自定义字段的一个选项
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomFieldOption {
+    pub id: String,
+    pub label: String,
+    /// 十六进制颜色，例如 "#0f766e"
+    pub color: String,
+}
+
+/// 自定义字段定义（按看板隔离）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomField {
+    pub id: String,
+    pub board_id: String,
+    pub name: String,
+    pub field_type: CustomFieldType,
+    /// 仅 select 类型有选项；number 类型恒为空数组
+    pub options: Vec<CustomFieldOption>,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 某张任务在某个字段上的取值
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardFieldValue {
+    pub card_id: String,
+    pub field_id: String,
+    /// select 字段存选项 id；number 字段恒为 null
+    pub value_text: Option<String>,
+    /// number 字段存数字；select 字段恒为 null
+    pub value_number: Option<f64>,
+}
+
 /// 启动时一次性拉取的全量快照。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -699,6 +768,12 @@ pub struct Snapshot {
     /// 本地规则（V0.11）。
     #[serde(default)]
     pub automation_rules: Vec<AutomationRule>,
+    /// 自定义字段定义（V0.13.0）。
+    #[serde(default)]
+    pub custom_fields: Vec<CustomField>,
+    /// 任务在自定义字段上的取值（V0.13.0）。
+    #[serde(default)]
+    pub card_field_values: Vec<CardFieldValue>,
 }
 
 // ---------------------------------------------------------------------------
@@ -752,6 +827,12 @@ pub struct BackupFile {
     /// V0.11 新增；旧备份没有该字段时按空活动日志处理。
     #[serde(default)]
     pub card_activity: Vec<CardActivity>,
+    /// V0.13.0 新增；旧备份没有该字段时按空自定义字段处理。
+    #[serde(default)]
+    pub custom_fields: Vec<CustomField>,
+    /// V0.13.0 新增；旧备份没有该字段时按空字段值处理。
+    #[serde(default)]
+    pub card_field_values: Vec<CardFieldValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -789,6 +870,12 @@ pub struct BackupSummary {
     pub automation_rules: usize,
     #[serde(default)]
     pub card_activity: usize,
+    /// V0.13.0 新增。
+    #[serde(default)]
+    pub custom_fields: usize,
+    /// V0.13.0 新增。
+    #[serde(default)]
+    pub card_field_values: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1295,6 +1382,57 @@ pub struct PerformancePatch {
 pub struct UpdatePerformanceInput {
     pub id: String,
     pub patch: PerformancePatch,
+}
+
+/// 新建自定义字段的入参（V0.13.0）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewCustomFieldInput {
+    pub board_id: String,
+    pub name: String,
+    pub field_type: CustomFieldType,
+    /// select 类型必填且至少一项；number 类型必须为空
+    #[serde(default)]
+    pub options: Vec<CustomFieldOption>,
+}
+
+/// 修改自定义字段的入参（V0.13.0）。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomFieldPatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 传入则整体替换选项列表
+    #[serde(default)]
+    pub options: Option<Vec<CustomFieldOption>>,
+    #[serde(default)]
+    pub sort_order: Option<i64>,
+}
+
+/// 更新自定义字段的入参（V0.13.0）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCustomFieldInput {
+    pub id: String,
+    pub patch: CustomFieldPatch,
+}
+
+/// 设置某张任务在一组字段上的取值；同一字段只保留一个值（V0.13.0）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCardFieldValuesInput {
+    pub card_id: String,
+    pub values: Vec<CardFieldValueInput>,
+}
+
+/// 单个字段取值的入参（V0.13.0）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardFieldValueInput {
+    pub field_id: String,
+    /// select 字段存选项 id，number 字段存数字；两者都为 null 表示清空该字段
+    pub value_text: Option<String>,
+    pub value_number: Option<f64>,
 }
 
 /// 从磁盘读取的需求文档（V0.9）。

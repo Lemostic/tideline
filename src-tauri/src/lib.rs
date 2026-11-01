@@ -62,6 +62,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_snapshot,
+            commands::create_custom_field,
+            commands::update_custom_field,
+            commands::delete_custom_field,
+            commands::set_card_field_values,
             commands::create_board,
             commands::update_board,
             commands::delete_board,

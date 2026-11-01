@@ -25,6 +25,47 @@ pub fn get_snapshot(db: State<'_, Db>) -> CmdResult<Snapshot> {
     repo::get_snapshot(&conn)
 }
 
+// ---------------------------------------------------------------------------
+// 自定义字段（V0.13.0）
+// ---------------------------------------------------------------------------
+
+/// 新建自定义字段。
+#[tauri::command]
+pub fn create_custom_field(
+    db: State<'_, Db>,
+    input: NewCustomFieldInput,
+) -> CmdResult<CustomField> {
+    let mut conn = db.lock()?;
+    repo::create_custom_field(&mut conn, input)
+}
+
+/// 修改自定义字段：传入 options 时整体替换选项列表。
+#[tauri::command]
+pub fn update_custom_field(
+    db: State<'_, Db>,
+    input: UpdateCustomFieldInput,
+) -> CmdResult<CustomField> {
+    let mut conn = db.lock()?;
+    repo::update_custom_field(&mut conn, input)
+}
+
+/// 删除自定义字段，并清理它在任务上的取值。
+#[tauri::command]
+pub fn delete_custom_field(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_custom_field(&mut conn, input)
+}
+
+/// 设置某张任务在一组字段上的取值，返回该任务当前的全部字段值。
+#[tauri::command]
+pub fn set_card_field_values(
+    db: State<'_, Db>,
+    input: SetCardFieldValuesInput,
+) -> CmdResult<Vec<CardFieldValue>> {
+    let mut conn = db.lock()?;
+    repo::set_card_field_values(&mut conn, input)
+}
+
 #[tauri::command]
 pub fn create_board(db: State<'_, Db>, input: NewBoardInput) -> CmdResult<Board> {
     let mut conn = db.lock()?;

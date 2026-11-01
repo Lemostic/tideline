@@ -6,7 +6,7 @@
 //! V0.2 起任务表新增 `start_date / labels / subtasks` 三列，V0.3 再新增 `deleted_at`
 //! 软删除列：新库直接按最新结构建表，旧库（V0.1 / V0.2 已有用户数据）在启动时按列存在性
 //! 做幂等 `ALTER TABLE` 迁移，不重建表。V0.4 新增 `card_dependencies` 依赖表。
-//! 迁移完成后写入 `PRAGMA user_version = 15`。
+//! 迁移完成后写入 `PRAGMA user_version = 16`。
 //!
 //! V0.12 起 `card_dependencies` 增加 `relation_type` 列（任务关系类型），
 //! 旧库按「前置阻塞」补齐，不丢已有依赖。
@@ -14,6 +14,10 @@
 //! V0.10 新增「桌面软件使用统计」三张表：`usage_apps`（应用清单与勾选状态）、
 //! `usage_daily`（按日聚合的使用秒数）、`usage_settings`（暂停开关与空闲阈值）。
 //! 这三张表不建外键：应用清单与统计数据互相独立，清空统计记录不会影响应用清单。
+//!
+//! V0.13.0 新增自定义字段两张表：`custom_fields`（看板级字段定义，选项以 JSON 文本存放）
+//! 与 `card_field_values`（任务在字段上的取值）。两张表都是新表，靠
+//! `CREATE TABLE IF NOT EXISTS` 在每次开库时补齐，旧库无需列迁移。
 
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
@@ -355,6 +359,27 @@ CREATE TABLE IF NOT EXISTS notification_deliveries (
     PRIMARY KEY (kind, day, card_id)
 );
 
+-- V0.13.0 自定义字段：按看板隔离的字段定义，选项列表以 JSON 数组文本存放
+CREATE TABLE IF NOT EXISTS custom_fields (
+    id           TEXT PRIMARY KEY NOT NULL,
+    board_id     TEXT NOT NULL REFERENCES boards (id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    field_type   TEXT NOT NULL CHECK (field_type IN ('select', 'number')),
+    options_json TEXT NOT NULL DEFAULT '[]',
+    sort_order   INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+-- V0.13.0 任务字段取值：同一任务在同一字段上只保留一个值
+CREATE TABLE IF NOT EXISTS card_field_values (
+    card_id      TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+    field_id     TEXT NOT NULL REFERENCES custom_fields (id) ON DELETE CASCADE,
+    value_text   TEXT,
+    value_number REAL,
+    PRIMARY KEY (card_id, field_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_lists_board_position ON lists (board_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_list_position ON cards (list_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_board ON cards (board_id);
@@ -376,6 +401,8 @@ CREATE INDEX IF NOT EXISTS idx_usage_daily_day ON usage_daily (day);
 CREATE INDEX IF NOT EXISTS idx_recurrences_card ON recurrences (card_id);
 CREATE INDEX IF NOT EXISTS idx_automation_rules_trigger ON automation_rules (trigger, enabled);
 CREATE INDEX IF NOT EXISTS idx_card_activity_card ON card_activity (card_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_custom_fields_board ON custom_fields (board_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_card_field_values_field ON card_field_values (field_id);
 "#;
 
 /// 打开磁盘数据库（生产路径）。
@@ -409,7 +436,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 15;
+const SCHEMA_VERSION: i64 = 16;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -937,6 +964,49 @@ mod tests {
         assert_eq!(depends_on, "c1");
         assert_eq!(relation_type, "blocks");
 
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user_version");
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    /// V0.13.0：旧库（v15）没有自定义字段两张表时，启动流程幂等补齐，
+    /// 并把 `user_version` 升到 16。
+    #[test]
+    fn v15_database_gains_custom_field_tables() {
+        let connection = Connection::open_in_memory().expect("memory database");
+        // 模拟 v15 旧库：把 V0.13.0 新增的两张表与两个索引从建表语句里剔除。
+        let v15_schema: String = SCHEMA
+            .split(';')
+            .filter(|statement| {
+                !statement.contains("custom_fields") && !statement.contains("card_field_values")
+            })
+            .collect::<Vec<_>>()
+            .join(";\n");
+        connection
+            .execute_batch(&v15_schema)
+            .expect("create v15 schema");
+        connection
+            .execute_batch("PRAGMA user_version = 15;")
+            .expect("set v15 user_version");
+
+        let table_count = |connection: &Connection| -> i64 {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' \
+                     AND name IN ('custom_fields', 'card_field_values')",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("读取表数量")
+        };
+        assert_eq!(table_count(&connection), 0, "v15 旧库不应有自定义字段表");
+
+        // 走一次真实启动流程：建表（CREATE TABLE IF NOT EXISTS）+ 迁移。
+        init(&connection).expect("启动流程应补齐自定义字段表");
+        init(&connection).expect("重复启动应保持幂等");
+
+        assert_eq!(table_count(&connection), 2, "应补齐两张自定义字段表");
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("read user_version");

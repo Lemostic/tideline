@@ -13,10 +13,13 @@ import { toDateKey } from '@/lib/date';
 import type {
   Board,
   BoardPatch,
+  CardFieldValueInput,
   BoardSet,
   BoardSetPatch,
   Card,
   CardPatch,
+  CustomField,
+  CustomFieldPatch,
   Goal,
   GoalPatch,
   InboxItem,
@@ -26,6 +29,7 @@ import type {
   NewBoardInput,
   NewBoardSetInput,
   NewCardInput,
+  NewCustomFieldInput,
   NewGoalInput,
   NewOvertimeInput,
   NewPerformanceInput,
@@ -77,6 +81,8 @@ const EMPTY_SNAPSHOT: Snapshot = {
   projectRoles: [],
   recurrences: [],
   automationRules: [],
+  customFields: [],
+  cardFieldValues: [],
 };
 const SEED_FLAG = 'tideline.seeded';
 
@@ -181,6 +187,16 @@ export interface AppState {
   loadNotificationSettings: () => Promise<NotificationSettings>;
   /** 更新提醒设置 */
   updateNotificationSettings: (patch: NotificationSettingsInput) => Promise<void>;
+
+  /* ---------- 自定义字段（V0.13.0） ---------- */
+  /** 新建自定义字段（按看板隔离） */
+  createCustomField: (input: NewCustomFieldInput) => Promise<CustomField>;
+  /** 修改自定义字段 */
+  updateCustomField: (id: string, patch: CustomFieldPatch) => Promise<void>;
+  /** 删除自定义字段（连带清理取值） */
+  deleteCustomField: (id: string) => Promise<void>;
+  /** 设置某张任务在一组字段上的取值 */
+  setCardFieldValues: (cardId: string, values: CardFieldValueInput[]) => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -290,6 +306,12 @@ export const useAppStore = create<AppState>((set, get) => {
                 (item) => !removedCardIds.has(item.cardId),
               ),
               automationRules: state.snapshot.automationRules,
+              customFields: state.snapshot.customFields.filter(
+                (item) => item.boardId !== id,
+              ),
+              cardFieldValues: state.snapshot.cardFieldValues.filter(
+                (value) => !removedCardIds.has(value.cardId),
+              ),
             },
           };
         });
@@ -1066,6 +1088,65 @@ export const useAppStore = create<AppState>((set, get) => {
     updateNotificationSettings: async (patch) => {
       try {
         await api.setNotificationSettings(patch);
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    /* ---------- 自定义字段（V0.13.0） ---------- */
+
+    createCustomField: async (input) => {
+      try {
+        const field = await api.createCustomField(input);
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            customFields: [...state.snapshot.customFields, field],
+          },
+        }));
+        return field;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateCustomField: async (id, patch) => {
+      try {
+        const field = await api.updateCustomField({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            customFields: state.snapshot.customFields.map((item) =>
+              item.id === id ? field : item,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteCustomField: async (id) => {
+      try {
+        await api.deleteCustomField({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            customFields: state.snapshot.customFields.filter((item) => item.id !== id),
+            cardFieldValues: state.snapshot.cardFieldValues.filter(
+              (value) => value.fieldId !== id,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    setCardFieldValues: async (cardId, values) => {
+      try {
+        await api.setCardFieldValues({ cardId, values });
+        await get().reloadSnapshot();
       } catch (error) {
         fail(error);
       }

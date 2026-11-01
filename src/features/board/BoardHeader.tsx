@@ -23,6 +23,8 @@ interface BoardHeaderProps {
   batchMode: boolean;
   onToggleBatchMode: () => void;
   showDependencyLegend?: boolean;
+  /** 打开看板的自定义字段管理弹窗 */
+  onOpenCustomFields: () => void;
 }
 
 /** 看板头部：主题色点 + 可编辑标题 + 星标 + 更多菜单 + 视图 Tabs */
@@ -35,6 +37,7 @@ export function BoardHeader({
   batchMode,
   onToggleBatchMode,
   showDependencyLegend = false,
+  onOpenCustomFields,
 }: BoardHeaderProps) {
   const navigate = useNavigate();
   const updateBoard = useAppStore((state) => state.updateBoard);
@@ -94,6 +97,13 @@ export function BoardHeader({
               label: '重命名看板',
               icon: 'pencil',
               onSelect: () => setEditingTitle(true),
+            },
+            { kind: 'sep' },
+            {
+              kind: 'item',
+              label: '自定义字段',
+              icon: 'sliders',
+              onSelect: () => onOpenCustomFields(),
             },
             { kind: 'sep' },
             {

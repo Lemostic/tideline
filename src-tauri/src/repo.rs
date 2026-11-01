@@ -12,7 +12,7 @@
 //! - `delete_card` 是软删除（deleted_at），`get_snapshot` 只返回活动卡片，
 //!   回收站通过 `get_trash` 读取，由 `restore_card` / `purge_card` / `empty_trash` 管理。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -356,6 +356,8 @@ pub fn get_snapshot(conn: &Connection) -> DbResult<Snapshot> {
         project_roles: get_all_project_roles(conn)?,
         recurrences: crate::automation::get_recurrences(conn)?,
         automation_rules: crate::automation::get_automation_rules(conn)?,
+        custom_fields: get_all_custom_fields(conn)?,
+        card_field_values: get_all_card_field_values(conn)?,
     })
 }
 
@@ -2765,6 +2767,368 @@ pub fn convert_inbox_item(conn: &mut Connection, input: ConvertInboxInput) -> Db
 }
 
 // ---------------------------------------------------------------------------
+// 自定义字段（V0.13.0）
+// ---------------------------------------------------------------------------
+
+const CUSTOM_FIELD_COLUMNS: &str =
+    "id, board_id, name, field_type, options_json, sort_order, created_at, updated_at";
+
+/// 字段选项数组 → SQLite TEXT（JSON 数组）；序列化失败返回可读错误。
+fn custom_field_options_to_json(options: &[CustomFieldOption]) -> DbResult<String> {
+    serde_json::to_string(options).map_err(|error| format!("字段选项序列化失败：{error}"))
+}
+
+/// SQLite TEXT → 字段选项数组；历史脏数据解析失败时回退空数组。
+fn custom_field_options_from_json(raw: &str) -> Vec<CustomFieldOption> {
+    serde_json::from_str(raw).unwrap_or_default()
+}
+
+fn row_to_custom_field(row: &Row<'_>) -> rusqlite::Result<CustomField> {
+    let raw_type: String = row.get("field_type")?;
+    Ok(CustomField {
+        id: row.get("id")?,
+        board_id: row.get("board_id")?,
+        name: row.get("name")?,
+        // 类型是脏数据时兜底为 select，避免一条脏数据炸掉整份快照
+        field_type: CustomFieldType::from_db(&raw_type).unwrap_or(CustomFieldType::Select),
+        options: custom_field_options_from_json(&row.get::<_, String>("options_json")?),
+        sort_order: row.get("sort_order")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn row_to_card_field_value(row: &Row<'_>) -> rusqlite::Result<CardFieldValue> {
+    Ok(CardFieldValue {
+        card_id: row.get("card_id")?,
+        field_id: row.get("field_id")?,
+        value_text: row.get("value_text")?,
+        value_number: row.get("value_number")?,
+    })
+}
+
+/// 字段名兜底：`trim()` 后为空则用「未命名字段」。
+fn custom_field_name(raw: &str) -> String {
+    fallback_trimmed(raw, "未命名字段")
+}
+
+/// 同一看板内字段名唯一（按 trim 后的字符串精确比较）。
+fn ensure_unique_custom_field_name(
+    conn: &Connection,
+    board_id: &str,
+    name: &str,
+    exclude_id: Option<&str>,
+) -> DbResult<()> {
+    for field in get_custom_fields(conn, board_id)? {
+        if exclude_id == Some(field.id.as_str()) {
+            continue;
+        }
+        if field.name.trim() == name {
+            return Err("该看板已存在同名字段".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// 规范化选项：id 非空且唯一，label 空时兜底「选项 N」，color 空时兜底默认色。
+fn normalize_custom_field_options(
+    options: &[CustomFieldOption],
+) -> DbResult<Vec<CustomFieldOption>> {
+    let mut normalized = Vec::with_capacity(options.len());
+    let mut seen: HashSet<String> = HashSet::new();
+    for (index, option) in options.iter().enumerate() {
+        let id = option.id.trim().to_string();
+        if id.is_empty() {
+            return Err("选项 id 不能为空".to_string());
+        }
+        if !seen.insert(id.clone()) {
+            return Err(format!("选项 id 重复：{id}"));
+        }
+        normalized.push(CustomFieldOption {
+            id,
+            label: fallback_trimmed(&option.label, &format!("选项 {}", index + 1)),
+            color: fallback_trimmed(&option.color, "#64748b"),
+        });
+    }
+    Ok(normalized)
+}
+
+/// 按字段类型校验并规范化选项列表：数值字段不允许带选项，单选字段至少一个选项。
+fn prepare_custom_field_options(
+    field_type: CustomFieldType,
+    options: &[CustomFieldOption],
+) -> DbResult<Vec<CustomFieldOption>> {
+    match field_type {
+        CustomFieldType::Select => {
+            if options.is_empty() {
+                return Err("单选字段至少需要一个选项".to_string());
+            }
+            normalize_custom_field_options(options)
+        }
+        CustomFieldType::Number => {
+            if !options.is_empty() {
+                return Err("数值字段不支持选项".to_string());
+            }
+            Ok(Vec::new())
+        }
+    }
+}
+
+/// 读取某个看板的全部自定义字段（按 sort_order、created_at 排序）。
+pub fn get_custom_fields(conn: &Connection, board_id: &str) -> DbResult<Vec<CustomField>> {
+    let mut statement = conn
+        .prepare(&format!(
+            "SELECT {CUSTOM_FIELD_COLUMNS} FROM custom_fields WHERE board_id = ?1 \
+             ORDER BY sort_order ASC, created_at ASC"
+        ))
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([board_id], row_to_custom_field)
+        .map_err(db_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+}
+
+/// 读取全部自定义字段（快照与备份用）。
+pub fn get_all_custom_fields(conn: &Connection) -> DbResult<Vec<CustomField>> {
+    collect_rows(
+        conn,
+        &format!(
+            "SELECT {CUSTOM_FIELD_COLUMNS} FROM custom_fields \
+             ORDER BY board_id ASC, sort_order ASC, created_at ASC"
+        ),
+        row_to_custom_field,
+    )
+}
+
+/// 读取全部任务字段取值（快照与备份用）。
+pub fn get_all_card_field_values(conn: &Connection) -> DbResult<Vec<CardFieldValue>> {
+    collect_rows(
+        conn,
+        "SELECT card_id, field_id, value_text, value_number FROM card_field_values \
+         ORDER BY card_id ASC, field_id ASC",
+        row_to_card_field_value,
+    )
+}
+
+fn get_custom_field(conn: &Connection, id: &str) -> DbResult<CustomField> {
+    conn.query_row(
+        &format!("SELECT {CUSTOM_FIELD_COLUMNS} FROM custom_fields WHERE id = ?1"),
+        [id],
+        row_to_custom_field,
+    )
+    .optional()
+    .map_err(db_err)?
+    .ok_or_else(|| format!("自定义字段不存在：{id}"))
+}
+
+/// 新建自定义字段：字段名同看板内唯一，选项按类型校验。
+pub fn create_custom_field(
+    conn: &mut Connection,
+    input: NewCustomFieldInput,
+) -> DbResult<CustomField> {
+    let _ = get_board(conn, &input.board_id)?;
+    let name = custom_field_name(&input.name);
+    ensure_unique_custom_field_name(conn, &input.board_id, &name, None)?;
+    let options = prepare_custom_field_options(input.field_type, &input.options)?;
+    let now = now_iso();
+    let sort_order: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM custom_fields WHERE board_id = ?1",
+            [&input.board_id],
+            |row| row.get(0),
+        )
+        .map_err(db_err)?;
+    let field = CustomField {
+        id: create_id("cf"),
+        board_id: input.board_id,
+        name,
+        field_type: input.field_type,
+        options,
+        sort_order,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    conn.execute(
+        "INSERT INTO custom_fields \
+         (id, board_id, name, field_type, options_json, sort_order, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            &field.id,
+            &field.board_id,
+            &field.name,
+            field.field_type.as_str(),
+            custom_field_options_to_json(&field.options)?,
+            field.sort_order,
+            &field.created_at,
+            &field.updated_at,
+        ],
+    )
+    .map_err(db_err)?;
+    Ok(field)
+}
+
+/// 修改自定义字段：传入 options 时整体替换，被移除选项对应的字段值一并清理。
+pub fn update_custom_field(
+    conn: &mut Connection,
+    input: UpdateCustomFieldInput,
+) -> DbResult<CustomField> {
+    let mut field = get_custom_field(conn, &input.id)?;
+    let mut removed_option_ids: Vec<String> = Vec::new();
+    if let Some(name) = input.patch.name {
+        let new_name = custom_field_name(&name);
+        if new_name != field.name {
+            ensure_unique_custom_field_name(conn, &field.board_id, &new_name, Some(&field.id))?;
+        }
+        field.name = new_name;
+    }
+    if let Some(options) = input.patch.options {
+        let normalized = prepare_custom_field_options(field.field_type, &options)?;
+        // 被移除的选项 id：指向它们的字段值要一并删除，避免留下指向已删选项的脏值
+        let kept: HashSet<String> = normalized.iter().map(|option| option.id.clone()).collect();
+        removed_option_ids = field
+            .options
+            .iter()
+            .map(|option| option.id.clone())
+            .filter(|id| !kept.contains(id))
+            .collect();
+        field.options = normalized;
+    }
+    if let Some(sort_order) = input.patch.sort_order {
+        field.sort_order = sort_order;
+    }
+    field.updated_at = now_iso();
+    let options_json = custom_field_options_to_json(&field.options)?;
+    let tx = conn.transaction().map_err(db_err)?;
+    tx.execute(
+        "UPDATE custom_fields SET name = ?1, options_json = ?2, sort_order = ?3, updated_at = ?4 \
+         WHERE id = ?5",
+        params![
+            &field.name,
+            options_json,
+            field.sort_order,
+            &field.updated_at,
+            &field.id
+        ],
+    )
+    .map_err(db_err)?;
+    for option_id in &removed_option_ids {
+        tx.execute(
+            "DELETE FROM card_field_values WHERE field_id = ?1 AND value_text = ?2",
+            params![&field.id, option_id],
+        )
+        .map_err(db_err)?;
+    }
+    tx.commit().map_err(db_err)?;
+    Ok(field)
+}
+
+/// 删除自定义字段：显式清理字段值，旧库外键未生效时也不会留下孤儿行。
+pub fn delete_custom_field(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    let tx = conn.transaction().map_err(db_err)?;
+    tx.execute(
+        "DELETE FROM card_field_values WHERE field_id = ?1",
+        [&input.id],
+    )
+    .map_err(db_err)?;
+    tx.execute("DELETE FROM custom_fields WHERE id = ?1", [&input.id])
+        .map_err(db_err)?;
+    tx.commit().map_err(db_err)?;
+    Ok(())
+}
+
+/// 设置某张任务在一组字段上的取值；返回该任务当前的全部字段值。
+pub fn set_card_field_values(
+    conn: &mut Connection,
+    input: SetCardFieldValuesInput,
+) -> DbResult<Vec<CardFieldValue>> {
+    // 任务必须存在，并取出它所在的看板
+    let card_board_id: String = conn
+        .query_row(
+            "SELECT board_id FROM cards WHERE id = ?1",
+            [&input.card_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(db_err)?
+        .ok_or_else(|| format!("任务不存在：{}", input.card_id))?;
+
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut planned: Vec<(String, Option<String>, Option<f64>)> = Vec::new();
+    for value in &input.values {
+        if !seen.insert(value.field_id.clone()) {
+            return Err(format!("字段重复赋值：{}", value.field_id));
+        }
+        let field = get_custom_field(conn, &value.field_id)?;
+        if field.board_id != card_board_id {
+            return Err("字段不属于任务所在看板".to_string());
+        }
+        match field.field_type {
+            CustomFieldType::Select => {
+                if value.value_number.is_some() {
+                    return Err("单选字段只接受选项 id".to_string());
+                }
+                match value.value_text.as_deref() {
+                    Some(option_id) => {
+                        if !field.options.iter().any(|option| option.id == option_id) {
+                            return Err(format!("选项不存在：{option_id}"));
+                        }
+                        planned.push((field.id.clone(), Some(option_id.to_string()), None));
+                    }
+                    None => planned.push((field.id.clone(), None, None)),
+                }
+            }
+            CustomFieldType::Number => {
+                if value.value_text.is_some() {
+                    return Err("数值字段只接受数字".to_string());
+                }
+                match value.value_number {
+                    Some(number) => {
+                        if !number.is_finite() {
+                            return Err("数值字段必须是有限数".to_string());
+                        }
+                        planned.push((field.id.clone(), None, Some(number)));
+                    }
+                    None => planned.push((field.id.clone(), None, None)),
+                }
+            }
+        }
+    }
+
+    let tx = conn.transaction().map_err(db_err)?;
+    for (field_id, value_text, value_number) in &planned {
+        if value_text.is_none() && value_number.is_none() {
+            // 两个值都为 null 表示清空该字段
+            tx.execute(
+                "DELETE FROM card_field_values WHERE card_id = ?1 AND field_id = ?2",
+                params![&input.card_id, field_id],
+            )
+            .map_err(db_err)?;
+        } else {
+            tx.execute(
+                "INSERT INTO card_field_values (card_id, field_id, value_text, value_number) \
+                 VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT(card_id, field_id) DO UPDATE SET \
+                 value_text = excluded.value_text, value_number = excluded.value_number",
+                params![&input.card_id, field_id, value_text, value_number],
+            )
+            .map_err(db_err)?;
+        }
+    }
+    tx.commit().map_err(db_err)?;
+
+    let mut statement = conn
+        .prepare(
+            "SELECT card_id, field_id, value_text, value_number FROM card_field_values \
+             WHERE card_id = ?1 ORDER BY field_id ASC",
+        )
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([&input.card_id], row_to_card_field_value)
+        .map_err(db_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+}
+
+// ---------------------------------------------------------------------------
 // 单元测试：内存 SQLite，覆盖核心命令、重排、级联与收件箱转换
 // ---------------------------------------------------------------------------
 
@@ -4709,5 +5073,475 @@ mod tests {
         assert!(snapshot.team_members.is_empty());
         assert!(snapshot.overtime_records.is_empty());
         assert!(snapshot.performance_records.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // 自定义字段（V0.13.0）
+    // -----------------------------------------------------------------------
+
+    fn custom_field_option(id: &str, label: &str) -> CustomFieldOption {
+        CustomFieldOption {
+            id: id.to_string(),
+            label: label.to_string(),
+            color: "#0f766e".to_string(),
+        }
+    }
+
+    fn new_custom_field(
+        conn: &mut Connection,
+        board_id: &str,
+        name: &str,
+        field_type: CustomFieldType,
+        options: Vec<CustomFieldOption>,
+    ) -> CustomField {
+        create_custom_field(
+            conn,
+            NewCustomFieldInput {
+                board_id: board_id.to_string(),
+                name: name.to_string(),
+                field_type,
+                options,
+            },
+        )
+        .expect("创建自定义字段失败")
+    }
+
+    fn field_value_input(
+        field_id: &str,
+        value_text: Option<&str>,
+        value_number: Option<f64>,
+    ) -> CardFieldValueInput {
+        CardFieldValueInput {
+            field_id: field_id.to_string(),
+            value_text: value_text.map(|value| value.to_string()),
+            value_number,
+        }
+    }
+
+    fn set_field_values(
+        conn: &mut Connection,
+        card_id: &str,
+        values: Vec<CardFieldValueInput>,
+    ) -> DbResult<Vec<CardFieldValue>> {
+        set_card_field_values(
+            conn,
+            SetCardFieldValuesInput {
+                card_id: card_id.to_string(),
+                values,
+            },
+        )
+    }
+
+    #[test]
+    fn create_select_field_reads_back_options_in_order() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "优先级",
+            CustomFieldType::Select,
+            vec![
+                custom_field_option("opt_high", "高"),
+                custom_field_option("opt_low", "低"),
+            ],
+        );
+        assert_eq!(field.field_type, CustomFieldType::Select);
+
+        let fields = get_custom_fields(&conn, &board.id).expect("读取字段");
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].id, field.id);
+        assert_eq!(fields[0].name, "优先级");
+        assert_eq!(
+            fields[0]
+                .options
+                .iter()
+                .map(|option| option.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["opt_high".to_string(), "opt_low".to_string()]
+        );
+        assert_eq!(fields[0].options[0].label, "高");
+        assert_eq!(fields[0].options[1].color, "#0f766e");
+    }
+
+    #[test]
+    fn create_number_field_keeps_options_empty() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "工时",
+            CustomFieldType::Number,
+            Vec::new(),
+        );
+        assert!(field.options.is_empty());
+        let fields = get_custom_fields(&conn, &board.id).expect("读取字段");
+        assert!(fields[0].options.is_empty());
+    }
+
+    #[test]
+    fn duplicate_field_name_in_same_board_is_rejected() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        new_custom_field(
+            &mut conn,
+            &board.id,
+            "优先级",
+            CustomFieldType::Number,
+            Vec::new(),
+        );
+        let error = create_custom_field(
+            &mut conn,
+            NewCustomFieldInput {
+                board_id: board.id.clone(),
+                name: " 优先级 ".to_string(),
+                field_type: CustomFieldType::Number,
+                options: Vec::new(),
+            },
+        )
+        .expect_err("同看板内的同名字段应被拒绝");
+        assert!(error.contains("该看板已存在同名字段"));
+    }
+
+    #[test]
+    fn same_field_name_allowed_across_boards() {
+        let mut conn = memory_db();
+        let first = new_board(&mut conn, "看板 A");
+        let second = new_board(&mut conn, "看板 B");
+        new_custom_field(
+            &mut conn,
+            &first.id,
+            "优先级",
+            CustomFieldType::Number,
+            Vec::new(),
+        );
+        let field = new_custom_field(
+            &mut conn,
+            &second.id,
+            "优先级",
+            CustomFieldType::Number,
+            Vec::new(),
+        );
+        assert_eq!(field.board_id, second.id);
+        assert_eq!(get_custom_fields(&conn, &first.id).expect("读取字段").len(), 1);
+        assert_eq!(get_custom_fields(&conn, &second.id).expect("读取字段").len(), 1);
+    }
+
+    #[test]
+    fn blank_field_name_falls_back_to_default() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "   ",
+            CustomFieldType::Number,
+            Vec::new(),
+        );
+        assert_eq!(field.name, "未命名字段");
+    }
+
+    #[test]
+    fn select_field_requires_options() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let error = create_custom_field(
+            &mut conn,
+            NewCustomFieldInput {
+                board_id: board.id.clone(),
+                name: "优先级".to_string(),
+                field_type: CustomFieldType::Select,
+                options: Vec::new(),
+            },
+        )
+        .expect_err("单选字段缺少选项应被拒绝");
+        assert!(error.contains("至少需要一个选项"));
+    }
+
+    #[test]
+    fn number_field_rejects_options() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let error = create_custom_field(
+            &mut conn,
+            NewCustomFieldInput {
+                board_id: board.id.clone(),
+                name: "工时".to_string(),
+                field_type: CustomFieldType::Number,
+                options: vec![custom_field_option("opt_high", "高")],
+            },
+        )
+        .expect_err("数值字段带选项应被拒绝");
+        assert!(error.contains("数值字段不支持选项"));
+    }
+
+    #[test]
+    fn set_select_value_reads_back() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let list = new_list(&mut conn, &board.id, "列");
+        let card = new_card(&mut conn, &board.id, &list.id, "任务");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "优先级",
+            CustomFieldType::Select,
+            vec![custom_field_option("opt_high", "高")],
+        );
+        let values = set_field_values(
+            &mut conn,
+            &card.id,
+            vec![field_value_input(&field.id, Some("opt_high"), None)],
+        )
+        .expect("写入取值");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].value_text.as_deref(), Some("opt_high"));
+        assert_eq!(values[0].value_number, None);
+
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.card_field_values.len(), 1);
+        assert_eq!(snapshot.card_field_values[0].card_id, card.id);
+    }
+
+    #[test]
+    fn set_number_value_reads_back() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let list = new_list(&mut conn, &board.id, "列");
+        let card = new_card(&mut conn, &board.id, &list.id, "任务");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "工时",
+            CustomFieldType::Number,
+            Vec::new(),
+        );
+        let values = set_field_values(
+            &mut conn,
+            &card.id,
+            vec![field_value_input(&field.id, None, Some(12.5))],
+        )
+        .expect("写入取值");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].value_number, Some(12.5));
+        assert_eq!(values[0].value_text, None);
+    }
+
+    #[test]
+    fn select_field_rejects_unknown_option() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let list = new_list(&mut conn, &board.id, "列");
+        let card = new_card(&mut conn, &board.id, &list.id, "任务");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "优先级",
+            CustomFieldType::Select,
+            vec![custom_field_option("opt_high", "高")],
+        );
+        let error = set_field_values(
+            &mut conn,
+            &card.id,
+            vec![field_value_input(&field.id, Some("opt_missing"), None)],
+        )
+        .expect_err("非法选项 id 应被拒绝");
+        assert!(error.contains("选项不存在"));
+    }
+
+    #[test]
+    fn number_field_rejects_non_finite_value() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let list = new_list(&mut conn, &board.id, "列");
+        let card = new_card(&mut conn, &board.id, &list.id, "任务");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "工时",
+            CustomFieldType::Number,
+            Vec::new(),
+        );
+        for invalid in [f64::NAN, f64::INFINITY] {
+            let error = set_field_values(
+                &mut conn,
+                &card.id,
+                vec![field_value_input(&field.id, None, Some(invalid))],
+            )
+            .expect_err("非有限数应被拒绝");
+            assert!(error.contains("有限数"));
+        }
+    }
+
+    #[test]
+    fn cross_board_field_value_is_rejected() {
+        let mut conn = memory_db();
+        let first = new_board(&mut conn, "看板 A");
+        let second = new_board(&mut conn, "看板 B");
+        let list = new_list(&mut conn, &first.id, "列 A");
+        let card = new_card(&mut conn, &first.id, &list.id, "任务 A");
+        let field = new_custom_field(
+            &mut conn,
+            &second.id,
+            "工时",
+            CustomFieldType::Number,
+            Vec::new(),
+        );
+        let error = set_field_values(
+            &mut conn,
+            &card.id,
+            vec![field_value_input(&field.id, None, Some(1.0))],
+        )
+        .expect_err("跨看板赋值应被拒绝");
+        assert!(error.contains("不属于任务所在看板"));
+    }
+
+    #[test]
+    fn duplicated_field_in_one_request_is_rejected() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let list = new_list(&mut conn, &board.id, "列");
+        let card = new_card(&mut conn, &board.id, &list.id, "任务");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "优先级",
+            CustomFieldType::Select,
+            vec![custom_field_option("opt_high", "高")],
+        );
+        let error = set_field_values(
+            &mut conn,
+            &card.id,
+            vec![
+                field_value_input(&field.id, Some("opt_high"), None),
+                field_value_input(&field.id, Some("opt_high"), None),
+            ],
+        )
+        .expect_err("同一字段重复赋值应被拒绝");
+        assert!(error.contains("重复赋值"));
+    }
+
+    #[test]
+    fn removing_option_clears_matching_field_values() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let list = new_list(&mut conn, &board.id, "列");
+        let keep_card = new_card(&mut conn, &board.id, &list.id, "任务 A");
+        let drop_card = new_card(&mut conn, &board.id, &list.id, "任务 B");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "优先级",
+            CustomFieldType::Select,
+            vec![
+                custom_field_option("opt_keep", "保留"),
+                custom_field_option("opt_drop", "移除"),
+            ],
+        );
+        set_field_values(
+            &mut conn,
+            &keep_card.id,
+            vec![field_value_input(&field.id, Some("opt_keep"), None)],
+        )
+        .expect("写入取值");
+        set_field_values(
+            &mut conn,
+            &drop_card.id,
+            vec![field_value_input(&field.id, Some("opt_drop"), None)],
+        )
+        .expect("写入取值");
+
+        let updated = update_custom_field(
+            &mut conn,
+            UpdateCustomFieldInput {
+                id: field.id.clone(),
+                patch: CustomFieldPatch {
+                    name: None,
+                    options: Some(vec![custom_field_option("opt_keep", "保留")]),
+                    sort_order: None,
+                },
+            },
+        )
+        .expect("更新字段");
+        assert_eq!(updated.options.len(), 1);
+
+        let values = get_all_card_field_values(&conn).expect("读取字段值");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].card_id, keep_card.id);
+        assert_eq!(values[0].value_text.as_deref(), Some("opt_keep"));
+    }
+
+    #[test]
+    fn deleting_field_removes_its_values() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let list = new_list(&mut conn, &board.id, "列");
+        let card = new_card(&mut conn, &board.id, &list.id, "任务");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "优先级",
+            CustomFieldType::Select,
+            vec![custom_field_option("opt_high", "高")],
+        );
+        set_field_values(
+            &mut conn,
+            &card.id,
+            vec![field_value_input(&field.id, Some("opt_high"), None)],
+        )
+        .expect("写入取值");
+
+        delete_custom_field(&mut conn, id_input(&field.id)).expect("删除字段");
+
+        assert!(get_all_card_field_values(&conn).expect("读取字段值").is_empty());
+        let orphans: i64 = conn
+            .query_row("SELECT COUNT(*) FROM card_field_values", [], |row| row.get(0))
+            .expect("统计字段值行");
+        assert_eq!(orphans, 0);
+    }
+
+    #[test]
+    fn clearing_value_removes_the_row() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let list = new_list(&mut conn, &board.id, "列");
+        let card = new_card(&mut conn, &board.id, &list.id, "任务");
+        let select_field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "优先级",
+            CustomFieldType::Select,
+            vec![custom_field_option("opt_high", "高")],
+        );
+        let number_field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "工时",
+            CustomFieldType::Number,
+            Vec::new(),
+        );
+        set_field_values(
+            &mut conn,
+            &card.id,
+            vec![
+                field_value_input(&select_field.id, Some("opt_high"), None),
+                field_value_input(&number_field.id, None, Some(3.0)),
+            ],
+        )
+        .expect("写入取值");
+        assert_eq!(get_all_card_field_values(&conn).expect("读取字段值").len(), 2);
+
+        let cleared = set_field_values(
+            &mut conn,
+            &card.id,
+            vec![
+                field_value_input(&select_field.id, None, None),
+                field_value_input(&number_field.id, None, None),
+            ],
+        )
+        .expect("清空取值");
+        assert!(cleared.is_empty());
+        assert!(get_all_card_field_values(&conn).expect("读取字段值").is_empty());
     }
 }
