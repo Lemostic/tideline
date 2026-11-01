@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildDashboard, buildTrend, type DashboardFilters } from './dashboard';
+import {
+  buildAging,
+  buildDashboard,
+  buildDimension,
+  buildEfficiency,
+  buildThroughput,
+  buildTrend,
+  type DashboardFilters,
+} from './dashboard';
 import type { Board, Card, CardDependency, List, Snapshot } from './types';
 
 const now = new Date(2026, 5, 15); // 2026-06-15 周一
@@ -135,5 +143,64 @@ describe('dashboard aggregation', () => {
     const data = buildDashboard(snapshot(), 0, { ...filters, weekStartsOn: 0 });
     expect(data.kpis.total).toBe(6);
     expect(data.kpis.dueWeek).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('BI 维度聚合', () => {
+  it('吞吐节奏按周分桶，净增 = 新建 - 完成', () => {
+    const points = buildThroughput(snapshot().cards, now, 30, 1);
+    expect(points).toHaveLength(5);
+    const totalCreated = points.reduce((sum, point) => sum + point.created, 0);
+    const totalCompleted = points.reduce((sum, point) => sum + point.completed, 0);
+    expect(totalCreated).toBe(6);
+    expect(totalCompleted).toBe(1);
+    expect(points[points.length - 1].net).toBe(
+      points[points.length - 1].created - points[points.length - 1].completed,
+    );
+  });
+
+  it('结构维度按分组统计总数、已完成与占比', () => {
+    const slices = buildDimension(snapshot().cards, now, 1, (card) =>
+      card.boardId === 'b1' ? { key: 'b1', label: '看板一' } : { key: 'b2', label: '看板二' },
+    );
+    expect(slices[0].key).toBe('b1');
+    expect(slices[0].total).toBe(5);
+    expect(slices[0].completed).toBe(1);
+    expect(slices[0].overdue).toBe(1);
+    expect(Math.round(slices[0].share * 100) / 100).toBeCloseTo(5 / 6, 2);
+  });
+
+  it('效率指标给出中位周期、积压与本周净增', () => {
+    const metrics = buildEfficiency(snapshot().cards, now, 1);
+    // c2 于 6-10 创建、6-14 完成，周期 4 天
+    expect(metrics.medianCycleDays).toBe(4);
+    expect(metrics.averageCycleDays).toBe(4);
+    expect(metrics.backlog).toBe(2); // c1 + c6
+  });
+
+  it('任务年龄分桶只统计未完成任务', () => {
+    const buckets = buildAging(snapshot().cards, now);
+    const total = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+    // 5 个未完成任务
+    expect(total).toBe(5);
+    expect(buckets.find((bucket) => bucket.key === 'aged')?.count).toBe(0);
+  });
+
+  it('交叉筛选把其余维度一起收窄', () => {
+    const data = buildDashboard(snapshot(), 0, {
+      ...filters,
+      crossFilter: { dimension: 'board', key: 'b2' },
+    });
+    expect(data.kpis.total).toBe(1);
+    expect(data.crossFilter?.key).toBe('b2');
+    // 被筛的那一维保留全貌，方便换选；其它维度被收窄
+    expect(data.byBoard).toHaveLength(2);
+    expect(data.byList.every((slice) => slice.key === 'l2')).toBe(true);
+  });
+
+  it('不筛选时各维度覆盖全部任务', () => {
+    const data = buildDashboard(snapshot(), 0, filters);
+    expect(data.byBoard.reduce((sum, slice) => sum + slice.total, 0)).toBe(6);
+    expect(data.crossFilter).toBeNull();
   });
 });

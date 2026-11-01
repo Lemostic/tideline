@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
@@ -9,9 +9,14 @@ import {
   buildDashboard,
   DASHBOARD_RANGES,
   type BoardHealth,
+  type CrossFilter,
   type DashboardRange,
+  type DimensionKey,
+  type DimensionSlice,
+  type AgingBucket,
   type PrioritySlice,
   type StatusSlice,
+  type ThroughputPoint,
   type TrendPoint,
 } from '@/lib/dashboard';
 import { boardColorValue, type Card } from '@/lib/types';
@@ -54,6 +59,8 @@ export function DashboardPage() {
 
   const [boardFilter, setBoardFilter] = useState('all');
   const [rangeDays, setRangeDays] = useState<DashboardRange>(30);
+  /** 交叉筛选：在结构维度上点选某一格，其余图表跟着过滤 */
+  const [crossFilter, setCrossFilter] = useState<CrossFilter | null>(null);
 
   useEffect(() => {
     void loadTrash().catch(() => undefined);
@@ -72,9 +79,16 @@ export function DashboardPage() {
         rangeDays,
         weekStartsOn,
         now,
+        crossFilter,
       }),
-    [snapshot, trash.length, activeBoardId, rangeDays, weekStartsOn, now],
+    [snapshot, trash.length, activeBoardId, rangeDays, weekStartsOn, now, crossFilter],
   );
+
+  const toggleCrossFilter = useCallback((dimension: DimensionKey, key: string) => {
+    setCrossFilter((current) =>
+      current && current.dimension === dimension && current.key === key ? null : { dimension, key },
+    );
+  }, []);
 
   const boardById = useMemo(
     () => new Map(snapshot.boards.map((board) => [board.id, board])),
@@ -110,6 +124,7 @@ export function DashboardPage() {
           { label: '任务', value: data.kpis.total },
           { label: '完成率', value: percent(data.kpis.completionRate) },
           { label: '已逾期', value: data.kpis.overdue, tone: data.kpis.overdue > 0 ? 'danger' : 'muted' },
+          { label: '本周净增', value: signed(data.efficiency.weeklyNet), tone: data.efficiency.weeklyNet > 0 ? 'accent' : 'muted' },
         ]}
         actions={
           <div className="dashboard-controls">
@@ -145,6 +160,41 @@ export function DashboardPage() {
           </div>
         }
       />
+
+      {/* 交叉筛选状态：只在生效时出现，点「清除」恢复全量 */}
+      {data.crossFilter ? (
+        <div className="dash-crossfilter" role="status">
+          <Icon name="filter" size={13} />
+          <span className="dash-crossfilter-text">
+            已按「{CROSS_DIMENSION_LABELS[data.crossFilter.dimension]}」筛选，图表只显示
+            {crossFilterLabel(data)}
+          </span>
+          <button
+            type="button"
+            className="btn btn-quiet btn-sm"
+            onClick={() => setCrossFilter(null)}
+          >
+            清除筛选
+          </button>
+        </div>
+      ) : null}
+
+      {/* 与上一等长区间对比：新建与完成的增减 */}
+      <section className="dash-compare" aria-label="与上一周期对比">
+        <CompareRow
+          label="新建"
+          current={data.kpis.createdInRange}
+          previous={data.kpis.createdPrevRange}
+        />
+        <CompareRow
+          label="完成"
+          current={data.kpis.completedInRange}
+          previous={data.kpis.completedPrevRange}
+        />
+        <span className="dash-compare-note">
+          对比前 {rangeDays} 天
+        </span>
+      </section>
 
       {/* 任务总数、完成率、已逾期已在读数条里呈现，这里只放剩下的三项，避免同一数字出现两次 */}
       <section className="dashboard-kpis" aria-label="核心指标">
@@ -256,9 +306,102 @@ export function DashboardPage() {
             onOpen={openCard}
           />
         </section>
+
+        <section className="dash-card dash-throughput">
+          <div className="dash-card-head">
+            <div>
+              <h2 className="dash-card-title">吞吐节奏</h2>
+              <p className="dash-card-desc">按周统计新建与完成，净增为正说明在堆积</p>
+            </div>
+            <div className="dash-legend">
+              <span><i style={{ background: '#0f766e' }} />新建</span>
+              <span><i style={{ background: '#e9a23b' }} />完成</span>
+            </div>
+          </div>
+          <ThroughputBars points={data.throughput} />
+        </section>
+
+        <section className="dash-card dash-efficiency">
+          <div className="dash-card-head">
+            <div>
+              <h2 className="dash-card-title">效率指标</h2>
+              <p className="dash-card-desc">周期时间按创建到完成计算，完成时间以最后更新近似</p>
+            </div>
+          </div>
+          <div className="dash-metrics">
+            <Metric label="中位周期" value={`${data.efficiency.medianCycleDays} 天`} />
+            <Metric label="平均周期" value={`${round1(data.efficiency.averageCycleDays)} 天`} />
+            <Metric label="未完成平均存续" value={`${round1(data.efficiency.avgAgeDays)} 天`} />
+            <Metric
+              label="积压任务"
+              value={String(data.efficiency.backlog)}
+              tone={data.efficiency.backlog > 0 ? 'danger' : 'default'}
+            />
+          </div>
+          <AgingChart buckets={data.aging} />
+        </section>
+
+        <section className="dash-card dash-dimension">
+          <div className="dash-card-head">
+            <div>
+              <h2 className="dash-card-title">任务构成</h2>
+              <p className="dash-card-desc">点某一格，页面其余图表按它交叉筛选</p>
+            </div>
+          </div>
+          <div className="dash-dimension-groups">
+            <DimensionBars
+              title="按看板"
+              dimension="board"
+              slices={data.byBoard}
+              active={data.crossFilter}
+              onSelect={toggleCrossFilter}
+            />
+            <DimensionBars
+              title="按列表"
+              dimension="list"
+              slices={data.byList}
+              active={data.crossFilter}
+              onSelect={toggleCrossFilter}
+            />
+            <DimensionBars
+              title="按标签"
+              dimension="label"
+              slices={data.byLabel}
+              active={data.crossFilter}
+              onSelect={toggleCrossFilter}
+            />
+          </div>
+        </section>
       </div>
     </div>
   );
+}
+
+const CROSS_DIMENSION_LABELS: Record<DimensionKey, string> = {
+  board: '看板',
+  list: '列表',
+  label: '标签',
+};
+
+function signed(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
+}
+
+function round1(value: number): string {
+  return `${Math.round(value * 10) / 10}`;
+}
+
+/** 交叉筛选生效时，页面上要能说出「筛的是谁」 */
+function crossFilterLabel(data: ReturnType<typeof buildDashboard>): string {
+  const filter = data.crossFilter;
+  if (!filter) return '';
+  const source =
+    filter.dimension === 'board'
+      ? data.byBoard
+      : filter.dimension === 'list'
+        ? data.byList
+        : data.byLabel;
+  return source.find((slice) => slice.key === filter.key)?.label ?? '所选分组';
 }
 
 interface KpiCardProps {
@@ -552,4 +695,180 @@ function todayKey(): string {
   const m = `${now.getMonth() + 1}`.padStart(2, '0');
   const d = `${now.getDate()}`.padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+/** 环比行：本期 vs 上期，带增减方向 */
+function CompareRow({
+  label,
+  current,
+  previous,
+}: {
+  label: string;
+  current: number;
+  previous: number;
+}) {
+  const delta = current - previous;
+  const direction = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+  return (
+    <span className="dash-compare-row">
+      <span className="dash-compare-label">{label}</span>
+      <span className="dash-compare-value">{current}</span>
+      <span className={`dash-compare-delta is-${direction}`}>
+        {direction === 'flat' ? '持平' : `${delta > 0 ? '+' : ''}${delta}`}
+      </span>
+      <span className="dash-compare-prev">上期 {previous}</span>
+    </span>
+  );
+}
+
+/** 吞吐节奏：每周两根柱（新建 / 完成），上方标净增 */
+function ThroughputBars({ points }: { points: ThroughputPoint[] }) {
+  const max = Math.max(1, ...points.flatMap((point) => [point.created, point.completed]));
+  if (points.length === 0) {
+    return <p className="dash-empty-text">还没有可统计的周数据。</p>;
+  }
+  return (
+    <div className="dash-throughput-chart">
+      {points.map((point) => (
+        <div className="dash-throughput-col" key={point.weekStart}>
+          <span
+            className={`dash-throughput-net${point.net > 0 ? ' is-up' : point.net < 0 ? ' is-down' : ''}`}
+          >
+            {signed(point.net)}
+          </span>
+          <div className="dash-throughput-bars">
+            <span
+              className="dash-throughput-bar is-created"
+              style={{ height: `${(point.created / max) * 100}%` }}
+              title={`新建 ${point.created} 个`}
+            />
+            <span
+              className="dash-throughput-bar is-completed"
+              style={{ height: `${(point.completed / max) * 100}%` }}
+              title={`完成 ${point.completed} 个`}
+            />
+          </div>
+          <span className="dash-throughput-label">{point.weekStart.slice(5).replace('-', '/')}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 效率指标的一格 */
+function Metric({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string;
+  value: string;
+  tone?: 'default' | 'danger';
+}) {
+  return (
+    <div className="dash-metric">
+      <span className="dash-metric-label">{label}</span>
+      <strong className={`dash-metric-value${tone === 'danger' ? ' is-danger' : ''}`}>{value}</strong>
+    </div>
+  );
+}
+
+/** 任务年龄分布：横向堆叠条，越往右挂得越久 */
+function AgingChart({ buckets }: { buckets: AgingBucket[] }) {
+  const total = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+  if (total === 0) {
+    return <p className="dash-empty-text">没有未完成的任务，积压为零。</p>;
+  }
+  return (
+    <div className="dash-aging">
+      <div className="dash-aging-bar">
+        {buckets.map((bucket) =>
+          bucket.count === 0 ? null : (
+            <span
+              key={bucket.key}
+              className={`dash-aging-seg is-${bucket.key}`}
+              style={{ width: `${(bucket.count / total) * 100}%` }}
+              title={`${bucket.label}：${bucket.count} 个`}
+            />
+          ),
+        )}
+      </div>
+      <ul className="dash-aging-legend">
+        {buckets.map((bucket) => (
+          <li key={bucket.key}>
+            <i className={`dash-aging-dot is-${bucket.key}`} aria-hidden="true" />
+            <span>{bucket.label}</span>
+            <strong>{bucket.count}</strong>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** 结构维度：横向条形，条内按「已完成 / 未完成」分段；点条即交叉筛选 */
+function DimensionBars({
+  title,
+  dimension,
+  slices,
+  active,
+  onSelect,
+}: {
+  title: string;
+  dimension: DimensionKey;
+  slices: DimensionSlice[];
+  active: CrossFilter | null;
+  onSelect: (dimension: DimensionKey, key: string) => void;
+}) {
+  const max = Math.max(1, ...slices.map((slice) => slice.total));
+  if (slices.length === 0) {
+    return (
+      <div className="dash-dimension-group">
+        <span className="dash-dimension-title">{title}</span>
+        <p className="dash-empty-text">没有数据</p>
+      </div>
+    );
+  }
+  return (
+    <div className="dash-dimension-group">
+      <span className="dash-dimension-title">{title}</span>
+      <ul className="dash-dimension-list">
+        {slices.slice(0, 6).map((slice) => {
+          const selected = active?.dimension === dimension && active.key === slice.key;
+          const doneWidth = (slice.completed / max) * 100;
+          const overdueWidth = (slice.overdue / max) * 100;
+          return (
+            <li key={slice.key}>
+              <button
+                type="button"
+                className={`dash-dimension-row${selected ? ' is-selected' : ''}`}
+                onClick={() => onSelect(dimension, slice.key)}
+                aria-pressed={selected}
+                title={`${slice.label}：${slice.total} 个任务，已完成 ${slice.completed} 个，逾期 ${slice.overdue} 个`}
+              >
+                <span className="dash-dimension-name">{slice.label}</span>
+                <span className="dash-dimension-track">
+                  <span
+                    className="dash-dimension-total"
+                    style={{ width: `${(slice.total / max) * 100}%` }}
+                  />
+                  <span
+                    className="dash-dimension-done"
+                    style={{ width: `${doneWidth}%` }}
+                    aria-hidden="true"
+                  />
+                  <span
+                    className="dash-dimension-overdue"
+                    style={{ left: `${doneWidth}%`, width: `${overdueWidth}%` }}
+                    aria-hidden="true"
+                  />
+                </span>
+                <span className="dash-dimension-count">{slice.total}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
