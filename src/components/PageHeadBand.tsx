@@ -34,29 +34,33 @@ export function PageHeadBand({
 
   return (
     <header className="page-head-band">
-      <div className="page-head-main">
-        {eyebrow ? <div className="page-eyebrow">{eyebrow}</div> : null}
-        <h1 className="page-head-title">{title}</h1>
-        {description ? <p className="page-head-sub">{description}</p> : null}
+      <div className="page-head-top">
+        <div className="page-head-main">
+          {eyebrow ? <div className="page-eyebrow">{eyebrow}</div> : null}
+          <h1 className="page-head-title">{title}</h1>
+          {description ? <p className="page-head-sub">{description}</p> : null}
+        </div>
+
+        {hasReadout ? (
+          <div className="readout">
+            {readouts.map((item, index) => (
+              <div key={item.label} className="readout-group">
+                {index > 0 ? <span className="readout-divider" aria-hidden="true" /> : null}
+                <span className="readout-item">
+                  <span className="readout-label">{item.label}</span>
+                  <span
+                    className={`readout-value${item.tone && item.tone !== 'default' ? ` is-${item.tone}` : ''}`}
+                  >
+                    {item.value}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
 
-      {hasReadout ? (
-        <div className="readout">
-          {readouts.map((item, index) => (
-            <div key={item.label} className="readout-group">
-              {index > 0 ? <span className="readout-divider" aria-hidden="true" /> : null}
-              <span className="readout-item">
-                <span className="readout-label">{item.label}</span>
-                <span
-                  className={`readout-value${item.tone && item.tone !== 'default' ? ` is-${item.tone}` : ''}`}
-                >
-                  {item.value}
-                </span>
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      <div className="page-head-rule" aria-hidden="true" />
 
       {actions ? <div className="page-head-actions">{actions}</div> : null}
     </header>

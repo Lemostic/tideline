@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
-import { EmptyState, Modal } from '@/components/Modal';
+import { EmptyState } from '@/components/Modal';
 import { dueBucket, formatDueLabel, formatRelativeTime } from '@/lib/date';
 import { boardColorValue, PRIORITY_META, type Card } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
+import { useUiStore } from '@/store/uiStore';
 import './trash.css';
 
 type RowAction = 'restore' | 'purge';
@@ -29,14 +30,14 @@ export function TrashPage() {
   const restoreCard = useAppStore((state) => state.restoreCard);
   const purgeCard = useAppStore((state) => state.purgeCard);
   const emptyTrash = useAppStore((state) => state.emptyTrash);
+  const notify = useUiStore((state) => state.notify);
+  const requestConfirm = useUiStore((state) => state.requestConfirm);
 
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [emptyOpen, setEmptyOpen] = useState(false);
   const [emptying, setEmptying] = useState(false);
-  const [flash, setFlash] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -52,12 +53,6 @@ export function TrashPage() {
       active = false;
     };
   }, [loadTrash]);
-
-  useEffect(() => {
-    if (!flash) return;
-    const timer = window.setTimeout(() => setFlash(null), 5000);
-    return () => window.clearTimeout(timer);
-  }, [flash]);
 
   const boardMap = useMemo(
     () => new Map(snapshot.boards.map((board) => [board.id, board])),
@@ -90,7 +85,7 @@ export function TrashPage() {
     } finally {
       setBusyId(null);
     }
-    setFlash(`已恢复到 ${boardName} · ${listName}`);
+    notify(`已恢复到 ${boardName} 的「${listName}」`, 'success');
   };
 
   const handlePurge = async (card: Card) => {
@@ -103,12 +98,19 @@ export function TrashPage() {
     } finally {
       setBusyId(null);
     }
-    setFlash(`已彻底删除「${card.title}」`);
+    notify(`已彻底删除「${card.title}」`);
   };
 
   const handleEmpty = async () => {
     const count = trash.length;
-    setEmptyOpen(false);
+    const confirmed = await requestConfirm({
+      title: '清空回收站',
+      description: '回收站里的任务会从本机数据库里永久删除，删除后无法恢复。',
+      details: [`将彻底删除 ${count} 个任务`],
+      confirmLabel: '确认清空',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setEmptying(true);
     try {
       await emptyTrash();
@@ -117,7 +119,7 @@ export function TrashPage() {
     } finally {
       setEmptying(false);
     }
-    setFlash(`已清空回收站（${count} 个任务）`);
+    notify(`已清空回收站（${count} 个任务）`);
   };
 
   return (
@@ -130,7 +132,7 @@ export function TrashPage() {
           <button
             type="button"
             className="btn btn-ghost btn-sm"
-            onClick={() => setEmptyOpen(true)}
+            onClick={() => void handleEmpty()}
             disabled={loading || emptying || trash.length === 0}
           >
             <Icon name="trash" size={13} />
@@ -138,21 +140,6 @@ export function TrashPage() {
           </button>
         </div>
       </div>
-
-      {flash ? (
-        <div className="trash-flash" role="status">
-          <Icon name="check-circle" size={14} />
-          <span className="trash-flash-text">{flash}</span>
-          <button
-            type="button"
-            className="trash-flash-close"
-            onClick={() => setFlash(null)}
-            aria-label="关闭提示"
-          >
-            <Icon name="x" size={12} />
-          </button>
-        </div>
-      ) : null}
 
       {loading ? (
         <div className="trash-skeleton" role="status" aria-label="正在加载回收站">
@@ -401,31 +388,6 @@ export function TrashPage() {
         </>
       )}
 
-      {emptyOpen ? (
-        <Modal
-          title="清空回收站"
-          subtitle={`将彻底删除 ${trash.length} 个任务，删除后无法恢复。`}
-          onClose={() => setEmptyOpen(false)}
-          footer={
-            <>
-              <button className="btn btn-quiet" onClick={() => setEmptyOpen(false)}>
-                取消
-              </button>
-              <button
-                className="btn btn-danger"
-                onClick={() => void handleEmpty()}
-                disabled={emptying}
-              >
-                {emptying ? '正在清空…' : '确认清空'}
-              </button>
-            </>
-          }
-        >
-          <p className="trash-empty-text">
-            回收站里的任务会从本机数据库里永久删除。如果其中可能有还想找回的内容，建议先逐条恢复或彻底删除。
-          </p>
-        </Modal>
-      ) : null}
     </div>
   );
 }

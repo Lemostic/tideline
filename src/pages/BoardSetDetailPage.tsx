@@ -54,6 +54,7 @@ export function BoardSetDetailPage() {
   const navigate = useNavigate();
   const snapshot = useSnapshot();
   const openCard = useUiStore((state) => state.openCard);
+  const requestConfirm = useUiStore((state) => state.requestConfirm);
   const updateCard = useAppStore((state) => state.updateCard);
   const updateBoardSet = useAppStore((state) => state.updateBoardSet);
   const deleteBoardSet = useAppStore((state) => state.deleteBoardSet);
@@ -126,7 +127,12 @@ export function BoardSetDetailPage() {
   const completionRate = cards.length === 0 ? 0 : completed / cards.length;
 
   const handleDelete = async () => {
-    const confirmed = window.confirm(`确定删除看板集「${set.title}」吗？不会删除其中的看板与任务。`);
+    const confirmed = await requestConfirm({
+      title: `删除看板集「${set.title}」`,
+      description: '看板集本身会被删除，其中的看板和任务不受影响。',
+      confirmLabel: '删除看板集',
+      tone: 'danger',
+    });
     if (!confirmed) return;
     try {
       await deleteBoardSet(set.id);

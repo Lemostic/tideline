@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Icon, type IconName } from '@/components/Icon';
 import { boardColorValue, type Board, type BoardView } from '@/lib/types';
 import { useAppStore } from '@/store/appStore';
+import { useUiStore } from '@/store/uiStore';
 import { InlineEdit } from './InlineEdit';
 import { PopMenu } from './PopMenu';
 
@@ -39,6 +40,7 @@ export function BoardHeader({
   const updateBoard = useAppStore((state) => state.updateBoard);
   const toggleStar = useAppStore((state) => state.toggleStar);
   const deleteBoard = useAppStore((state) => state.deleteBoard);
+  const requestConfirm = useUiStore((state) => state.requestConfirm);
   const [editingTitle, setEditingTitle] = useState(false);
 
   const accent = boardColorValue(board.color);
@@ -49,9 +51,13 @@ export function BoardHeader({
   }, [totalCards, completedCards]);
 
   const handleDelete = async () => {
-    const confirmed = window.confirm(
-      `确定删除看板「${board.title}」吗？其中的 ${totalCards} 个任务会一起删除，且无法恢复。`,
-    );
+    const confirmed = await requestConfirm({
+      title: `删除看板「${board.title}」`,
+      description: '看板和其中的任务会一起删除，之后无法恢复。',
+      details: totalCards > 0 ? [`其中有 ${totalCards} 个任务`] : undefined,
+      confirmLabel: '删除看板',
+      tone: 'danger',
+    });
     if (!confirmed) return;
     try {
       await deleteBoard(board.id);

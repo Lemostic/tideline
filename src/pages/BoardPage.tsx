@@ -5,6 +5,7 @@ import { EmptyState } from '@/components/Modal';
 import { PRIORITY_META, boardColorValue, type BoardView, type Card } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useUiStore } from '@/store/uiStore';
 import { BoardFilterBar } from '@/features/board/BoardFilterBar';
 import { BoardHeader } from '@/features/board/BoardHeader';
 import { CalendarView } from '@/features/board/CalendarView';
@@ -28,6 +29,7 @@ export function BoardPage() {
   const showDependencyLines = useSettingsStore((state) => state.showDependencyLines);
   const bulkMoveCards = useAppStore((state) => state.bulkMoveCards);
   const bulkDeleteCards = useAppStore((state) => state.bulkDeleteCards);
+  const requestConfirm = useUiStore((state) => state.requestConfirm);
   const bulkUpdateCards = useAppStore((state) => state.bulkUpdateCards);
   const [view, setView] = useState<BoardView>(() => defaultView);
   const [filters, setFilters] = useState<BoardFilters>(EMPTY_FILTERS);
@@ -133,9 +135,11 @@ export function BoardPage() {
   };
   const handleBulkDelete = async () => {
     if (busySelection) return;
-    const confirmed = window.confirm(
-      `确定把选中的 ${selectedCardIds.length} 个任务移入回收站吗？可在回收站恢复。`,
-    );
+    const confirmed = await requestConfirm({
+      title: `移入回收站 ${selectedCardIds.length} 个任务`,
+      description: '这些任务会进入回收站，需要时可以在回收站恢复。',
+      confirmLabel: '移入回收站',
+    });
     if (!confirmed) return;
     await runBulk(() => bulkDeleteCards(selectedCardIds));
   };

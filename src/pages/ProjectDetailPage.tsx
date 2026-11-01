@@ -42,6 +42,7 @@ import type {
   TeamMember,
 } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
+import { useUiStore } from '@/store/uiStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import './team.css';
 
@@ -66,6 +67,8 @@ export function ProjectDetailPage() {
   const navigate = useNavigate();
   const snapshot = useSnapshot();
   const project = snapshot.projects.find((item) => item.id === projectId) ?? null;
+  const requestConfirm = useUiStore((state) => state.requestConfirm);
+  const notify = useUiStore((state) => state.notify);
   const updateProject = useAppStore((state) => state.updateProject);
   const deleteProject = useAppStore((state) => state.deleteProject);
   const updateMember = useAppStore((state) => state.updateTeamMember);
@@ -190,7 +193,12 @@ export function ProjectDetailPage() {
   }));
 
   const releaseMember = async (member: TeamMember) => {
-    if (!window.confirm(`确认释放「${member.name}」？记录保留，可随时回归。`)) return;
+    const confirmed = await requestConfirm({
+      title: `释放成员「${member.name}」`,
+      description: '成员状态改为已释放，历史记录保留，随时可以回归。',
+      confirmLabel: '释放成员',
+    });
+    if (!confirmed) return;
     await updateMember(member.id, {
       status: 'released',
       releasedAt: todayLocalDate(),
@@ -198,24 +206,48 @@ export function ProjectDetailPage() {
   };
 
   const removeMember = async (member: TeamMember) => {
-    if (!window.confirm(`确认删除「${member.name}」？其加班与绩效记录会一起删除。`)) return;
+    const confirmed = await requestConfirm({
+      title: `删除成员「${member.name}」`,
+      description: '成员会从项目中移除，加班与绩效记录会一起删除。',
+      confirmLabel: '删除成员',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     await deleteMember(member.id).catch(() => undefined);
   };
 
   const removeRole = async (role: ProjectRole) => {
-    if (!window.confirm(`确认删除角色「${role.name}」？`)) return;
+    const confirmed = await requestConfirm({
+      title: `删除角色「${role.name}」`,
+      description: '角色会从项目中移除，成员的角色分配会一并清空。',
+      confirmLabel: '删除角色',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     await deleteRole(role.id).catch((reason) => {
-      window.alert(reason instanceof Error ? reason.message : String(reason));
+      notify(reason instanceof Error ? reason.message : String(reason), 'danger');
     });
   };
 
   const removeMeta = async (field: ProjectMetaField) => {
-    if (!window.confirm(`确认删除元数据「${field.name}」？`)) return;
+    const confirmed = await requestConfirm({
+      title: `删除元数据「${field.name}」`,
+      description: '这个自定义字段会从项目中移除，已经填写的值也会消失。',
+      confirmLabel: '删除字段',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     await deleteMeta(field.id).catch(() => undefined);
   };
 
   const removeTenure = async (tenure: MemberTenure) => {
-    if (!window.confirm('确认删除这一段投入记录？成员状态会按剩余时间段重新计算。')) return;
+    const confirmed = await requestConfirm({
+      title: '删除这一段投入记录',
+      description: '成员状态会按剩余时间段重新计算。',
+      confirmLabel: '删除记录',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     await deleteTenure(tenure.id).catch(() => undefined);
   };
 
@@ -226,13 +258,13 @@ export function ProjectDetailPage() {
   };
 
   const removeProject = async () => {
-    if (
-      !window.confirm(
-        `确认删除项目「${project.name}」？项目内所有成员、角色、元数据、加班与绩效都会删除。`,
-      )
-    ) {
-      return;
-    }
+    const confirmed = await requestConfirm({
+      title: `删除项目「${project.name}」`,
+      description: '项目内所有成员、角色、元数据、加班与绩效都会删除，且不可恢复。',
+      confirmLabel: '删除项目',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     await deleteProject(project.id).catch(() => undefined);
     navigate('/team');
   };
@@ -749,8 +781,15 @@ export function ProjectDetailPage() {
                               className="btn btn-icon"
                               aria-label="删除加班记录"
                               onClick={() => {
-                                if (!window.confirm('确认删除这条加班记录？')) return;
-                                void deleteOvertime(record.id).catch(() => undefined);
+                                void requestConfirm({
+                                  title: '删除这条加班记录',
+                                  description: '这条记录会从项目统计中移除。',
+                                  confirmLabel: '删除记录',
+                                  tone: 'danger',
+                                }).then((confirmed) => {
+                                  if (!confirmed) return;
+                                  void deleteOvertime(record.id).catch(() => undefined);
+                                });
                               }}
                             >
                               <Icon name="trash" size={13} />
@@ -824,8 +863,15 @@ export function ProjectDetailPage() {
                         className="btn btn-icon"
                         aria-label="删除绩效记录"
                         onClick={() => {
-                          if (!window.confirm('确认删除这条绩效记录？')) return;
-                          void deletePerformance(record.id).catch(() => undefined);
+                          void requestConfirm({
+                            title: '删除这条绩效记录',
+                            description: '这条记录会从项目统计中移除。',
+                            confirmLabel: '删除记录',
+                            tone: 'danger',
+                          }).then((confirmed) => {
+                            if (!confirmed) return;
+                            void deletePerformance(record.id).catch(() => undefined);
+                          });
                         }}
                       >
                         <Icon name="trash" size={13} />

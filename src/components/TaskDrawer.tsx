@@ -33,6 +33,8 @@ export function TaskDrawer() {
   const navigate = useNavigate();
   const editingCardId = useUiStore((state) => state.editingCardId);
   const closeCard = useUiStore((state) => state.closeCard);
+  const requestConfirm = useUiStore((state) => state.requestConfirm);
+  const notify = useUiStore((state) => state.notify);
   const snapshot = useSnapshot();
   const updateCard = useAppStore((state) => state.updateCard);
   const deleteCard = useAppStore((state) => state.deleteCard);
@@ -252,14 +254,13 @@ export function TaskDrawer() {
     setDescriptionMode('preview');
   };
 
-  const handleDelete = () => {
-    if (
-      !window.confirm(
-        `将「${card.title}」移入回收站？\n之后可以在「回收站」里恢复到原看板，确认不再需要时再彻底删除。`,
-      )
-    ) {
-      return;
-    }
+  const handleDelete = async () => {
+    const confirmed = await requestConfirm({
+      title: `移入回收站「${card.title}」`,
+      description: '之后可以在「回收站」里恢复到原看板，确认不再需要时再彻底删除。',
+      confirmLabel: '移入回收站',
+    });
+    if (!confirmed) return;
     void deleteCard(card.id);
     closeCard();
   };
@@ -317,7 +318,11 @@ export function TaskDrawer() {
             <div className="drawer-title-meta">
               <button
                 className={`task-toggle${card.completed ? ' on' : ''}`}
-                onClick={() => void updateCard(card.id, { completed: !card.completed })}
+                onClick={() => {
+                  const next = !card.completed;
+                  void updateCard(card.id, { completed: next });
+                  notify(next ? '已标记完成' : '已恢复为进行中', next ? 'success' : 'default');
+                }}
               >
                 <Icon name={card.completed ? 'check-circle' : 'check'} size={13} />
                 {card.completed ? '已完成' : '标记完成'}

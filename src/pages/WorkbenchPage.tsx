@@ -221,8 +221,8 @@ export function WorkbenchPage() {
         }
         description={
           viewMode === 'boards'
-            ? `${snapshot.boards.length} 个看板 · ${snapshot.cards.length} 个任务 · 可切换回门户视图`
-            : `${snapshot.boards.length} 个看板 · ${openCards.length} 个进行中任务 · ${activeGoals.length} 个目标进行中`
+            ? '切换回门户视图，可以看今日重点和目标进度。'
+            : '把看板、目标和今天要做的事收在同一处。'
         }
         readouts={
           viewMode === 'workbench'

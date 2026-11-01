@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { BrandMark } from '@/components/Icon';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { NewBoardModal } from '@/components/NewBoardModal';
 import { SearchDialog } from '@/components/SearchDialog';
 import { Sidebar } from '@/components/Sidebar';
 import { TaskDrawer } from '@/components/TaskDrawer';
+import { ToastStack } from '@/components/ToastStack';
 import { TopBar } from '@/components/TopBar';
 import { BoardPage } from '@/pages/BoardPage';
 import { BoardSetDetailPage } from '@/pages/BoardSetDetailPage';
@@ -117,6 +119,8 @@ export default function App() {
         <NewBoardModal />
         <TaskDrawer />
         <SearchDialog />
+        <ConfirmDialog />
+        <ToastStack />
         <StartupRedirect />
         <AutoUpdateCheck />
       </div>

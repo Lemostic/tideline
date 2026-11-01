@@ -5,6 +5,7 @@ import { EmptyState, Modal } from '@/components/Modal';
 import { PROJECT_COLORS, projectMeta, projectMembers, projectOvertime } from '@/lib/team';
 import type { Project } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
+import { useUiStore } from '@/store/uiStore';
 import './team.css';
 
 function formatDateCN(value: string): string {
@@ -45,14 +46,16 @@ export function TeamPage() {
     [projects, snapshot],
   );
 
+  const requestConfirm = useUiStore((state) => state.requestConfirm);
+
   const removeProject = async (project: Project) => {
-    if (
-      !window.confirm(
-        `确认删除项目「${project.name}」？项目内成员、角色、元数据、加班与绩效记录都会删除，且不可恢复。`,
-      )
-    ) {
-      return;
-    }
+    const confirmed = await requestConfirm({
+      title: `删除项目「${project.name}」`,
+      description: '项目内成员、角色、元数据、加班与绩效记录都会删除，且不可恢复。',
+      confirmLabel: '删除项目',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     await deleteProject(project.id).catch(() => undefined);
   };
 

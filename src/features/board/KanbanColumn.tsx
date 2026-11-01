@@ -51,6 +51,7 @@ export function KanbanColumn({
   const updateList = useAppStore((state) => state.updateList);
   const deleteList = useAppStore((state) => state.deleteList);
   const openCard = useUiStore((state) => state.openCard);
+  const requestConfirm = useUiStore((state) => state.requestConfirm);
   const [editingTitle, setEditingTitle] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -60,9 +61,13 @@ export function KanbanColumn({
   const columnStyle = { '--column-accent': accentColor } as CSSProperties;
 
   const handleDelete = async () => {
-    const confirmed = window.confirm(
-      `确定删除列表「${list.title}」及其中 ${cards.length} 个任务吗？此操作不可恢复。`,
-    );
+    const confirmed = await requestConfirm({
+      title: `删除列表「${list.title}」`,
+      description: '列表和其中的任务会一起删除，之后无法恢复。',
+      details: cards.length > 0 ? [`其中有 ${cards.length} 个任务`] : undefined,
+      confirmLabel: '删除列表',
+      tone: 'danger',
+    });
     if (!confirmed) return;
     try {
       await deleteList(list.id);

@@ -1,25 +1,28 @@
 /* 潮线 tideline — 页面标题带（潮汐表式读数条）
 
-   全站统一的页面头：左侧标题 + 说明，右侧读数，读数之间用会「垂下去」的
-   刻度线分隔。刻度只在真正承载数据时出现，不做装饰。 */
+   全站统一的页面头：左侧标题 + 说明，右侧读数。读数坐在一条基线规则上，
+   读数之间的刻度线垂下去、穿过规则，像刻度尺上的分度。
+   刻度只在真正承载数据时出现——没有读数就没有刻度，不做装饰。 */
 
 .page-head-band {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  --head-rule-gap: 11px;
   padding: 14px 2px 0;
-  border-bottom: 1px solid var(--line);
+}
+
+/* 上半：标题在左，读数在右，两者底部对齐到同一条基线 */
+.page-head-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  column-gap: 24px;
 }
 
 .page-head-main {
   min-width: 0;
-  flex: 1 1 320px;
 }
 
 /* 位置标记：标题上方的一行小字，前面带一道潮位刻度。
-   这是全站唯一允许的装饰性刻度，且只出现在每页一次的位置标记上。 */
+   这是全站唯一允许的装饰性刻度，且每页只出现一次。 */
 .page-eyebrow {
   display: flex;
   align-items: center;
@@ -49,11 +52,19 @@
 }
 
 .page-head-sub {
-  margin: 5px 0 12px;
+  margin: 5px 0 0;
   max-width: 62ch;
   color: var(--muted);
   font-size: 12.5px;
   line-height: 1.65;
+}
+
+/* 基线规则：读数坐在它上面 */
+.page-head-rule {
+  position: relative;
+  height: 1px;
+  margin-top: var(--head-rule-gap);
+  background: var(--line);
 }
 
 /* 读数条：一组标签 + 数值 */
@@ -62,7 +73,6 @@
   align-items: baseline;
   gap: 0;
   flex: 0 0 auto;
-  padding-bottom: 12px;
 }
 
 .readout-group {
@@ -108,44 +118,43 @@
   font-weight: 600;
 }
 
-/* 刻度线：横穿基线并向下垂 6px，像刻度尺上的分度 */
+/* 刻度线：穿过基线规则，向下垂 6px */
 .readout-divider {
   position: relative;
   align-self: stretch;
   width: 1px;
-  margin: 0 -1px;
-  background: var(--line);
+  background: var(--line-strong);
 }
 
 .readout-divider::after {
   content: '';
   position: absolute;
   left: 0;
-  bottom: -6px;
+  /* 从读数底部一直延伸到规则下方 6px，视觉上穿过基线 */
+  bottom: calc(-1 * (var(--head-rule-gap) + 6px));
   width: 1px;
-  height: 6px;
+  height: calc(var(--head-rule-gap) + 6px);
   background: var(--line-strong);
 }
 
-/* 页面操作区：紧贴标题带下沿 */
+/* 页面操作区：贴在基线规则下方 */
 .page-head-actions {
   display: flex;
   align-items: center;
   gap: 7px;
   flex-wrap: wrap;
-  padding-bottom: 12px;
+  padding: 13px 0 14px;
 }
 
-@media (max-width: 860px) {
-  .page-head-band {
-    align-items: flex-start;
-    flex-direction: column;
+@media (max-width: 960px) {
+  .page-head-top {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .readout {
     flex-wrap: wrap;
     gap: 2px 0;
-    padding-bottom: 8px;
+    margin-top: 8px;
   }
 
   .readout-item {
@@ -157,6 +166,6 @@
   }
 
   .page-head-actions {
-    padding-bottom: 10px;
+    padding-top: 13px;
   }
 }

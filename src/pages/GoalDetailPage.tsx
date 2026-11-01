@@ -25,6 +25,7 @@ export function GoalDetailPage() {
   const navigate = useNavigate();
   const snapshot = useSnapshot();
   const openCard = useUiStore((state) => state.openCard);
+  const requestConfirm = useUiStore((state) => state.requestConfirm);
   const createGoal = useAppStore((state) => state.createGoal);
   const updateGoal = useAppStore((state) => state.updateGoal);
   const deleteGoal = useAppStore((state) => state.deleteGoal);
@@ -75,11 +76,16 @@ export function GoalDetailPage() {
   const isCompleted = goal.status === 'completed';
 
   const handleDelete = async () => {
-    const childHint =
-      children.length > 0
-        ? `\n${children.length} 个子目标会保留并升为顶层目标。`
-        : '';
-    const confirmed = window.confirm(`确定删除目标「${goal.title}」吗？不会删除关联的任务。${childHint}`);
+    const confirmed = await requestConfirm({
+      title: `删除目标「${goal.title}」`,
+      description: '目标本身会被删除，关联的任务不受影响。',
+      details:
+        children.length > 0
+          ? [`${children.length} 个子目标会保留并升为顶层目标`]
+          : undefined,
+      confirmLabel: '删除目标',
+      tone: 'danger',
+    });
     if (!confirmed) return;
     try {
       await deleteGoal(goal.id);

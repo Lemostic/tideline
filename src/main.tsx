@@ -7,6 +7,7 @@ import { useSettingsStore } from './store/settingsStore';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/page-head.css';
+import './styles/overlays.css';
 
 // 首帧前恢复主题与全局卡片尺寸，避免启动时先闪一下默认布局。
 const initialSettings = useSettingsStore.getState();
