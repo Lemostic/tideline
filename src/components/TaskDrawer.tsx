@@ -4,7 +4,12 @@ import { DatePicker } from '@/components/DatePicker';
 import { Icon } from '@/components/Icon';
 import { ActivitySection, RecurrenceSection } from '@/components/RecurrenceSection';
 import { formatDateCN, formatRelativeTime, todayKey } from '@/lib/date';
-import { blockersFor, dependencyCandidates } from '@/lib/dependencies';
+import {
+  blockersFor,
+  crossBoardRelationCandidates,
+  dependencyCandidates,
+  relationTypeOf,
+} from '@/lib/dependencies';
 import { createId } from '@/lib/ids';
 import { labelColorKey, labelStyle } from '@/lib/labelColors';
 import { isBlankMarkdown, renderMarkdown } from '@/lib/markdown';
@@ -12,9 +17,12 @@ import {
   BOARD_COLORS,
   boardColorValue,
   PRIORITY_META,
+  RELATION_META,
+  relationMeta,
   type Card,
   type CardPatch,
   type Priority,
+  type RelationType,
 } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useUiStore } from '@/store/uiStore';
@@ -69,6 +77,7 @@ export function TaskDrawer() {
   const [rangeNote, setRangeNote] = useState<string | null>(null);
   const [labelNote, setLabelNote] = useState<string | null>(null);
   const [dependencyPick, setDependencyPick] = useState('');
+  const [relationPickType, setRelationPickType] = useState<RelationType>('blocks');
   const subtaskInputRef = useRef<HTMLInputElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
 
@@ -143,21 +152,50 @@ export function TaskDrawer() {
   const labelLimitReached = card.labels.length >= MAX_LABELS;
   const blockers = blockersFor(card.id, snapshot.dependencies, snapshot.cards);
   const unfinishedBlockers = blockers.filter((blocker) => !blocker.completed);
-  const dependencyOptions = dependencyCandidates(
+  // V0.12：全部关系（前置 / 相关 / 重复），按目标 id 索引便于统一增删。
+  const relations = snapshot.dependencies.filter((item) => item.cardId === card.id);
+  const relationTargets = new Map(
+    relations.map((item) => [item.dependsOnCardId, relationTypeOf(item)]),
+  );
+  const relationRows = relations
+    .map((item) => ({
+      id: item.dependsOnCardId,
+      type: relationTypeOf(item),
+      card: snapshot.cards.find((candidate) => candidate.id === item.dependsOnCardId),
+    }))
+    .filter((item): item is { id: string; type: RelationType; card: Card } => Boolean(item.card));
+  // 候选任务：同看板优先，跨看板任务放在分组末尾（V0.12 放开跨看板限制）。
+  const sameBoardOptions = dependencyCandidates(
     card,
     snapshot.cards.filter((item) => item.boardId === card.boardId),
     snapshot.dependencies,
   );
-  const addBlocker = (blockerId: string) => {
-    if (!blockerId) return;
-    void setDependencies(card.id, [...blockers.map((blocker) => blocker.id), blockerId]);
-    setDependencyPick('');
-  };
-  const removeBlocker = (blockerId: string) => {
+  const otherBoardOptions = crossBoardRelationCandidates(
+    card,
+    snapshot.cards.filter((item) => item.boardId !== card.boardId),
+    snapshot.dependencies,
+  );
+  const dependencyOptions = [...sameBoardOptions, ...otherBoardOptions];
+
+  /** 按当前类型写回全部关系（types 与 ids 同序）。 */
+  const writeRelations = (rows: Array<{ id: string; type: RelationType }>) => {
     void setDependencies(
       card.id,
-      blockers.filter((blocker) => blocker.id !== blockerId).map((blocker) => blocker.id),
+      rows.map((row) => row.id),
+      rows.map((row) => row.type),
     );
+  };
+  const addRelation = (targetId: string, type: RelationType) => {
+    if (!targetId) return;
+    writeRelations([...relationRows.map((row) => ({ id: row.id, type: row.type })), { id: targetId, type }]);
+    setDependencyPick('');
+  };
+  const removeRelation = (targetId: string) => {
+    writeRelations(relationRows.filter((row) => row.id !== targetId).map((row) => ({ id: row.id, type: row.type })));
+  };
+  /** 切换某个关系的类型；改成前置时若会形成环，由后端拒绝并给出提示。 */
+  const changeRelationType = (targetId: string, type: RelationType) => {
+    writeRelations(relationRows.map((row) => (row.id === targetId ? { id: row.id, type } : { id: row.id, type: row.type })));
   };
 
   /** 所有写操作都从最新快照取当前卡片，连续快速点击也不会互相覆盖 */
@@ -591,42 +629,67 @@ export function TaskDrawer() {
             <div className="td-section-head">
               <div className="drawer-section-title">
                 <Icon name="link" size={13} />
-                前置任务
+                任务关系
               </div>
               {blockers.length > 0 ? (
                 <span className="td-progress-value">
-                  {blockers.length - unfinishedBlockers.length} / {blockers.length} 已完成
+                  {blockers.length - unfinishedBlockers.length} / {blockers.length} 前置已完成
                 </span>
               ) : null}
             </div>
 
-            {blockers.length > 0 ? (
+            {relationRows.length > 0 ? (
               <ul className="td-dependencies">
-                {blockers.map((blocker) => (
-                  <li className={`td-dependency${blocker.completed ? ' is-done' : ''}`} key={blocker.id}>
-                    <Icon
-                      name={blocker.completed ? 'check-circle' : 'clock'}
-                      size={13}
-                      className="td-dependency-icon"
-                    />
-                    <span className="td-dependency-title" title={blocker.title}>
-                      {blocker.title}
-                    </span>
-                    {blocker.completed ? <span className="td-dependency-state">已完成</span> : null}
-                    <button
-                      type="button"
-                      className="td-dependency-remove"
-                      aria-label={`移除前置任务：${blocker.title}`}
-                      title="移除前置任务"
-                      onClick={() => removeBlocker(blocker.id)}
+                {relationRows.map((row) => {
+                  const meta = relationMeta(row.type);
+                  const blocking = row.type === 'blocks';
+                  const done = blocking && row.card.completed;
+                  return (
+                    <li
+                      className={`td-dependency${done ? ' is-done' : ''}${blocking ? '' : ' is-soft'}`}
+                      key={row.id}
                     >
-                      <Icon name="x" size={11} />
-                    </button>
-                  </li>
-                ))}
+                      <Icon
+                        name={blocking ? (done ? 'check-circle' : 'clock') : 'link'}
+                        size={13}
+                        className="td-dependency-icon"
+                      />
+                      <span className="td-dependency-title" title={row.card.title}>
+                        {row.card.title}
+                      </span>
+                      <select
+                        className="td-dependency-type"
+                        value={row.type}
+                        aria-label={`${row.card.title} 的关系类型`}
+                        title={meta.hint}
+                        onChange={(event) =>
+                          changeRelationType(row.id, event.target.value as RelationType)
+                        }
+                      >
+                        {RELATION_META.map((item) => (
+                          <option key={item.key} value={item.key}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                      {done ? <span className="td-dependency-state">已完成</span> : null}
+                      <button
+                        type="button"
+                        className="td-dependency-remove"
+                        aria-label={`移除关系：${row.card.title}`}
+                        title="移除关系"
+                        onClick={() => removeRelation(row.id)}
+                      >
+                        <Icon name="x" size={11} />
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
-              <p className="td-dependency-empty">暂无前置任务，添加后会在卡片上显示阻塞提示。</p>
+              <p className="td-dependency-empty">
+                暂无任务关系。添加前置后，目标未完成时本任务会显示阻塞提示。
+              </p>
             )}
 
             {unfinishedBlockers.length > 0 ? (
@@ -637,23 +700,46 @@ export function TaskDrawer() {
             ) : null}
 
             {dependencyOptions.length > 0 ? (
-              <label className="td-dependency-add">
-                <Icon name="plus" size={12} />
+              <div className="td-dependency-add-row">
                 <select
-                  value={dependencyPick}
-                  aria-label="添加前置任务"
-                  onChange={(event) => addBlocker(event.target.value)}
+                  className="td-dependency-type"
+                  value={relationPickType}
+                  aria-label="新关系类型"
+                  onChange={(event) => setRelationPickType(event.target.value as RelationType)}
                 >
-                  <option value="">添加前置任务…</option>
-                  {dependencyOptions.map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {candidate.title}
+                  {RELATION_META.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.label}
                     </option>
                   ))}
                 </select>
-              </label>
+                <label className="td-dependency-add">
+                  <Icon name="plus" size={12} />
+                  <select
+                    value={dependencyPick}
+                    aria-label="添加任务关系"
+                    onChange={(event) => addRelation(event.target.value, relationPickType)}
+                  >
+                    <option value="">添加任务关系…</option>
+                    {sameBoardOptions.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {candidate.title}
+                      </option>
+                    ))}
+                    {otherBoardOptions.length > 0 ? (
+                      <optgroup label="其它看板">
+                        {otherBoardOptions.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {candidate.title}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                  </select>
+                </label>
+              </div>
             ) : (
-              <p className="td-dependency-empty">当前看板没有可作为前置的任务。</p>
+              <p className="td-dependency-empty">当前没有可关联的任务。</p>
             )}
           </div>
 

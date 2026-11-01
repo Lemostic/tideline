@@ -371,11 +371,11 @@ pub fn get_all_cards(conn: &Connection) -> DbResult<Vec<Card>> {
     )
 }
 
-/// 全部任务依赖边（V0.4）。
+/// 全部任务关系边（V0.4 起为依赖，V0.12 起带类型）。
 pub fn get_dependencies(conn: &Connection) -> DbResult<Vec<CardDependency>> {
     let mut statement = conn
         .prepare(
-            "SELECT card_id, depends_on_card_id FROM card_dependencies \
+            "SELECT card_id, depends_on_card_id, relation_type FROM card_dependencies \
              ORDER BY card_id ASC, depends_on_card_id ASC",
         )
         .map_err(db_err)?;
@@ -384,6 +384,7 @@ pub fn get_dependencies(conn: &Connection) -> DbResult<Vec<CardDependency>> {
             Ok(CardDependency {
                 card_id: row.get(0)?,
                 depends_on_card_id: row.get(1)?,
+                relation_type: RelationType::from_str_lossy(&row.get::<_, String>(2)?),
             })
         })
         .map_err(db_err)?;
@@ -1956,9 +1957,10 @@ fn dependency_reaches(
     false
 }
 
-/// 整体替换某张任务的前置任务列表（V0.4）。
+/// 整体替换某张任务的关系列表（V0.4 起为前置任务，V0.12 起支持多种关系类型）。
 ///
-/// 约束：只能依赖同一看板内的活动任务；不能依赖自己；不能形成循环。
+/// 约束：不能关联自己；关联目标必须是未删除的任务；`blocks` 类型不能形成循环。
+/// V0.12 起放开跨看板限制——看板集本就是跨看板容器，跨看板依赖是真实需求。
 pub fn set_card_dependencies(
     conn: &mut Connection,
     input: SetDependenciesInput,
@@ -1966,42 +1968,45 @@ pub fn set_card_dependencies(
     let tx = conn.transaction().map_err(db_err)?;
     let card = get_card(&tx, &input.card_id)?;
     if card.deleted_at.is_some() {
-        return Err("回收站中的任务不能设置前置任务".to_string());
+        return Err("回收站中的任务不能设置关系".to_string());
     }
 
-    let mut depends_on = Vec::new();
-    for id in input.depends_on {
-        if id == card.id {
-            return Err("任务不能依赖自己".to_string());
+    // 目标 id 与关系类型一一对应；缺省类型按 blocks 处理。
+    let mut relations: Vec<(String, RelationType)> = Vec::new();
+    for (index, id) in input.depends_on.iter().enumerate() {
+        if *id == card.id {
+            return Err("任务不能关联自己".to_string());
         }
-        if !depends_on.contains(&id) {
-            depends_on.push(id);
+        if relations.iter().any(|(existing, _)| existing == id) {
+            continue;
+        }
+        let relation_type = input
+            .relation_types
+            .get(index)
+            .copied()
+            .unwrap_or(RelationType::Blocks);
+        relations.push((id.clone(), relation_type));
+    }
+
+    for (id, _) in &relations {
+        let target = get_card(&tx, id).map_err(|_| format!("关联任务不存在：{id}"))?;
+        if target.deleted_at.is_some() {
+            return Err(format!("关联任务「{}」在回收站中", target.title));
         }
     }
 
-    for id in &depends_on {
-        let blocker = get_card(&tx, id)
-            .map_err(|_| format!("前置任务不存在：{id}"))?;
-        if blocker.deleted_at.is_some() {
-            return Err(format!("前置任务「{}」在回收站中", blocker.title));
-        }
-        if blocker.board_id != card.board_id {
-            return Err("只能依赖同一看板内的任务".to_string());
-        }
-    }
-
-    // 构建该看板的依赖图（先移除当前任务的旧边，再检查新边是否成环）。
+    // 构建阻塞关系图：只有 blocks 类型参与循环依赖检测。
     let mut edges: HashMap<String, Vec<String>> = HashMap::new();
     {
         let mut statement = tx
             .prepare(
                 "SELECT d.card_id, d.depends_on_card_id \
                  FROM card_dependencies d JOIN cards c ON c.id = d.card_id \
-                 WHERE c.board_id = ?1",
+                 WHERE d.relation_type = 'blocks'",
             )
             .map_err(db_err)?;
         let rows = statement
-            .query_map([&card.board_id], |row| {
+            .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
             .map_err(db_err)?;
@@ -2013,8 +2018,14 @@ pub fn set_card_dependencies(
             edges.entry(from).or_default().push(to);
         }
     }
-    edges.insert(card.id.clone(), depends_on.clone());
-    for blocker in &depends_on {
+    // 只有 blocks 关系参与环检测；relates / duplicates 不构成阻塞链。
+    let blocking: Vec<String> = relations
+        .iter()
+        .filter(|(_, relation_type)| relation_type.is_blocking())
+        .map(|(id, _)| id.clone())
+        .collect();
+    edges.insert(card.id.clone(), blocking.clone());
+    for blocker in &blocking {
         if dependency_reaches(&edges, blocker, &card.id) {
             return Err("前置任务形成了循环依赖".to_string());
         }
@@ -2025,20 +2036,22 @@ pub fn set_card_dependencies(
         [&card.id],
     )
     .map_err(db_err)?;
-    for id in &depends_on {
+    for (id, relation_type) in &relations {
         tx.execute(
-            "INSERT INTO card_dependencies (card_id, depends_on_card_id) VALUES (?1, ?2)",
-            params![&card.id, id],
+            "INSERT INTO card_dependencies (card_id, depends_on_card_id, relation_type) \
+             VALUES (?1, ?2, ?3)",
+            params![&card.id, id, relation_type.as_str()],
         )
         .map_err(db_err)?;
     }
     tx.commit().map_err(db_err)?;
 
-    Ok(depends_on
+    Ok(relations
         .into_iter()
-        .map(|depends_on_card_id| CardDependency {
+        .map(|(depends_on_card_id, relation_type)| CardDependency {
             card_id: card.id.clone(),
             depends_on_card_id,
+            relation_type,
         })
         .collect())
 }
@@ -4078,6 +4091,7 @@ mod tests {
             SetDependenciesInput {
                 card_id: c.id.clone(),
                 depends_on: vec![a.id.clone(), b.id.clone()],
+                relation_types: Vec::new(),
             },
         )
         .expect("设置依赖");
@@ -4096,6 +4110,7 @@ mod tests {
             SetDependenciesInput {
                 card_id: c.id.clone(),
                 depends_on: Vec::new(),
+                relation_types: Vec::new(),
             },
         )
         .expect("清空依赖");
@@ -4107,6 +4122,7 @@ mod tests {
             SetDependenciesInput {
                 card_id: c.id.clone(),
                 depends_on: vec![a.id.clone()],
+                relation_types: Vec::new(),
             },
         )
         .expect("重新设置依赖");
@@ -4132,26 +4148,40 @@ mod tests {
             SetDependenciesInput {
                 card_id: a.id.clone(),
                 depends_on: vec![a.id.clone()],
+                relation_types: Vec::new(),
             },
         )
         .expect_err("不能依赖自己");
         assert!(err.contains("自己"), "错误：{err}");
 
-        let err = set_card_dependencies(
+        // V0.12：跨看板关系已放开，不再报错。
+        let saved = set_card_dependencies(
             &mut conn,
             SetDependenciesInput {
                 card_id: a.id.clone(),
                 depends_on: vec![other.id.clone()],
+                relation_types: Vec::new(),
             },
         )
-        .expect_err("不能跨看板");
-        assert!(err.contains("同一看板"), "错误：{err}");
+        .expect("允许跨看板关系");
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].relation_type, RelationType::Blocks);
+        set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: a.id.clone(),
+                depends_on: Vec::new(),
+                relation_types: Vec::new(),
+            },
+        )
+        .expect("清空关系");
 
         let err = set_card_dependencies(
             &mut conn,
             SetDependenciesInput {
                 card_id: a.id.clone(),
                 depends_on: vec!["c_missing".to_string()],
+                relation_types: Vec::new(),
             },
         )
         .expect_err("不能依赖不存在任务");
@@ -4163,6 +4193,7 @@ mod tests {
             SetDependenciesInput {
                 card_id: b.id.clone(),
                 depends_on: vec![a.id.clone()],
+                relation_types: Vec::new(),
             },
         )
         .expect("B 依赖 A");
@@ -4171,10 +4202,86 @@ mod tests {
             SetDependenciesInput {
                 card_id: a.id.clone(),
                 depends_on: vec![b.id.clone()],
+                relation_types: Vec::new(),
             },
         )
         .expect_err("循环依赖");
         assert!(err.contains("循环"), "错误：{err}");
+    }
+
+    #[test]
+    fn relation_types_persist_and_only_blocks_detect_cycles() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "关系看板");
+        let list = new_list(&mut conn, &board.id, "待办");
+        let a = new_card(&mut conn, &board.id, &list.id, "A");
+        let b = new_card(&mut conn, &board.id, &list.id, "B");
+        let c = new_card(&mut conn, &board.id, &list.id, "C");
+
+        // A 与 B 互为 relates：这类关系不构成阻塞链，不应触发循环检测。
+        set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: a.id.clone(),
+                depends_on: vec![b.id.clone()],
+                relation_types: vec![RelationType::Relates],
+            },
+        )
+        .expect("A 关联 B");
+        set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: b.id.clone(),
+                depends_on: vec![a.id.clone()],
+                relation_types: vec![RelationType::Relates],
+            },
+        )
+        .expect("B 关联 A");
+
+        let dependencies = get_dependencies(&conn).expect("关系");
+        assert_eq!(dependencies.len(), 2);
+        assert!(dependencies
+            .iter()
+            .all(|dependency| dependency.relation_type == RelationType::Relates));
+
+        // blocks 类型仍然要检测循环。
+        let saved = set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: a.id.clone(),
+                depends_on: vec![c.id.clone()],
+                relation_types: vec![RelationType::Blocks],
+            },
+        )
+        .expect("A 前置 C");
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].relation_type, RelationType::Blocks);
+        let err = set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: c.id.clone(),
+                depends_on: vec![a.id.clone()],
+                relation_types: vec![RelationType::Blocks],
+            },
+        )
+        .expect_err("blocks 应检测出循环");
+        assert!(err.contains("循环"), "错误：{err}");
+
+        // 缺少类型时按 blocks 处理：换一个无环的目标验证缺省行为。
+        set_card_dependencies(
+            &mut conn,
+            SetDependenciesInput {
+                card_id: c.id.clone(),
+                depends_on: vec![b.id.clone()],
+                relation_types: Vec::new(),
+            },
+        )
+        .expect("缺省类型按 blocks");
+        let dependencies = get_dependencies(&conn).expect("关系");
+        assert!(dependencies
+            .iter()
+            .filter(|dependency| dependency.card_id == c.id)
+            .all(|dependency| dependency.relation_type == RelationType::Blocks));
     }
 
     #[test]

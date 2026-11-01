@@ -54,6 +54,7 @@ import type {
   NotificationSettingsInput,
   Recurrence,
   RecurrencePatch,
+  RelationType,
   TeamMember,
   TeamMemberPatch,
   TenurePatch,
@@ -140,8 +141,12 @@ export interface AppState {
   updateCard: (id: string, patch: CardPatch) => Promise<void>;
   deleteCard: (id: string) => Promise<void>;
   moveCard: (cardId: string, toListId: string, toIndex: number) => Promise<void>;
-  /** 整体替换某张任务的前置任务（V0.4） */
-  setDependencies: (cardId: string, dependsOn: string[]) => Promise<void>;
+  /** 整体替换某张任务的关系列表（V0.4 起为前置任务，V0.12 起带类型） */
+  setDependencies: (
+    cardId: string,
+    dependsOn: string[],
+    relationTypes?: RelationType[],
+  ) => Promise<void>;
 
   /** 看板内批量操作（V0.4）：顺序写入后刷新快照 */
   bulkMoveCards: (cardIds: string[], toListId: string) => Promise<void>;
@@ -845,9 +850,13 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
-    setDependencies: async (cardId, dependsOn) => {
+    setDependencies: async (cardId, dependsOn, relationTypes) => {
       try {
-        const dependencies = await api.setCardDependencies({ cardId, dependsOn });
+        const dependencies = await api.setCardDependencies({
+          cardId,
+          dependsOn,
+          relationTypes,
+        });
         set((state) => ({
           snapshot: {
             ...state.snapshot,

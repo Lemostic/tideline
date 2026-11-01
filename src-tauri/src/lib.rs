@@ -22,6 +22,14 @@ use tauri::Manager;
 use db::Db;
 use usage::UsageRuntime;
 
+/// 「桌面软件使用统计」当前处于下线状态。
+///
+/// 该功能统计前台软件使用时长，与潮线「任务与看板管理」的产品定位不符，
+/// 因此默认不启动后台采样线程：既不在导航中出现，也不在用户无感知的情况下
+/// 继续采集数据。相关表结构、命令与已有数据全部保留，需要时把这里改成
+/// `true` 即可恢复。
+const USAGE_STATS_ENABLED: bool = false;
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -42,7 +50,10 @@ pub fn run() {
                 usage_settings.idle_threshold_seconds,
             ));
             // 启动后台采样线程：每 1 秒采样一次前台窗口所属进程，线程随进程退出而结束。
-            usage::spawn_sampler(app.handle().clone());
+            // 使用统计下线时不启动，避免在用户无感知的情况下继续采集前台窗口数据。
+            if USAGE_STATS_ENABLED {
+                usage::spawn_sampler(app.handle().clone());
+            }
             // 启动后台提醒线程：每分钟检查一次到期 / 逾期 / 每日摘要。
             reminders::spawn_scheduler(app.handle().clone());
             #[cfg(debug_assertions)]

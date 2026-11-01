@@ -21,7 +21,15 @@ import {
   toDateKey,
   todayKey,
 } from '@/lib/date';
-import { PRIORITY_META, boardColorValue, type Card, type CardPatch, type List } from '@/lib/types';
+import { relationTypeOf } from '@/lib/dependencies';
+import {
+  PRIORITY_META,
+  boardColorValue,
+  type Card,
+  type CardPatch,
+  type List,
+  type RelationType,
+} from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
@@ -64,6 +72,8 @@ interface DependencyPath {
   d: string;
   arrow: string;
   done: boolean;
+  /** V0.12：关系类型决定连线样式 */
+  relationType: RelationType;
 }
 
 function cardProgress(card: Card): number {
@@ -330,6 +340,8 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
               endY + 3.6
             } Z`,
             done: snapshot.cards.find((card) => card.id === dependency.dependsOnCardId)?.completed === true,
+            // V0.12：关系类型决定连线样式。
+            relationType: relationTypeOf(dependency),
           });
         }
         setDependencyPaths(paths);
@@ -763,7 +775,7 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
               {dependencyPaths.map((path) => (
                 <g
                   key={path.key}
-                  className={`gantt-dependency${path.done ? ' is-done' : ''}`}
+                  className={`gantt-dependency gantt-dependency--${path.relationType}${path.done ? ' is-done' : ''}`}
                 >
                   <path className="gantt-dependency-line" d={path.d} />
                   <path className="gantt-dependency-arrow" d={path.arrow} />

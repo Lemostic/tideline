@@ -23,6 +23,7 @@ import type {
   ProjectMetaField,
   ProjectRole,
   Recurrence,
+  RelationType,
   TeamMember,
   MemberTenure,
 } from './types';
@@ -220,7 +221,6 @@ export function parseBackup(text: string): BackupFile {
   }
 
   const cardIds = new Set<string>();
-  const cardBoard = new Map<string, string>();
   for (const card of cards) {
     if (!isRecord(card)) throw new Error('备份中的任务数据格式不正确');
     const id = requireString(card.id, 'cards[].id');
@@ -232,7 +232,6 @@ export function parseBackup(text: string): BackupFile {
     if (!owner) throw new Error(`任务「${String(card.title)}」引用了不存在的列表`);
     if (owner !== boardId) throw new Error(`任务「${String(card.title)}」的列表与看板不一致`);
     cardIds.add(id);
-    cardBoard.set(id, boardId);
     requireString(card.title ?? '', 'cards[].title');
     for (const field of ['estimatedMinutes', 'actualMinutes'] as const) {
       const minutes = card[field];
@@ -258,13 +257,20 @@ export function parseBackup(text: string): BackupFile {
     if (!cardIds.has(dependsOnCardId)) {
       throw new Error(`依赖引用了不存在的前置任务：${dependsOnCardId}`);
     }
-    if (cardBoard.get(cardId) !== cardBoard.get(dependsOnCardId)) {
-      throw new Error('备份中存在跨看板的任务依赖');
+    // V0.12：关系带类型，旧备份缺少该字段时按「前置」处理；
+    // 只有前置关系参与循环检测，跨看板关系不再拒绝。
+    const rawType = item.relationType;
+    const relationType: RelationType =
+      rawType === undefined || rawType === null ? 'blocks' : (rawType as RelationType);
+    if (relationType !== 'blocks' && relationType !== 'relates' && relationType !== 'duplicates') {
+      throw new Error(`备份中存在未知的关系类型：${String(rawType)}`);
     }
-    dependencies.push({ cardId, dependsOnCardId });
-    const bucket = dependencyEdges.get(cardId) ?? [];
-    bucket.push(dependsOnCardId);
-    dependencyEdges.set(cardId, bucket);
+    dependencies.push({ cardId, dependsOnCardId, relationType });
+    if (relationType === 'blocks') {
+      const bucket = dependencyEdges.get(cardId) ?? [];
+      bucket.push(dependsOnCardId);
+      dependencyEdges.set(cardId, bucket);
+    }
   }
   if (dependencyGraphHasCycle(dependencyEdges)) {
     throw new Error('备份中的任务依赖存在循环');

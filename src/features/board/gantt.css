@@ -635,6 +635,21 @@
   opacity: 0.75;
 }
 
+/* V0.12：关系类型区分连线样式 */
+.gantt-dependency--relates .gantt-dependency-line {
+  stroke-dasharray: 2 3;
+  opacity: 0.6;
+}
+
+.gantt-dependency--duplicates .gantt-dependency-line {
+  stroke-dasharray: 7 3 2 3;
+}
+
+.gantt-dependency--relates .gantt-dependency-arrow,
+.gantt-dependency--duplicates .gantt-dependency-arrow {
+  opacity: 0.7;
+}
+
 .gantt-bar.is-dragging {
   z-index: 4;
 }

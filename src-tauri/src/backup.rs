@@ -362,13 +362,14 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
                 dependency.depends_on_card_id
             ));
         };
-        if card_board_id != blocker_board_id {
-            return Err("备份中存在跨看板的任务依赖".to_string());
+        // V0.12：放开跨看板限制；只有 blocks 类型参与循环检测。
+        let _ = (card_board_id, blocker_board_id);
+        if dependency.relation_type.is_blocking() {
+            dependency_edges
+                .entry(dependency.card_id.clone())
+                .or_default()
+                .push(dependency.depends_on_card_id.clone());
         }
-        dependency_edges
-            .entry(dependency.card_id.clone())
-            .or_default()
-            .push(dependency.depends_on_card_id.clone());
     }
     if dependency_graph_has_cycle(&dependency_edges) {
         return Err("备份中的任务依赖存在循环".to_string());
@@ -952,8 +953,13 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
 
     for dependency in &backup.dependencies {
         tx.execute(
-            "INSERT INTO card_dependencies (card_id, depends_on_card_id) VALUES (?1, ?2)",
-            params![&dependency.card_id, &dependency.depends_on_card_id],
+            "INSERT INTO card_dependencies (card_id, depends_on_card_id, relation_type) \
+             VALUES (?1, ?2, ?3)",
+            params![
+                &dependency.card_id,
+                &dependency.depends_on_card_id,
+                dependency.relation_type.as_str(),
+            ],
         )
         .map_err(|error| format!("写入任务依赖失败：{error}"))?;
     }
@@ -1199,6 +1205,7 @@ mod tests {
             SetDependenciesInput {
                 card_id: second.id.clone(),
                 depends_on: vec![first.id.clone()],
+                relation_types: Vec::new(),
             },
         )
         .expect("设置依赖");
@@ -1308,6 +1315,7 @@ mod tests {
         backup.dependencies.push(CardDependency {
             card_id: backup.cards[0].id.clone(),
             depends_on_card_id: "c_missing".to_string(),
+            relation_type: RelationType::Blocks,
         });
         let error = validate(&backup).expect_err("应拒绝不存在的依赖");
         assert!(error.contains("不存在"), "错误：{error}");

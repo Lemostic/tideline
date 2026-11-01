@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type DragEvent } from 'react';
 import { dependencyPath, type CardBox } from '@/lib/dependencyLayout';
-import type { Board, Card, List } from '@/lib/types';
+import { relationTypeOf } from '@/lib/dependencies';
+import type { Board, Card, List, RelationType } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { AddListColumn } from './AddListColumn';
@@ -22,6 +23,8 @@ interface DependencyLine {
   done: boolean;
   from: string;
   to: string;
+  /** V0.12：关系类型决定连线样式 */
+  relationType: RelationType;
 }
 
 interface KanbanBoardProps {
@@ -107,6 +110,8 @@ export function KanbanBoard({
           done: cardsById.get(dependency.dependsOnCardId)?.completed === true,
           from: dependency.dependsOnCardId,
           to: dependency.cardId,
+          // V0.12：关系类型决定连线样式，只有前置关系是实心阻塞箭头。
+          relationType: relationTypeOf(dependency),
         });
       }
       setDependencyLines(next);
@@ -260,7 +265,7 @@ export function KanbanBoard({
               <path
                 key={line.key}
                 d={line.d}
-                className={`dependency-line${line.done ? ' is-done' : ''}`}
+                className={`dependency-line dependency-line--${line.relationType}${line.done ? ' is-done' : ''}`}
                 data-dep-from={line.from}
                 data-dep-to={line.to}
                 markerStart="url(#dependency-start)"

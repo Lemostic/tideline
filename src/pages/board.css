@@ -264,6 +264,24 @@
   opacity: 0.28;
 }
 
+/* V0.12：关系类型区分连线样式 */
+.dependency-line--relates {
+  stroke: var(--muted);
+  stroke-dasharray: 2 4;
+  opacity: 0.4;
+}
+
+.dependency-line--duplicates {
+  stroke: var(--warning);
+  stroke-dasharray: 8 3 2 3;
+  opacity: 0.45;
+}
+
+.dependency-line--relates.is-done,
+.dependency-line--duplicates.is-done {
+  opacity: 0.22;
+}
+
 .dependency-layer marker path {
   fill: var(--primary);
 }

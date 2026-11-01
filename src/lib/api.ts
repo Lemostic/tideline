@@ -37,6 +37,7 @@ import type {
   CardActivity,
   CardDependency,
   CardPatch,
+  RelationType,
   Goal,
   GoalPatch,
   GoalScope,
@@ -115,8 +116,12 @@ export interface TidelineApi {
   addInboxItem(input: { content: string }): Promise<InboxItem>;
   deleteInboxItem(input: IdInput): Promise<void>;
   convertInboxItem(input: ConvertInboxInput): Promise<Card>;
-  /** 整体替换某张任务的前置任务（V0.4） */
-  setCardDependencies(input: { cardId: string; dependsOn: string[] }): Promise<CardDependency[]>;
+  /** 整体替换某张任务的关系列表（V0.4 起为前置任务，V0.12 起带类型） */
+  setCardDependencies(input: {
+    cardId: string;
+    dependsOn: string[];
+    relationTypes?: RelationType[];
+  }): Promise<CardDependency[]>;
   /** 导出全量 JSON 备份（桌面端写入「文档」目录，浏览器端触发下载） */
   exportBackup(): Promise<BackupExport>;
   /** 用 JSON 备份替换全部数据（失败时不应修改原数据） */
@@ -703,12 +708,18 @@ function loadLocalDb(): LocalDb {
       cards: Array.isArray(parsed.cards) ? parsed.cards.map(normalizeCard) : [],
       inbox: Array.isArray(parsed.inbox) ? parsed.inbox : [],
       dependencies: Array.isArray(parsed.dependencies)
-        ? parsed.dependencies.filter(
-            (item): item is CardDependency =>
-              Boolean(item) &&
-              typeof item.cardId === 'string' &&
-              typeof item.dependsOnCardId === 'string',
-          )
+        ? parsed.dependencies
+            .filter(
+              (item): item is CardDependency =>
+                Boolean(item) &&
+                typeof item.cardId === 'string' &&
+                typeof item.dependsOnCardId === 'string',
+            )
+            // V0.12：旧备份没有关系类型字段，按「前置」处理。
+            .map((item) => ({
+              ...item,
+              relationType: item.relationType ?? 'blocks',
+            }))
         : [],
       boardSets: Array.isArray(parsed.boardSets)
         ? parsed.boardSets
@@ -1422,40 +1433,51 @@ const localApi: TidelineApi = {
     return card;
   },
 
-  async setCardDependencies({ cardId, dependsOn }) {
+  async setCardDependencies({ cardId, dependsOn, relationTypes }) {
     const db = loadLocalDb();
     const card = requireCard(db, cardId);
-    if (card.deletedAt) throw new Error('回收站中的任务不能设置前置任务');
-    const blockers: string[] = [];
-    for (const id of dependsOn) {
-      if (id === card.id) throw new Error('任务不能依赖自己');
-      if (blockers.includes(id)) continue;
-      const blocker = requireCard(db, id);
-      if (blocker.deletedAt) throw new Error(`前置任务「${blocker.title}」在回收站中`);
-      if (blocker.boardId !== card.boardId) throw new Error('只能依赖同一看板内的任务');
-      blockers.push(id);
+    if (card.deletedAt) throw new Error('回收站中的任务不能设置关系');
+    // 目标 id 与关系类型一一对应；缺省类型按 blocks 处理。
+    const relations: Array<{ id: string; type: RelationType }> = [];
+    for (const [index, id] of dependsOn.entries()) {
+      if (id === card.id) throw new Error('任务不能关联自己');
+      if (relations.some((item) => item.id === id)) continue;
+      const target = requireCard(db, id);
+      if (target.deletedAt) throw new Error(`关联任务「${target.title}」在回收站中`);
+      relations.push({ id, type: relationTypes?.[index] ?? 'blocks' });
     }
 
+    // 只有 blocks 关系参与循环依赖检测。
+    const blocking = relations.filter((item) => item.type === 'blocks').map((item) => item.id);
     const edges = new Map<string, string[]>();
     for (const dependency of db.dependencies) {
       if (dependency.cardId === card.id) continue;
+      if ((dependency.relationType ?? 'blocks') !== 'blocks') continue;
       const list = edges.get(dependency.cardId) ?? [];
       list.push(dependency.dependsOnCardId);
       edges.set(dependency.cardId, list);
     }
-    edges.set(card.id, blockers);
-    for (const blocker of blockers) {
+    edges.set(card.id, blocking);
+    for (const blocker of blocking) {
       if (dependencyReaches(edges, blocker, card.id)) {
         throw new Error('前置任务形成了循环依赖');
       }
     }
 
     db.dependencies = db.dependencies.filter((dependency) => dependency.cardId !== card.id);
-    for (const blocker of blockers) {
-      db.dependencies.push({ cardId: card.id, dependsOnCardId: blocker });
+    for (const relation of relations) {
+      db.dependencies.push({
+        cardId: card.id,
+        dependsOnCardId: relation.id,
+        relationType: relation.type,
+      });
     }
     saveLocalDb(db);
-    return blockers.map((dependsOnCardId) => ({ cardId: card.id, dependsOnCardId }));
+    return relations.map((relation) => ({
+      cardId: card.id,
+      dependsOnCardId: relation.id,
+      relationType: relation.type,
+    }));
   },
 
   async addInboxItem({ content }) {

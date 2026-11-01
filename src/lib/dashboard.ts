@@ -21,6 +21,7 @@ import {
   type DueBucket,
   type WeekStart,
 } from './date';
+import { isBlockingRelation } from './types';
 import type { Board, Card, CardDependency, List, Priority, Snapshot } from './types';
 
 export const DASHBOARD_RANGES = [7, 30, 90] as const;
@@ -180,6 +181,8 @@ function isoDateKey(iso: string): string {
 function isBlocked(card: Card, cardsById: Map<string, Card>, dependencies: CardDependency[]): boolean {
   return dependencies.some((dependency) => {
     if (dependency.cardId !== card.id) return false;
+    // V0.12：只有前置（blocks）关系产生阻塞。
+    if (!isBlockingRelation(dependency.relationType)) return false;
     const blocker = cardsById.get(dependency.dependsOnCardId);
     return Boolean(blocker && !blocker.completed);
   });

@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS inbox_items (
 CREATE TABLE IF NOT EXISTS card_dependencies (
     card_id            TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
     depends_on_card_id TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+    relation_type      TEXT NOT NULL DEFAULT 'blocks',
     PRIMARY KEY (card_id, depends_on_card_id)
 );
 
@@ -405,7 +406,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 14;
+const SCHEMA_VERSION: i64 = 15;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -460,6 +461,17 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
     if !table_columns(connection, "boards")?.iter().any(|name| name == "label_colors") {
         connection.execute_batch("ALTER TABLE boards ADD COLUMN label_colors TEXT NOT NULL DEFAULT '{}'")
             .map_err(|error| format!("迁移 boards.label_colors 失败：{error}"))?;
+    }
+    // V0.12：任务关系增加类型列，旧数据按「前置阻塞」处理。
+    if !table_columns(connection, "card_dependencies")?
+        .iter()
+        .any(|name| name == "relation_type")
+    {
+        connection
+            .execute_batch(
+                "ALTER TABLE card_dependencies ADD COLUMN relation_type TEXT NOT NULL DEFAULT 'blocks'",
+            )
+            .map_err(|error| format!("迁移 card_dependencies.relation_type 失败：{error}"))?;
     }
     let existing_lists = table_columns(connection, "lists")?;
     for (column, statement) in LIST_COLUMN_MIGRATIONS {

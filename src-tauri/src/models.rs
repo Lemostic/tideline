@@ -323,12 +323,61 @@ pub struct InboxItem {
     pub created_at: String,
 }
 
-/// 任务依赖（V0.4）：`card_id` 依赖 `depends_on_card_id`（前置任务）。
+/// 任务关系类型（V0.12）。
+///
+/// `Blocks` 沿用 V0.4 的前置语义：被指向的任务未完成时，本任务处于被阻塞状态，
+/// 并参与循环依赖检测。`Relates` 与 `Duplicates` 只表达关联，不产生阻塞。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RelationType {
+    /// 前置阻塞：目标未完成则本任务被阻塞
+    Blocks,
+    /// 相关联
+    Relates,
+    /// 重复：目标与本任务是同一件事
+    Duplicates,
+}
+
+impl RelationType {
+    /// 数据库存储值；旧数据缺省按 `blocks` 处理。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RelationType::Blocks => "blocks",
+            RelationType::Relates => "relates",
+            RelationType::Duplicates => "duplicates",
+        }
+    }
+
+    /// 从数据库字符串解析；未知值按 `blocks` 兜底。
+    pub fn from_str_lossy(value: &str) -> RelationType {
+        match value {
+            "relates" => RelationType::Relates,
+            "duplicates" => RelationType::Duplicates,
+            _ => RelationType::Blocks,
+        }
+    }
+
+    /// 是否参与阻塞判定与循环依赖检测。
+    pub fn is_blocking(&self) -> bool {
+        matches!(self, RelationType::Blocks)
+    }
+}
+
+impl Default for RelationType {
+    fn default() -> Self {
+        RelationType::Blocks
+    }
+}
+
+/// 任务关系（V0.4 起为依赖，V0.12 起带类型）：`card_id` 与 `depends_on_card_id` 的关系。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CardDependency {
     pub card_id: String,
     pub depends_on_card_id: String,
+    /// V0.12 新增；旧备份缺少该字段时按 `blocks` 处理。
+    #[serde(default)]
+    pub relation_type: RelationType,
 }
 
 /// 看板集（V0.5.4）：把多个看板聚合成一张跨看板汇总表。
@@ -926,13 +975,17 @@ pub struct ImportBackupInput {
     pub json: String,
 }
 
-/// 设置某张任务的前置任务（整体替换）。
-#[derive(Debug, Clone, Deserialize)]
+/// 整体替换某张任务的关系列表（V0.12）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetDependenciesInput {
     pub card_id: String,
+    /// 关系目标 id 列表；每条关系的类型由 `relations` 中同序元素给出。
     #[serde(default)]
     pub depends_on: Vec<String>,
+    /// 与 `depends_on` 一一对应的关系类型；缺省或长度不足时按 `blocks` 处理。
+    #[serde(default)]
+    pub relation_types: Vec<RelationType>,
 }
 
 /// 切换数据存储目录。

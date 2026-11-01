@@ -117,10 +117,40 @@ export interface Snapshot {
   automationRules: AutomationRule[];
 }
 
-/** 任务依赖（V0.4）：`cardId` 被 `dependsOnCardId` 阻塞 */
+/**
+ * 任务关系类型（V0.12）。
+ *
+ * `blocks` 沿用 V0.4 的前置语义：被指向的任务未完成时，本任务处于被阻塞状态，
+ * 并参与循环依赖检测。`relates` 与 `duplicates` 只表达关联，不产生阻塞。
+ */
+export type RelationType = 'blocks' | 'relates' | 'duplicates';
+
+/** 关系类型的中文标签与说明，供界面展示。 */
+export const RELATION_META: ReadonlyArray<{
+  key: RelationType;
+  label: string;
+  hint: string;
+}> = [
+  { key: 'blocks', label: '前置', hint: '目标未完成时本任务被阻塞' },
+  { key: 'relates', label: '相关', hint: '两件事有关联，互不阻塞' },
+  { key: 'duplicates', label: '重复', hint: '与目标是同一件事' },
+];
+
+export function relationMeta(type: RelationType): (typeof RELATION_META)[number] {
+  return RELATION_META.find((item) => item.key === type) ?? RELATION_META[0];
+}
+
+/** 是否是阻塞型关系（只有阻塞型参与循环依赖检测与「被阻塞」判定）。 */
+export function isBlockingRelation(type: RelationType | undefined): boolean {
+  return (type ?? 'blocks') === 'blocks';
+}
+
+/** 任务关系（V0.4 起为依赖，V0.12 起带类型）：`cardId` 与 `dependsOnCardId` 的关系。 */
 export interface CardDependency {
   cardId: string;
   dependsOnCardId: string;
+  /** V0.12 新增；旧备份缺少该字段时按 `blocks` 处理。 */
+  relationType?: RelationType;
 }
 
 /** 看板集（V0.5.4）：把多个看板聚合成一张跨看板汇总表 */
@@ -434,7 +464,10 @@ export interface ConvertInboxInput {
 
 export interface SetDependenciesInput {
   cardId: string;
+  /** 关系目标 id 列表；类型由 `relationTypes` 中同序元素给出。 */
   dependsOn: string[];
+  /** 与 `dependsOn` 一一对应的关系类型；缺省或长度不足时按 `blocks` 处理。 */
+  relationTypes?: RelationType[];
 }
 
 /** 模板中心的数据结构：模板是创建看板的一份“菜谱”，不是数据库实体 */

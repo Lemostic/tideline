@@ -681,6 +681,44 @@
   color: var(--faint);
 }
 
+.td-dependency.is-soft {
+  background: var(--surface-sunken);
+}
+
+.td-dependency.is-soft .td-dependency-icon {
+  color: var(--faint);
+}
+
+/* 关系类型选择器：紧贴标题，宽度按内容自适应 */
+.td-dependency-type {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.td-dependency-type:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* 新增关系：类型选择与目标选择并排 */
+.td-dependency-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.td-dependency-add-row .td-dependency-add {
+  flex: 1;
+  min-width: 0;
+}
+
 .td-dependency-add select {
   flex: 1;
   min-width: 0;
