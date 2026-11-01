@@ -6,7 +6,10 @@
 //! V0.2 起任务表新增 `start_date / labels / subtasks` 三列，V0.3 再新增 `deleted_at`
 //! 软删除列：新库直接按最新结构建表，旧库（V0.1 / V0.2 已有用户数据）在启动时按列存在性
 //! 做幂等 `ALTER TABLE` 迁移，不重建表。V0.4 新增 `card_dependencies` 依赖表。
-//! 迁移完成后写入 `PRAGMA user_version = 11`。
+//! 迁移完成后写入 `PRAGMA user_version = 15`。
+//!
+//! V0.12 起 `card_dependencies` 增加 `relation_type` 列（任务关系类型），
+//! 旧库按「前置阻塞」补齐，不丢已有依赖。
 //!
 //! V0.10 新增「桌面软件使用统计」三张表：`usage_apps`（应用清单与勾选状态）、
 //! `usage_daily`（按日聚合的使用秒数）、`usage_settings`（暂停开关与空闲阈值）。
@@ -899,6 +902,45 @@ mod tests {
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).expect("read migrated board");
         assert_eq!((title.as_str(), colors.as_str()), ("board", "{}"));
+    }
+
+    /// V0.12：旧库（v14）缺少 `card_dependencies.relation_type` 时幂等补齐，
+    /// 已有依赖关系保留并按「前置阻塞」处理。
+    #[test]
+    fn v14_dependencies_gain_relation_type_without_losing_edges() {
+        let connection = Connection::open_in_memory().expect("memory database");
+        let v14_schema = SCHEMA.replace("    relation_type      TEXT NOT NULL DEFAULT 'blocks',\n", "");
+        connection.execute_batch(&v14_schema).expect("create v14 schema");
+        connection
+            .execute_batch(
+                "INSERT INTO boards (id, title, created_at, updated_at) VALUES ('b', 'board', 'now', 'now');
+                 INSERT INTO lists (id, board_id, title, created_at) VALUES ('l', 'b', 'list', 'now');
+                 INSERT INTO cards (id, board_id, list_id, title, created_at, updated_at)
+                     VALUES ('c1', 'b', 'l', '前置任务', 'now', 'now');
+                 INSERT INTO cards (id, board_id, list_id, title, created_at, updated_at)
+                     VALUES ('c2', 'b', 'l', '后置任务', 'now', 'now');
+                 INSERT INTO card_dependencies (card_id, depends_on_card_id) VALUES ('c2', 'c1');",
+            )
+            .expect("seed v14 dependency");
+
+        migrate_schema(&connection).expect("migrate relation type");
+        migrate_schema(&connection).expect("idempotent migration");
+
+        let (card_id, depends_on, relation_type): (String, String, String) = connection
+            .query_row(
+                "SELECT card_id, depends_on_card_id, relation_type FROM card_dependencies",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read migrated dependency");
+        assert_eq!(card_id, "c2");
+        assert_eq!(depends_on, "c1");
+        assert_eq!(relation_type, "blocks");
+
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user_version");
+        assert_eq!(version, SCHEMA_VERSION);
     }
 
     #[test]
