@@ -2,6 +2,7 @@ import { useRef, type DragEvent, type KeyboardEvent } from 'react';
 import { Icon } from '@/components/Icon';
 import { dueBucket, formatDueLabel, formatMonthDay } from '@/lib/date';
 import { blockersFor } from '@/lib/dependencies';
+import { labelStyle } from '@/lib/labelColors';
 import { PRIORITY_META, boardColorValue, type Card } from '@/lib/types';
 import { useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -49,6 +50,7 @@ export function TaskCard({
   const description = card.description.trim().replace(/\s+/g, ' ');
   const hasDescription = description.length > 0;
   const labels = card.labels;
+  const board = snapshot.boards.find((item) => item.id === card.boardId);
   const visibleLabels = labels.slice(0, 3);
   const hiddenLabels = labels.length - visibleLabels.length;
   const subtaskDone = card.subtasks.filter((subtask) => subtask.done).length;
@@ -156,7 +158,7 @@ export function TaskCard({
       {labels.length > 0 ? (
         <div className="task-card-labels">
           {visibleLabels.map((label) => (
-            <span key={label} className="task-card-label" title={`标签：${label}`}>
+            <span key={label} className="task-card-label" style={labelStyle(label, board)} title={`标签：${label}`}>
               {label}
             </span>
           ))}

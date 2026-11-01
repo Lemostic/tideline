@@ -123,6 +123,21 @@ describe('backup helpers', () => {
     expect(roundTrip.cards[0].actualMinutes).toBe(0);
   });
 
+  it('保留自定义标签颜色并兼容缺少颜色字段的旧备份', () => {
+    const current = validBackup();
+    current.boards[0] = { ...board, labelColors: { 研发: 'rose' } };
+    expect(parseBackup(JSON.stringify(current)).boards[0].labelColors).toEqual({ 研发: 'rose' });
+
+    const old = validBackup();
+    expect(parseBackup(JSON.stringify(old)).boards[0].labelColors).toEqual({});
+  });
+
+  it('拒绝备份中的无效标签颜色', () => {
+    const invalid = validBackup();
+    invalid.boards[0] = { ...board, labelColors: { 研发: 'invalid' as Board['color'] } };
+    expect(() => parseBackup(JSON.stringify(invalid))).toThrow('标签颜色');
+  });
+
   it('拒绝非潮线备份、错误版本和非法 JSON', () => {
     expect(() => parseBackup('not json')).toThrow('有效的 JSON');
     expect(() =>

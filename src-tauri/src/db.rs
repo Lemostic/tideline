@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS boards (
     description TEXT NOT NULL DEFAULT '',
     color       TEXT NOT NULL DEFAULT 'blue',
     starred     INTEGER NOT NULL DEFAULT 0,
+    label_colors TEXT NOT NULL DEFAULT '{}',
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -404,7 +405,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 13;
+const SCHEMA_VERSION: i64 = 14;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -455,6 +456,10 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
         connection.execute_batch(statement).map_err(|error| {
             format!("迁移 cards.{column} 失败（请先备份数据库后重试）：{error}")
         })?;
+    }
+    if !table_columns(connection, "boards")?.iter().any(|name| name == "label_colors") {
+        connection.execute_batch("ALTER TABLE boards ADD COLUMN label_colors TEXT NOT NULL DEFAULT '{}'")
+            .map_err(|error| format!("迁移 boards.label_colors 失败：{error}"))?;
     }
     let existing_lists = table_columns(connection, "lists")?;
     for (column, statement) in LIST_COLUMN_MIGRATIONS {
@@ -869,6 +874,22 @@ mod tests {
     }
 
     #[test]
+    fn legacy_boards_gain_empty_label_colors_without_losing_data() {
+        let connection = Connection::open_in_memory().expect("memory database");
+        let old_schema = SCHEMA.replace("    label_colors TEXT NOT NULL DEFAULT '{}',\n", "");
+        connection.execute_batch(&old_schema).expect("create old schema");
+        connection.execute("INSERT INTO boards (id, title, created_at, updated_at) VALUES ('b', 'board', 'now', 'now')", [])
+            .expect("seed old board");
+        migrate_schema(&connection).expect("migrate label colors");
+        migrate_schema(&connection).expect("idempotent migration");
+        let (title, colors): (String, String) = connection.query_row(
+            "SELECT title, label_colors FROM boards WHERE id = 'b'", [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).expect("read migrated board");
+        assert_eq!((title.as_str(), colors.as_str()), ("board", "{}"));
+    }
+
+    #[test]
     fn v12_cards_gain_nullable_minutes_without_losing_existing_values() {
         let connection = Connection::open_in_memory().expect("memory database");
         let v12_schema = SCHEMA.replace(
@@ -883,7 +904,7 @@ mod tests {
                  VALUES ('c', 'b', 'l', 'card', 'now', 'now');
              PRAGMA user_version = 12;"
         ).expect("seed v12 card");
-        migrate_schema(&connection).expect("migrate to v13");
+        migrate_schema(&connection).expect("migrate to v14");
         let values: (String, Option<i64>, Option<i64>) = connection.query_row(
             "SELECT title, estimated_minutes, actual_minutes FROM cards WHERE id = 'c'", [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -897,7 +918,7 @@ mod tests {
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).expect("read preserved minutes");
         assert_eq!(minutes, (Some(55), Some(22)));
-        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), 13);
+        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
     }
 
     /// V0.1 的表结构（cards 还没有 start_date / labels / subtasks），用于迁移测试。

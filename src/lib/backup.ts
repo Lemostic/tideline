@@ -178,7 +178,10 @@ export function parseBackup(text: string): BackupFile {
     );
   }
 
-  const boards = requireArray(raw.boards, 'boards') as Board[];
+  const boards = (requireArray(raw.boards, 'boards') as Board[]).map((board) => ({
+    ...board,
+    labelColors: board.labelColors ?? {},
+  }));
   const lists = (requireArray(raw.lists, 'lists') as List[]).map((list) => ({
     ...list,
     color: list.color ?? 'slate',
@@ -199,6 +202,11 @@ export function parseBackup(text: string): BackupFile {
     if (boardIds.has(id)) throw new Error(`备份中存在重复的看板 id：${id}`);
     boardIds.add(id);
     requireString(board.title ?? '', 'boards[].title');
+    if (!isRecord(board.labelColors) || Object.values(board.labelColors).some(
+      (color) => !['blue', 'amber', 'coral', 'green', 'violet', 'rose', 'teal', 'slate'].includes(String(color)),
+    )) {
+      throw new Error('备份中的标签颜色格式不正确');
+    }
   }
 
   const listBoard = new Map<string, string>();

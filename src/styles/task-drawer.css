@@ -311,6 +311,33 @@
 }
 
 /* ---------- 标签 ---------- */
+.td-label-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.td-label-color {
+  max-width: 65px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.td-label-remove {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 3px;
+}
+
+.td-label-remove:hover { color: var(--danger); }
+
 .td-labels {
   display: flex;
   flex-wrap: wrap;
@@ -334,11 +361,7 @@
     border-color var(--transition);
 }
 
-.td-label:hover {
-  border-color: var(--danger-line);
-  background: var(--danger-soft);
-  color: var(--danger);
-}
+.td-label-group:hover .td-label { filter: brightness(1.08); }
 
 .td-label-x {
   opacity: 0.5;

@@ -690,7 +690,9 @@ function loadLocalDb(): LocalDb {
     }
     const parsed = JSON.parse(raw) as Partial<LocalDb>;
     return {
-      boards: Array.isArray(parsed.boards) ? parsed.boards : [],
+      boards: Array.isArray(parsed.boards)
+        ? parsed.boards.map((board) => ({ ...board, labelColors: board.labelColors ?? {} }))
+        : [],
       lists: Array.isArray(parsed.lists)
         ? parsed.lists.map((list) => ({
             ...list,
@@ -1170,6 +1172,7 @@ const localApi: TidelineApi = {
       description: input.description?.trim() ?? '',
       color: input.color ?? 'blue',
       starred: false,
+      labelColors: {},
       createdAt: now,
       updatedAt: now,
     };

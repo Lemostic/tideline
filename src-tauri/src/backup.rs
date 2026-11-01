@@ -675,8 +675,8 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
 
     for board in &backup.boards {
         tx.execute(
-            "INSERT INTO boards (id, title, description, color, starred, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO boards (id, title, description, color, starred, created_at, updated_at, label_colors) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 &board.id,
                 &board.title,
@@ -685,6 +685,7 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
                 board.starred as i64,
                 &board.created_at,
                 &board.updated_at,
+                serde_json::to_string(&board.label_colors).map_err(|error| error.to_string())?,
             ],
         )
         .map_err(|error| format!("写入看板「{}」失败：{error}", board.title))?;
@@ -1070,6 +1071,26 @@ mod tests {
         assert_eq!(trash[0].labels, vec!["研发".to_string()]);
         assert_eq!(trash[0].priority, Some(Priority::High));
         assert_eq!(trash[0].subtasks.len(), 1);
+    }
+
+    #[test]
+    fn label_colors_survive_backup_and_old_backup_defaults_to_empty() {
+        let mut conn = db::open_in_memory().unwrap();
+        let card = seed(&mut conn);
+        let colors = std::collections::HashMap::from([("研发".to_string(), BoardColor::Rose)]);
+        repo::update_board(&mut conn, UpdateBoardInput {
+            id: card.board_id,
+            patch: BoardPatch { label_colors: Some(colors.clone()), ..Default::default() },
+        }).unwrap();
+        let backup = build(&conn).unwrap();
+        restore(&mut conn, &backup).unwrap();
+        assert_eq!(repo::get_snapshot(&conn).unwrap().boards[0].label_colors, colors);
+
+        let mut old = serde_json::to_value(backup).unwrap();
+        old["boards"][0].as_object_mut().unwrap().remove("labelColors");
+        let old: BackupFile = serde_json::from_value(old).unwrap();
+        restore(&mut conn, &old).unwrap();
+        assert!(repo::get_snapshot(&conn).unwrap().boards[0].label_colors.is_empty());
     }
 
     #[test]

@@ -138,6 +138,8 @@ pub struct Board {
     pub description: String,
     pub color: BoardColor,
     pub starred: bool,
+    #[serde(default)]
+    pub label_colors: std::collections::HashMap<String, BoardColor>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -773,6 +775,8 @@ pub struct BoardPatch {
     pub color: Option<BoardColor>,
     #[serde(default)]
     pub starred: Option<bool>,
+    #[serde(default)]
+    pub label_colors: Option<std::collections::HashMap<String, BoardColor>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

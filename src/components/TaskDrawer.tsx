@@ -6,6 +6,7 @@ import { ActivitySection, RecurrenceSection } from '@/components/RecurrenceSecti
 import { formatDateCN, formatRelativeTime, todayKey } from '@/lib/date';
 import { blockersFor, dependencyCandidates } from '@/lib/dependencies';
 import { createId } from '@/lib/ids';
+import { labelColorKey, labelStyle } from '@/lib/labelColors';
 import { isBlankMarkdown, renderMarkdown } from '@/lib/markdown';
 import {
   BOARD_COLORS,
@@ -37,6 +38,7 @@ export function TaskDrawer() {
   const notify = useUiStore((state) => state.notify);
   const snapshot = useSnapshot();
   const updateCard = useAppStore((state) => state.updateCard);
+  const updateBoard = useAppStore((state) => state.updateBoard);
   const deleteCard = useAppStore((state) => state.deleteCard);
   const setDependencies = useAppStore((state) => state.setDependencies);
 
@@ -265,6 +267,11 @@ export function TaskDrawer() {
 
   const removeLabel = (label: string) => {
     patchCard((current) => ({ labels: current.labels.filter((item) => item !== label) }));
+  };
+
+  const setLabelColor = (label: string, color: typeof BOARD_COLORS[number]['key']) => {
+    if (!board) return;
+    void updateBoard(board.id, { labelColors: { ...board.labelColors, [label]: color } });
   };
 
   const openPreview = () => {
@@ -762,16 +769,23 @@ export function TaskDrawer() {
             {card.labels.length > 0 ? (
               <div className="td-labels">
                 {card.labels.map((label) => (
-                  <button
-                    type="button"
-                    key={label}
-                    className="td-label"
-                    onClick={() => removeLabel(label)}
-                    title={`移除标签「${label}」`}
-                  >
-                    {label}
-                    <Icon name="x" size={10} className="td-label-x" />
-                  </button>
+                  <span key={label} className="td-label-group">
+                    <span className="td-label" style={labelStyle(label, board)}>{label}</span>
+                    <select
+                      className="td-label-color"
+                      aria-label={`标签「${label}」颜色`}
+                      title={`修改「${label}」的颜色（本看板所有任务）`}
+                      value={labelColorKey(label, board)}
+                      onChange={(event) => setLabelColor(label, event.target.value as typeof BOARD_COLORS[number]['key'])}
+                    >
+                      {BOARD_COLORS.map((color) => (
+                        <option key={color.key} value={color.key}>{color.label}</option>
+                      ))}
+                    </select>
+                    <button type="button" className="td-label-remove" onClick={() => removeLabel(label)} aria-label={`移除标签「${label}」`} title={`移除标签「${label}」`}>
+                      <Icon name="x" size={10} />
+                    </button>
+                  </span>
                 ))}
               </div>
             ) : null}

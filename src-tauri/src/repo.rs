@@ -126,7 +126,7 @@ fn subtasks_from_json(raw: &str) -> Vec<Subtask> {
 // 行映射
 // ---------------------------------------------------------------------------
 
-const BOARD_COLUMNS: &str = "id, title, description, color, starred, created_at, updated_at";
+const BOARD_COLUMNS: &str = "id, title, description, color, starred, label_colors, created_at, updated_at";
 const LIST_COLUMNS: &str = "id, board_id, title, color, wip_limit, position, created_at";
 const CARD_COLUMNS: &str = "id, board_id, list_id, title, description, due_date, start_date, estimated_minutes, actual_minutes, priority, accent, completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, created_at, updated_at";
 const INBOX_COLUMNS: &str = "id, content, created_at";
@@ -139,6 +139,7 @@ fn row_to_board(row: &Row<'_>) -> rusqlite::Result<Board> {
         description: row.get("description")?,
         color: BoardColor::from_db(&color),
         starred: row.get::<_, i64>("starred")? != 0,
+        label_colors: serde_json::from_str(&row.get::<_, String>("label_colors")?).unwrap_or_default(),
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
@@ -2051,6 +2052,7 @@ pub fn create_board(conn: &mut Connection, input: NewBoardInput) -> DbResult<Boa
         description: trimmed_or_empty(input.description),
         color: input.color.unwrap_or(BoardColor::Blue),
         starred: false,
+        label_colors: HashMap::new(),
         created_at: now.clone(),
         updated_at: now,
     };
@@ -2088,9 +2090,12 @@ pub fn update_board(conn: &mut Connection, input: UpdateBoardInput) -> DbResult<
     if let Some(starred) = input.patch.starred {
         board.starred = starred;
     }
+    if let Some(label_colors) = input.patch.label_colors {
+        board.label_colors = label_colors;
+    }
     board.updated_at = now_iso();
     tx.execute(
-        "UPDATE boards SET title = ?1, description = ?2, color = ?3, starred = ?4, updated_at = ?5 \
+        "UPDATE boards SET title = ?1, description = ?2, color = ?3, starred = ?4, updated_at = ?5, label_colors = ?7 \
          WHERE id = ?6",
         params![
             &board.title,
@@ -2099,6 +2104,7 @@ pub fn update_board(conn: &mut Connection, input: UpdateBoardInput) -> DbResult<
             board.starred as i64,
             &board.updated_at,
             &board.id,
+            serde_json::to_string(&board.label_colors).map_err(|error| error.to_string())?,
         ],
     )
     .map_err(db_err)?;
@@ -2879,6 +2885,18 @@ mod tests {
 
         let snapshot = get_snapshot(&conn).expect("快照");
         assert_eq!(snapshot.boards.len(), 2);
+    }
+
+    #[test]
+    fn board_label_colors_survive_sqlite_round_trip() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let colors = HashMap::from([("研发".to_string(), BoardColor::Rose)]);
+        update_board(&mut conn, UpdateBoardInput {
+            id: board.id.clone(),
+            patch: BoardPatch { label_colors: Some(colors.clone()), ..Default::default() },
+        }).expect("更新颜色");
+        assert_eq!(get_snapshot(&conn).unwrap().boards[0].label_colors, colors);
     }
 
     #[test]

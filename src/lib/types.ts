@@ -24,6 +24,8 @@ export interface Board {
   description: string;
   color: BoardColor;
   starred: boolean;
+  /** Per-board label color overrides; absent labels use a stable hashed palette color. */
+  labelColors?: Record<string, BoardColor>;
   createdAt: string;
   updatedAt: string;
 }
@@ -356,7 +358,7 @@ export type PerformancePatch = Partial<
 >;
 
 export type BoardPatch = Partial<
-  Pick<Board, 'title' | 'description' | 'color' | 'starred'>
+  Pick<Board, 'title' | 'description' | 'color' | 'starred' | 'labelColors'>
 >;
 
 export type ListPatch = Partial<Pick<List, 'title' | 'color' | 'wipLimit'>>;
