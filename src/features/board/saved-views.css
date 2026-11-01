@@ -1,0 +1,152 @@
+/* 保存的筛选视图条（V0.13.1）：横向视图标签 + 新建入口 + 名称弹窗 */
+
+.sv-bar {
+  position: relative;
+  z-index: 19;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 2px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sv-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.sv-item {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 7px;
+  transition: background var(--transition);
+}
+
+.sv-item:hover {
+  background: var(--hover-wash);
+}
+
+.sv-item.is-active {
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  border: 1px solid var(--line);
+}
+
+.sv-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color var(--transition);
+}
+
+.sv-item:hover .sv-tab {
+  color: var(--ink);
+}
+
+.sv-item.is-active .sv-tab {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.sv-item .menu {
+  margin-right: 2px;
+}
+
+.sv-item .menu .btn-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.sv-dirty {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent, var(--primary));
+}
+
+.sv-add {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: border-color var(--transition), color var(--transition),
+    background var(--transition);
+}
+
+.sv-add:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+/* ---------- 名称弹窗 ---------- */
+
+.sv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sv-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.sv-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  outline: none;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.sv-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.sv-error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sv-item,
+  .sv-tab,
+  .sv-add,
+  .sv-input {
+    transition: none;
+  }
+}

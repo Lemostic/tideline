@@ -119,6 +119,8 @@ export interface Snapshot {
   customFields: CustomField[];
   /** 任务在自定义字段上的取值（V0.13.0） */
   cardFieldValues: CardFieldValue[];
+  /** 保存的筛选视图（V0.13.1），按看板隔离 */
+  savedViews: SavedView[];
 }
 
 /**
@@ -233,6 +235,98 @@ export function customFieldTypeMeta(
   type: CustomFieldType,
 ): (typeof CUSTOM_FIELD_TYPE_META)[number] {
   return CUSTOM_FIELD_TYPE_META.find((item) => item.key === type) ?? CUSTOM_FIELD_TYPE_META[0];
+}
+
+/* ---------- 保存的筛选视图（V0.13.1） ---------- */
+
+/** 筛选状态分段：全部 / 未完成 / 已完成 */
+export type FilterStatus = 'all' | 'active' | 'completed';
+
+/** 看板排序键：表格视图与保存视图共用同一套标识 */
+export type BoardSortKey =
+  | 'due-asc'
+  | 'due-desc'
+  | 'priority'
+  | 'created-desc'
+  | 'created-asc'
+  | 'updated-desc';
+
+/** 排序方向 */
+export type SortDirection = 'asc' | 'desc';
+
+/** 表格视图与保存视图共用的排序选项 */
+export const BOARD_SORT_OPTIONS: ReadonlyArray<{ key: BoardSortKey; label: string }> = [
+  { key: 'due-asc', label: '默认排序' },
+  { key: 'due-desc', label: '截止日期 · 最远' },
+  { key: 'priority', label: '优先级 · 高到低' },
+  { key: 'created-desc', label: '创建时间 · 最新' },
+  { key: 'created-asc', label: '创建时间 · 最早' },
+  { key: 'updated-desc', label: '更新时间 · 最新' },
+];
+
+/** 保存视图里针对自定义字段的筛选条件 */
+export interface SavedViewFieldFilter {
+  /** 自定义字段 id */
+  fieldId: string;
+  /** 单选字段：命中的选项 id 集合（空 = 不限） */
+  optionIds: string[];
+  /** 数值字段：区间下限（null = 不限） */
+  min: number | null;
+  /** 数值字段：区间上限（null = 不限） */
+  max: number | null;
+}
+
+/** 保存视图的筛选条件：与看板筛选条同一套语义 */
+export interface SavedViewFilters {
+  keyword: string;
+  status: FilterStatus;
+  priorities: Priority[];
+  labels: string[];
+  /** 自定义字段筛选条件 */
+  fieldFilters: SavedViewFieldFilter[];
+  /** 只看被阻塞的任务 */
+  blocked: boolean;
+}
+
+/** 保存视图的排序方式：筛选与排序必须一起存，切回来才不会排序错乱 */
+export interface SavedViewSort {
+  key: BoardSortKey;
+  direction: SortDirection;
+}
+
+/** 保存的筛选视图（按看板隔离） */
+export interface SavedView {
+  id: string;
+  boardId: string;
+  name: string;
+  /** 视图类型：切回该视图时一并切到对应看板视图 */
+  viewType: BoardView;
+  filters: SavedViewFilters;
+  sort: SavedViewSort;
+  /** 内置视图不可删除、不可改名 */
+  isBuiltin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 新建保存视图的入参 */
+export interface NewSavedViewInput {
+  boardId: string;
+  name: string;
+  viewType?: BoardView;
+  filters?: SavedViewFilters;
+  sort?: SavedViewSort;
+}
+
+/** 修改保存视图的入参：字段缺失 = 保持原值 */
+export type SavedViewPatch = Partial<
+  Pick<SavedView, 'name' | 'viewType' | 'filters' | 'sort'>
+>;
+
+/** 更新保存视图的入参 */
+export interface UpdateSavedViewInput {
+  id: string;
+  patch: SavedViewPatch;
 }
 
 /** 看板集（V0.5.4）：把多个看板聚合成一张跨看板汇总表 */
@@ -614,6 +708,8 @@ export interface BackupFile {
   customFields: CustomField[];
   /** V0.13.0 新增；旧备份没有该字段时按空字段值处理 */
   cardFieldValues: CardFieldValue[];
+  /** V0.13.1 新增；旧备份没有该字段时按空保存视图处理 */
+  savedViews: SavedView[];
 }
 
 export interface BackupSummary {
@@ -637,6 +733,7 @@ export interface BackupSummary {
   cardActivity: number;
   customFields: number;
   cardFieldValues: number;
+  savedViews: number;
 }
 
 export interface BackupExport {

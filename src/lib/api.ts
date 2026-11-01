@@ -17,6 +17,11 @@ import {
   summarizeBackup,
 } from './backup';
 import { createId, nowISO } from './ids';
+import {
+  degradeSavedViewFieldFilters,
+  normalizeSavedViewFilters,
+  normalizeSavedViewSort,
+} from './savedViews';
 import { todayKey } from './date';
 import {
   applyRuleActions,
@@ -30,6 +35,7 @@ import type {
   BackupExport,
   BackupSummary,
   Board,
+  BoardView,
   BoardPatch,
   BoardSet,
   BoardSetPatch,
@@ -88,6 +94,10 @@ import type {
   ProjectRolePatch,
   Recurrence,
   RecurrencePatch,
+  SavedView,
+  SavedViewFilters,
+  SavedViewPatch,
+  SavedViewSort,
   SetCardFieldValuesInput,
   Snapshot,
   StorageInfo,
@@ -138,6 +148,19 @@ export interface TidelineApi {
   deleteCustomField(input: IdInput): Promise<void>;
   /** 设置某张任务在一组字段上的取值 */
   setCardFieldValues(input: SetCardFieldValuesInput): Promise<CardFieldValue[]>;
+  /* ---------- 保存的筛选视图（V0.13.1） ---------- */
+  /** 新建保存视图（按看板隔离） */
+  createSavedView(input: {
+    boardId: string;
+    name: string;
+    viewType?: BoardView;
+    filters?: SavedViewFilters;
+    sort?: SavedViewSort;
+  }): Promise<SavedView>;
+  /** 修改保存视图（改名 / 改筛选条件 / 改排序） */
+  updateSavedView(input: { id: string; patch: SavedViewPatch }): Promise<SavedView>;
+  /** 删除保存视图（内置视图不可删除） */
+  deleteSavedView(input: IdInput): Promise<void>;
   /** 导出全量 JSON 备份（桌面端写入「文档」目录，浏览器端触发下载） */
   exportBackup(): Promise<BackupExport>;
   /** 用 JSON 备份替换全部数据（失败时不应修改原数据） */
@@ -260,6 +283,9 @@ const tauriApi: TidelineApi = {
   deleteCustomField: (input) => invoke<void>('delete_custom_field', { input }),
   setCardFieldValues: (input) =>
     invoke<CardFieldValue[]>('set_card_field_values', { input }),
+  createSavedView: (input) => invoke<SavedView>('create_saved_view', { input }),
+  updateSavedView: (input) => invoke<SavedView>('update_saved_view', { input }),
+  deleteSavedView: (input) => invoke<void>('delete_saved_view', { input }),
   exportBackup: () => invoke<BackupExport>('export_backup'),
   importBackup: (json) => invoke<BackupSummary>('import_backup', { input: { json } }),
   getStorageInfo: () => invoke<StorageInfo>('get_storage_info'),
@@ -690,6 +716,7 @@ function loadLocalDb(): LocalDb {
       automationRules: [],
       customFields: [],
       cardFieldValues: [],
+      savedViews: [],
       cardActivity: [],
     };
   }
@@ -715,11 +742,12 @@ function loadLocalDb(): LocalDb {
       automationRules: [],
       customFields: [],
       cardFieldValues: [],
+      savedViews: [],
       cardActivity: [],
       };
     }
     const parsed = JSON.parse(raw) as Partial<LocalDb>;
-    return {
+    const db: LocalDb = {
       boards: Array.isArray(parsed.boards)
         ? parsed.boards.map((board) => ({ ...board, labelColors: board.labelColors ?? {} }))
         : [],
@@ -942,6 +970,23 @@ function loadLocalDb(): LocalDb {
                   : null,
             }))
         : [],
+      savedViews: Array.isArray(parsed.savedViews)
+        ? parsed.savedViews
+            .filter(
+              (item): item is SavedView =>
+                Boolean(item) &&
+                typeof item.id === 'string' &&
+                typeof item.boardId === 'string',
+            )
+            .map((item) => ({
+              ...item,
+              name: typeof item.name === 'string' ? item.name : '未命名视图',
+              viewType: item.viewType ?? 'board',
+              filters: normalizeSavedViewFilters(item.filters),
+              sort: normalizeSavedViewSort(item.sort),
+              isBuiltin: item.isBuiltin === true,
+            }))
+        : [],
       cardActivity: Array.isArray(parsed.cardActivity)
         ? parsed.cardActivity
             .filter(
@@ -953,6 +998,9 @@ function loadLocalDb(): LocalDb {
             .map(normalizeActivity)
         : [],
     };
+    // 旧数据没有保存视图：给每个看板补齐内置视图（与 Rust 侧迁移同一套语义）
+    for (const board of db.boards) ensureLocalBuiltinSavedViews(db, board.id);
+    return db;
   } catch {
     return {
       boards: [],
@@ -973,6 +1021,7 @@ function loadLocalDb(): LocalDb {
       automationRules: [],
       customFields: [],
       cardFieldValues: [],
+      savedViews: [],
       cardActivity: [],
     };
   }
@@ -1219,6 +1268,90 @@ function requireCustomField(db: LocalDb, id: string): CustomField {
   return field;
 }
 
+/* ---------- 保存的筛选视图（V0.13.1） ---------- */
+
+/** 内置视图的标识与名称：id 固定，重复补齐不会产生重复行。 */
+const LOCAL_BUILTIN_SAVED_VIEWS: ReadonlyArray<{
+  key: string;
+  name: string;
+  filters: SavedViewFilters;
+  sort: SavedViewSort;
+}> = [
+  {
+    key: 'all',
+    name: '全部',
+    filters: {
+      keyword: '',
+      status: 'all',
+      priorities: [],
+      labels: [],
+      fieldFilters: [],
+      blocked: false,
+    },
+    sort: { key: 'due-asc', direction: 'asc' },
+  },
+  {
+    key: 'mine',
+    name: '我的任务',
+    filters: {
+      keyword: '',
+      status: 'active',
+      priorities: [],
+      labels: [],
+      fieldFilters: [],
+      blocked: false,
+    },
+    sort: { key: 'due-asc', direction: 'asc' },
+  },
+  {
+    key: 'recent',
+    name: '最近更新',
+    filters: {
+      keyword: '',
+      status: 'all',
+      priorities: [],
+      labels: [],
+      fieldFilters: [],
+      blocked: false,
+    },
+    sort: { key: 'updated-desc', direction: 'desc' },
+  },
+];
+
+function requireSavedView(db: LocalDb, id: string): SavedView {
+  const view = db.savedViews.find((item) => item.id === id);
+  if (!view) throw new Error('保存视图不存在：' + id);
+  return view;
+}
+
+/**
+ * 字段或选项被删除后，视图里指向它们的条件自动降级：字段没了就丢掉整条条件，
+ * 选项没了就去掉那个选项 id。读视图与写视图都走这里，保证两边行为一致。
+ */
+function degradeLocalSavedViewFilters(db: LocalDb, filters: SavedViewFilters): SavedViewFilters {
+  return degradeSavedViewFieldFilters(filters, db.customFields);
+}
+
+/** 给某个看板补齐内置视图（幂等）。 */
+function ensureLocalBuiltinSavedViews(db: LocalDb, boardId: string): void {
+  const now = nowISO();
+  for (const item of LOCAL_BUILTIN_SAVED_VIEWS) {
+    const id = 'sv_builtin_' + boardId + '_' + item.key;
+    if (db.savedViews.some((view) => view.id === id)) continue;
+    db.savedViews.push({
+      id,
+      boardId,
+      name: item.name,
+      viewType: 'board',
+      filters: { ...item.filters },
+      sort: { ...item.sort },
+      isBuiltin: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+}
+
 /** 清理已删除任务残留的字段取值，避免留下孤儿行。 */
 function pruneCardFieldValues(db: LocalDb, removedCardIds: Set<string>): void {
   db.cardFieldValues = db.cardFieldValues.filter(
@@ -1282,6 +1415,14 @@ const localApi: TidelineApi = {
       cardFieldValues: [...db.cardFieldValues].sort((a, b) =>
         `${a.cardId}:${a.fieldId}`.localeCompare(`${b.cardId}:${b.fieldId}`),
       ),
+      savedViews: [...db.savedViews]
+        .sort((a, b) =>
+          a.boardId.localeCompare(b.boardId) || a.createdAt.localeCompare(b.createdAt),
+        )
+        .map((view) => ({
+          ...view,
+          filters: degradeSavedViewFieldFilters(view.filters, db.customFields),
+        })),
     };
   },
 
@@ -1299,6 +1440,8 @@ const localApi: TidelineApi = {
       updatedAt: now,
     };
     db.boards.push(board);
+    // 新看板同步补齐内置保存视图（与 Rust 侧 create_board 保持一致）
+    ensureLocalBuiltinSavedViews(db, board.id);
     saveLocalDb(db);
     return board;
   },
@@ -1707,6 +1850,74 @@ const localApi: TidelineApi = {
     return db.cardFieldValues.filter((value) => value.cardId === card.id);
   },
 
+  /* ---------- 保存的筛选视图（V0.13.1） ---------- */
+
+  async createSavedView({ boardId, name, viewType, filters, sort }) {
+    const db = loadLocalDb();
+    requireBoard(db, boardId);
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('请先填写视图名称');
+    if (db.savedViews.some((view) => view.boardId === boardId && view.name === trimmed)) {
+      throw new Error('该看板已存在同名视图');
+    }
+    const now = nowISO();
+    const view: SavedView = {
+      id: createId('sv'),
+      boardId,
+      name: trimmed,
+      viewType: viewType ?? 'board',
+      filters: degradeLocalSavedViewFilters(db, normalizeSavedViewFilters(filters)),
+      sort: normalizeSavedViewSort(sort),
+      isBuiltin: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.savedViews.push(view);
+    touchBoard(db, boardId);
+    saveLocalDb(db);
+    return view;
+  },
+
+  async updateSavedView({ id, patch }) {
+    const db = loadLocalDb();
+    const view = requireSavedView(db, id);
+    if (view.isBuiltin) throw new Error('内置视图不可修改');
+    if (patch.name !== undefined) {
+      const trimmed = patch.name.trim();
+      if (!trimmed) throw new Error('请先填写视图名称');
+      if (
+        db.savedViews.some(
+          (item) =>
+            item.id !== id && item.boardId === view.boardId && item.name === trimmed,
+        )
+      ) {
+        throw new Error('该看板已存在同名视图');
+      }
+      view.name = trimmed;
+    }
+    if (patch.viewType !== undefined) view.viewType = patch.viewType;
+    if (patch.filters !== undefined) {
+      view.filters = degradeLocalSavedViewFilters(
+        db,
+        normalizeSavedViewFilters(patch.filters),
+      );
+    }
+    if (patch.sort !== undefined) view.sort = normalizeSavedViewSort(patch.sort);
+    view.updatedAt = nowISO();
+    touchBoard(db, view.boardId);
+    saveLocalDb(db);
+    return view;
+  },
+
+  async deleteSavedView({ id }) {
+    const db = loadLocalDb();
+    const view = requireSavedView(db, id);
+    if (view.isBuiltin) throw new Error('内置视图不可删除');
+    db.savedViews = db.savedViews.filter((item) => item.id !== id);
+    touchBoard(db, view.boardId);
+    saveLocalDb(db);
+  },
+
   async addInboxItem({ content }) {
     const db = loadLocalDb();
     const item: InboxItem = {
@@ -1809,6 +2020,7 @@ const localApi: TidelineApi = {
       cardActivity: backup.cardActivity,
       customFields: backup.customFields,
       cardFieldValues: backup.cardFieldValues,
+      savedViews: backup.savedViews,
       notificationSettings: DEFAULT_NOTIFICATION_SETTINGS,
     });
     return summarizeBackup(backup);

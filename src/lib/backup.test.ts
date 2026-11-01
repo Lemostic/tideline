@@ -76,6 +76,7 @@ const validBackup = () =>
     cardActivity: [],
     customFields: [],
     cardFieldValues: [],
+    savedViews: [],
   });
 
 describe('backup helpers', () => {
@@ -102,6 +103,7 @@ describe('backup helpers', () => {
       cardActivity: 0,
       customFields: 0,
       cardFieldValues: 0,
+      savedViews: 0,
     });
   });
 
@@ -234,5 +236,99 @@ describe('backup helpers', () => {
     base.cardFieldValues = [];
     base.customFields[0].boardId = 'b_missing';
     expect(() => parseBackup(JSON.stringify(base))).toThrow('不存在的看板');
+  });
+
+  it('备份保留保存视图并统计数量', () => {
+    const backup = validBackup();
+    backup.savedViews = [
+      {
+        id: 'sv_1',
+        boardId: 'b_1',
+        name: '高优先级',
+        viewType: 'table',
+        filters: {
+          keyword: '',
+          status: 'active',
+          priorities: ['high'],
+          labels: [],
+          fieldFilters: [],
+          blocked: false,
+        },
+        sort: { key: 'priority', direction: 'asc' },
+        isBuiltin: false,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+
+    const parsed = parseBackup(JSON.stringify(backup));
+    expect(parsed.savedViews).toHaveLength(1);
+    expect(parsed.savedViews[0].name).toBe('高优先级');
+    expect(parsed.savedViews[0].filters.priorities).toEqual(['high']);
+    expect(summarizeBackup(parsed).savedViews).toBe(1);
+  });
+
+  it('旧备份缺少保存视图时按空数组处理', () => {
+    const backup = validBackup();
+    delete (backup as { savedViews?: unknown }).savedViews;
+    const parsed = parseBackup(JSON.stringify(backup));
+    expect(parsed.savedViews).toEqual([]);
+  });
+
+  it('拒绝引用不存在看板或 id 重复的保存视图', () => {
+    const base = validBackup();
+    base.savedViews = [
+      {
+        id: 'sv_1',
+        boardId: 'b_missing',
+        name: '坏视图',
+        viewType: 'board',
+        filters: {
+          keyword: '',
+          status: 'all',
+          priorities: [],
+          labels: [],
+          fieldFilters: [],
+          blocked: false,
+        },
+        sort: { key: 'due-asc', direction: 'asc' },
+        isBuiltin: false,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+    expect(() => parseBackup(JSON.stringify(base))).toThrow('不存在的看板');
+
+    base.savedViews[0].boardId = 'b_1';
+    base.savedViews.push({ ...base.savedViews[0] });
+    expect(() => parseBackup(JSON.stringify(base))).toThrow('重复的保存视图 id');
+  });
+
+  it('保存视图引用的字段不存在时拒绝这份备份', () => {
+    const base = validBackup();
+    base.savedViews = [
+      {
+        id: 'sv_1',
+        boardId: 'b_1',
+        name: '按阶段',
+        viewType: 'board',
+        filters: {
+          keyword: '',
+          status: 'all',
+          priorities: [],
+          labels: [],
+          fieldFilters: [
+            { fieldId: 'cf_gone', optionIds: ['opt_a'], min: null, max: null },
+          ],
+          blocked: false,
+        },
+        sort: { key: 'due-asc', direction: 'asc' },
+        isBuiltin: false,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+
+    expect(() => parseBackup(JSON.stringify(base))).toThrow('不存在的自定义字段');
   });
 });

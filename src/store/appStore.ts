@@ -10,6 +10,11 @@
 import { create } from 'zustand';
 import { api } from '@/lib/api';
 import { toDateKey } from '@/lib/date';
+import {
+  degradeSavedViewFieldFilters,
+  normalizeSavedViewFilters,
+  normalizeSavedViewSort,
+} from '@/lib/savedViews';
 import type {
   Board,
   BoardPatch,
@@ -36,6 +41,7 @@ import type {
   NewProjectInput,
   NewProjectMetaInput,
   NewProjectRoleInput,
+  NewSavedViewInput,
   NewTeamMemberInput,
   NewTenureInput,
   OvertimePatch,
@@ -59,6 +65,8 @@ import type {
   Recurrence,
   RecurrencePatch,
   RelationType,
+  SavedView,
+  SavedViewPatch,
   TeamMember,
   TeamMemberPatch,
   TenurePatch,
@@ -83,6 +91,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   automationRules: [],
   customFields: [],
   cardFieldValues: [],
+  savedViews: [],
 };
 const SEED_FLAG = 'tideline.seeded';
 
@@ -197,6 +206,33 @@ export interface AppState {
   deleteCustomField: (id: string) => Promise<void>;
   /** 设置某张任务在一组字段上的取值 */
   setCardFieldValues: (cardId: string, values: CardFieldValueInput[]) => Promise<void>;
+
+  /* ---------- 保存的筛选视图（V0.13.1） ---------- */
+  /** 新建保存视图 */
+  createSavedView: (input: NewSavedViewInput) => Promise<SavedView>;
+  /** 修改保存视图 */
+  updateSavedView: (id: string, patch: SavedViewPatch) => Promise<void>;
+  /** 删除保存视图 */
+  deleteSavedView: (id: string) => Promise<void>;
+}
+
+/**
+ * 归一化快照里的保存视图：后端存的排序键与筛选条件统一成前端形状。
+ * 旧数据、脏数据与后端默认值都在这里收口，界面层拿到的永远是规范结构。
+ */
+function normalizeSnapshot(snapshot: Snapshot): Snapshot {
+  if (!snapshot.savedViews || snapshot.savedViews.length === 0) return snapshot;
+  return {
+    ...snapshot,
+    savedViews: snapshot.savedViews.map((view) => ({
+      ...view,
+      filters: degradeSavedViewFieldFilters(
+        normalizeSavedViewFilters(view.filters),
+        snapshot.customFields,
+      ),
+      sort: normalizeSavedViewSort(view.sort),
+    })),
+  };
 }
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -218,9 +254,9 @@ export const useAppStore = create<AppState>((set, get) => {
       if (get().loaded) return;
       try {
         const snapshot = await api.getSnapshot();
-        set({ snapshot, loaded: true });
+        set({ snapshot: normalizeSnapshot(snapshot), loaded: true });
         const seeded = await seedDemoIfNeeded();
-        if (seeded) set({ snapshot: await api.getSnapshot() });
+        if (seeded) set({ snapshot: normalizeSnapshot(await api.getSnapshot()) });
       } catch (error) {
         fail(error);
       }
@@ -229,7 +265,7 @@ export const useAppStore = create<AppState>((set, get) => {
     reloadSnapshot: async () => {
       try {
         const snapshot = await api.getSnapshot();
-        set({ snapshot, trash: [] });
+        set({ snapshot: normalizeSnapshot(snapshot), trash: [] });
       } catch (error) {
         fail(error);
       }
@@ -306,6 +342,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 (item) => !removedCardIds.has(item.cardId),
               ),
               automationRules: state.snapshot.automationRules,
+              savedViews: state.snapshot.savedViews.filter((item) => item.boardId !== id),
               customFields: state.snapshot.customFields.filter(
                 (item) => item.boardId !== id,
               ),
@@ -1147,6 +1184,46 @@ export const useAppStore = create<AppState>((set, get) => {
       try {
         await api.setCardFieldValues({ cardId, values });
         await get().reloadSnapshot();
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    /* ---------- 保存的筛选视图（V0.13.1） ---------- */
+
+    createSavedView: async (input) => {
+      try {
+        const view = await api.createSavedView(input);
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            savedViews: [...state.snapshot.savedViews, view],
+          },
+        }));
+        return view;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateSavedView: async (id, patch) => {
+      try {
+        await api.updateSavedView({ id, patch });
+        await get().reloadSnapshot();
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteSavedView: async (id) => {
+      try {
+        await api.deleteSavedView({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            savedViews: state.snapshot.savedViews.filter((item) => item.id !== id),
+          },
+        }));
       } catch (error) {
         fail(error);
       }

@@ -10,8 +10,10 @@ import { EmptyState } from '@/components/Modal';
 import { formatRelativeTime, todayKey } from '@/lib/date';
 import {
   boardColorValue,
+  BOARD_SORT_OPTIONS,
   PRIORITY_META,
   type Board,
+  type BoardSortKey,
   type Card,
   type CardPatch,
   type List,
@@ -27,17 +29,10 @@ export interface BoardViewProps {
   board: Board;
   lists: List[];
   cards: Card[];
+  /** 受控排序键：保存视图会指定排序方式；不传时用组件内部状态 */
+  sort?: BoardSortKey;
+  onSortChange?: (key: BoardSortKey) => void;
 }
-
-type SortKey = 'due-asc' | 'due-desc' | 'priority' | 'created-desc' | 'created-asc';
-
-const SORT_OPTIONS: ReadonlyArray<{ key: SortKey; label: string }> = [
-  { key: 'due-asc', label: '默认排序' },
-  { key: 'due-desc', label: '截止日期 · 最远' },
-  { key: 'priority', label: '优先级 · 高到低' },
-  { key: 'created-desc', label: '创建时间 · 最新' },
-  { key: 'created-asc', label: '创建时间 · 最早' },
-];
 
 /** 列数：任务 / 状态 / 优先级 / 开始日期 / 截止日期 / 标签 / 子任务 / 更新时间 */
 const COLUMN_COUNT = 8;
@@ -77,14 +72,25 @@ function comparePriority(a: Card, b: Card): number {
  * - 任务行下展开子任务子行，形成「列表分组 → 任务 → 子任务」三层缩进层级；
  * - 子任务行可直接勾选完成，任务行的进度条同步更新。
  */
-export function TableView({ board, lists, cards }: BoardViewProps) {
+export function TableView({
+  board,
+  lists,
+  cards,
+  sort: controlledSort,
+  onSortChange,
+}: BoardViewProps) {
   const openCard = useUiStore((state) => state.openCard);
   const updateCard = useAppStore((state) => state.updateCard);
   const hideCompletedByDefault = useSettingsStore((state) => state.hideCompletedByDefault);
 
   const [query, setQuery] = useState('');
   const [showCompleted, setShowCompleted] = useState(() => !hideCompletedByDefault);
-  const [sortKey, setSortKey] = useState<SortKey>('due-asc');
+  const [internalSortKey, setInternalSortKey] = useState<BoardSortKey>('due-asc');
+  const sortKey = controlledSort ?? internalSortKey;
+  const changeSortKey = (key: BoardSortKey) => {
+    setInternalSortKey(key);
+    onSortChange?.(key);
+  };
   const [editingId, setEditingId] = useState<string | null>(null);
   /** 折叠的任务 id（默认全部展开，保证层级一眼可见） */
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
@@ -119,6 +125,8 @@ export function TableView({ board, lists, cards }: BoardViewProps) {
           return b.createdAt.localeCompare(a.createdAt);
         case 'created-asc':
           return a.createdAt.localeCompare(b.createdAt);
+        case 'updated-desc':
+          return b.updatedAt.localeCompare(a.updatedAt);
         default:
           return compareDueAsc(a, b);
       }
@@ -225,9 +233,9 @@ export function TableView({ board, lists, cards }: BoardViewProps) {
           <select
             value={sortKey}
             aria-label="排序方式"
-            onChange={(event) => setSortKey(event.target.value as SortKey)}
+            onChange={(event) => changeSortKey(event.target.value as BoardSortKey)}
           >
-            {SORT_OPTIONS.map((option) => (
+            {BOARD_SORT_OPTIONS.map((option) => (
               <option key={option.key} value={option.key}>
                 {option.label}
               </option>

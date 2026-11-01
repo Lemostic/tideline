@@ -44,6 +44,7 @@ pub fn build(conn: &Connection) -> Result<BackupFile, String> {
         card_activity: crate::automation::get_all_card_activity(conn)?,
         custom_fields: repo::get_all_custom_fields(conn)?,
         card_field_values: repo::get_all_card_field_values(conn)?,
+        saved_views: repo::get_all_saved_views(conn)?,
     })
 }
 
@@ -70,6 +71,7 @@ impl BackupFile {
             card_activity: self.card_activity.len(),
             custom_fields: self.custom_fields.len(),
             card_field_values: self.card_field_values.len(),
+            saved_views: self.saved_views.len(),
         }
     }
 }
@@ -704,6 +706,69 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         }
     }
 
+    // V0.13.1：保存的筛选视图。
+    let mut saved_view_ids = HashSet::new();
+    let mut saved_view_names: HashMap<&str, HashSet<&str>> = HashMap::new();
+    for view in &backup.saved_views {
+        if view.id.trim().is_empty() {
+            return Err("备份中存在空的保存视图 id".to_string());
+        }
+        if !saved_view_ids.insert(view.id.as_str()) {
+            return Err(format!("备份中存在重复的保存视图 id：{}", view.id));
+        }
+        if !board_ids.contains(view.board_id.as_str()) {
+            return Err(format!("保存视图「{}」引用了不存在的看板", view.name));
+        }
+        if view.name.trim().is_empty() {
+            return Err("备份中存在未命名的保存视图".to_string());
+        }
+        let names = saved_view_names.entry(view.board_id.as_str()).or_default();
+        if !names.insert(view.name.trim()) {
+            return Err(format!("看板中存在同名的保存视图：{}", view.name));
+        }
+        if view.view_type.trim().is_empty() {
+            return Err(format!("保存视图「{}」缺少视图类型", view.name));
+        }
+        for filter in &view.filters.field_filters {
+            let Some(field_type) = custom_field_types.get(filter.field_id.as_str()) else {
+                return Err(format!(
+                    "保存视图「{}」引用了不存在的自定义字段：{}",
+                    view.name, filter.field_id
+                ));
+            };
+            let field_board = custom_field_boards.get(filter.field_id.as_str()).copied();
+            if field_board != Some(view.board_id.as_str()) {
+                return Err(format!(
+                    "保存视图「{}」引用了其它看板的自定义字段",
+                    view.name
+                ));
+            }
+            match field_type {
+                CustomFieldType::Select => {
+                    for option_id in &filter.option_ids {
+                        let exists = custom_field_options
+                            .get(filter.field_id.as_str())
+                            .map(|options| options.contains(option_id.as_str()))
+                            .unwrap_or(false);
+                        if !exists {
+                            return Err(format!(
+                                "保存视图「{}」引用了不存在的选项：{option_id}",
+                                view.name
+                            ));
+                        }
+                    }
+                }
+                CustomFieldType::Number => {
+                    for bound in [filter.min, filter.max].into_iter().flatten() {
+                        if !bound.is_finite() {
+                            return Err(format!("保存视图「{}」的数值区间无效", view.name));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -716,6 +781,7 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
     let tx = conn.transaction().map_err(|error| format!("恢复失败：{error}"))?;
     tx.execute("DELETE FROM card_field_values", [])
         .and_then(|_| tx.execute("DELETE FROM custom_fields", []))
+        .and_then(|_| tx.execute("DELETE FROM saved_views", []))
         .and_then(|_| tx.execute("DELETE FROM recurrence_runs", []))
         .and_then(|_| tx.execute("DELETE FROM card_activity", []))
         .and_then(|_| tx.execute("DELETE FROM recurrences", []))
@@ -830,6 +896,30 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
             ],
         )
         .map_err(|error| format!("写入自定义字段「{}」失败：{error}", field.name))?;
+    }
+
+    for view in &backup.saved_views {
+        let filters_json = serde_json::to_string(&view.filters)
+            .map_err(|error| format!("筛选条件序列化失败：{error}"))?;
+        let sort_json = serde_json::to_string(&view.sort)
+            .map_err(|error| format!("排序方式序列化失败：{error}"))?;
+        tx.execute(
+            "INSERT INTO saved_views \
+             (id, board_id, name, view_type, filters_json, sort_json, is_builtin, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &view.id,
+                &view.board_id,
+                &view.name,
+                &view.view_type,
+                filters_json,
+                sort_json,
+                view.is_builtin as i64,
+                &view.created_at,
+                &view.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入保存视图「{}」失败：{error}", view.name))?;
     }
 
     for list in &backup.lists {
@@ -1147,8 +1237,9 @@ mod tests {
     use crate::db;
     use crate::models::{
         CardFieldValueInput, CustomField, CustomFieldOption, CustomFieldType, IdInput,
-        NewBoardInput, NewCardInput, NewCustomFieldInput, NewListInput, Priority,
-        SetCardFieldValuesInput, SetDependenciesInput,
+        NewBoardInput, NewCardInput, NewCustomFieldInput, NewListInput, NewSavedViewInput,
+        Priority, SavedView, SavedViewFilters, SavedViewSort, SetCardFieldValuesInput,
+        SetDependenciesInput,
     };
 
     fn seed(conn: &mut Connection) -> Card {
@@ -1337,6 +1428,7 @@ mod tests {
             card_activity: Vec::new(),
             custom_fields: Vec::new(),
             card_field_values: Vec::new(),
+            saved_views: Vec::new(),
         };
         let summary = restore(&mut conn, &empty).expect("恢复空备份");
         assert_eq!(summary.cards, 0);
@@ -1687,6 +1779,70 @@ mod tests {
             updated_at: "2026-11-01T00:00:00.000Z".to_string(),
         });
         let error = validate(&backup).expect_err("引用不存在看板的字段应被拒绝");
+        assert!(error.contains("引用了不存在的看板"));
+    }
+
+    #[test]
+    fn saved_views_round_trip_through_backup() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        let card = seed(&mut conn);
+        let view = repo::create_saved_view(
+            &mut conn,
+            NewSavedViewInput {
+                board_id: card.board_id.clone(),
+                name: "本周重点".to_string(),
+                view_type: "table".to_string(),
+                filters: SavedViewFilters {
+                    keyword: "发布".to_string(),
+                    status: "active".to_string(),
+                    ..Default::default()
+                },
+                sort: SavedViewSort {
+                    key: "created-desc".to_string(),
+                    direction: "desc".to_string(),
+                },
+            },
+        )
+        .expect("创建保存视图");
+
+        let backup = build(&conn).expect("构建备份");
+        // 3 个内置视图 + 1 个自建视图
+        assert_eq!(backup.summary().saved_views, 4);
+
+        let restored = restore(&mut conn, &backup).expect("恢复备份");
+        assert_eq!(restored.saved_views, 4);
+
+        let snapshot = repo::get_snapshot(&conn).expect("快照");
+        let saved = snapshot
+            .saved_views
+            .iter()
+            .find(|item| item.id == view.id)
+            .expect("视图应存在");
+        assert_eq!(saved.name, "本周重点");
+        assert_eq!(saved.view_type, "table");
+        assert_eq!(saved.filters.keyword, "发布");
+        assert_eq!(saved.filters.status, "active");
+        assert_eq!(saved.sort.key, "created-desc");
+        assert_eq!(saved.sort.direction, "desc");
+    }
+
+    #[test]
+    fn backup_with_saved_view_referencing_missing_board_is_rejected() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        seed(&mut conn);
+        let mut backup = build(&conn).expect("构建备份");
+        backup.saved_views.push(SavedView {
+            id: "sv_missing".to_string(),
+            board_id: "board_missing".to_string(),
+            name: "悬空视图".to_string(),
+            view_type: "board".to_string(),
+            filters: SavedViewFilters::default(),
+            sort: SavedViewSort::default(),
+            is_builtin: false,
+            created_at: "2026-11-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-11-02T00:00:00.000Z".to_string(),
+        });
+        let error = validate(&backup).expect_err("引用不存在看板的视图应被拒绝");
         assert!(error.contains("引用了不存在的看板"));
     }
 }

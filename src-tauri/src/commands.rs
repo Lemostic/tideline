@@ -66,6 +66,38 @@ pub fn set_card_field_values(
     repo::set_card_field_values(&mut conn, input)
 }
 
+// ---------------------------------------------------------------------------
+// 保存的筛选视图（V0.13.1）
+// ---------------------------------------------------------------------------
+
+/// 读取某个看板的保存视图（内置视图在前）。
+#[tauri::command]
+pub fn get_saved_views(db: State<'_, Db>, board_id: String) -> CmdResult<Vec<SavedView>> {
+    let conn = db.lock()?;
+    repo::get_saved_views(&conn, &board_id)
+}
+
+/// 新建保存视图。
+#[tauri::command]
+pub fn create_saved_view(db: State<'_, Db>, input: NewSavedViewInput) -> CmdResult<SavedView> {
+    let mut conn = db.lock()?;
+    repo::create_saved_view(&mut conn, input)
+}
+
+/// 修改保存视图。
+#[tauri::command]
+pub fn update_saved_view(db: State<'_, Db>, input: UpdateSavedViewInput) -> CmdResult<SavedView> {
+    let mut conn = db.lock()?;
+    repo::update_saved_view(&mut conn, input)
+}
+
+/// 删除保存视图。
+#[tauri::command]
+pub fn delete_saved_view(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_saved_view(&mut conn, input)
+}
+
 #[tauri::command]
 pub fn create_board(db: State<'_, Db>, input: NewBoardInput) -> CmdResult<Board> {
     let mut conn = db.lock()?;

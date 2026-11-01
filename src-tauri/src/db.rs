@@ -6,7 +6,7 @@
 //! V0.2 起任务表新增 `start_date / labels / subtasks` 三列，V0.3 再新增 `deleted_at`
 //! 软删除列：新库直接按最新结构建表，旧库（V0.1 / V0.2 已有用户数据）在启动时按列存在性
 //! 做幂等 `ALTER TABLE` 迁移，不重建表。V0.4 新增 `card_dependencies` 依赖表。
-//! 迁移完成后写入 `PRAGMA user_version = 16`。
+//! 迁移完成后写入 `PRAGMA user_version = 17`。
 //!
 //! V0.12 起 `card_dependencies` 增加 `relation_type` 列（任务关系类型），
 //! 旧库按「前置阻塞」补齐，不丢已有依赖。
@@ -18,6 +18,10 @@
 //! V0.13.0 新增自定义字段两张表：`custom_fields`（看板级字段定义，选项以 JSON 文本存放）
 //! 与 `card_field_values`（任务在字段上的取值）。两张表都是新表，靠
 //! `CREATE TABLE IF NOT EXISTS` 在每次开库时补齐，旧库无需列迁移。
+//!
+//! V0.13.1 新增 `saved_views` 表（看板级保存的筛选视图）：筛选条件与排序方式
+//! 分别以 JSON 文本存放，视图类型单独一列。同样是新表，开库时建好即可；
+//! 旧库的既有看板在迁移阶段补齐「全部 / 我的任务 / 最近更新」三个内置视图。
 
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
@@ -380,6 +384,19 @@ CREATE TABLE IF NOT EXISTS card_field_values (
     PRIMARY KEY (card_id, field_id)
 );
 
+-- V0.13.1 保存的筛选视图：筛选条件 + 排序方式 + 视图类型必须一起存
+CREATE TABLE IF NOT EXISTS saved_views (
+    id           TEXT PRIMARY KEY NOT NULL,
+    board_id     TEXT NOT NULL REFERENCES boards (id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    view_type    TEXT NOT NULL DEFAULT 'board',
+    filters_json TEXT NOT NULL DEFAULT '{}',
+    sort_json    TEXT NOT NULL DEFAULT '{}',
+    is_builtin   INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_lists_board_position ON lists (board_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_list_position ON cards (list_id, position);
 CREATE INDEX IF NOT EXISTS idx_cards_board ON cards (board_id);
@@ -403,6 +420,7 @@ CREATE INDEX IF NOT EXISTS idx_automation_rules_trigger ON automation_rules (tri
 CREATE INDEX IF NOT EXISTS idx_card_activity_card ON card_activity (card_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_custom_fields_board ON custom_fields (board_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_card_field_values_field ON card_field_values (field_id);
+CREATE INDEX IF NOT EXISTS idx_saved_views_board ON saved_views (board_id);
 "#;
 
 /// 打开磁盘数据库（生产路径）。
@@ -436,7 +454,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 16;
+const SCHEMA_VERSION: i64 = 17;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -601,6 +619,8 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
     backfill_member_tenures(connection)?;
     ensure_usage_settings(connection)?;
     ensure_notification_settings(connection)?;
+    // V0.13.1：既有看板补齐内置保存视图（全部 / 我的任务 / 最近更新）。
+    crate::repo::backfill_builtin_saved_views(connection)?;
     connection
         .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|error| format!("写入 user_version 失败：{error}"))?;
@@ -1007,6 +1027,63 @@ mod tests {
         init(&connection).expect("重复启动应保持幂等");
 
         assert_eq!(table_count(&connection), 2, "应补齐两张自定义字段表");
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user_version");
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    /// V0.13.1：旧库（v16）没有 `saved_views` 表时，启动流程幂等补齐，
+    /// 既有看板补齐内置视图，并把 `user_version` 升到 17。
+    #[test]
+    fn v16_database_gains_saved_views_table() {
+        let connection = Connection::open_in_memory().expect("memory database");
+        // 模拟 v16 旧库：把 V0.13.1 新增的表与索引从建表语句里剔除。
+        let v16_schema: String = SCHEMA
+            .split(';')
+            .filter(|statement| !statement.contains("saved_views"))
+            .collect::<Vec<_>>()
+            .join(";\n");
+        connection
+            .execute_batch(&v16_schema)
+            .expect("create v16 schema");
+        connection
+            .execute_batch(
+                "INSERT INTO boards (id, title, created_at, updated_at) \
+                 VALUES ('b', 'board', 'now', 'now');
+                 PRAGMA user_version = 16;",
+            )
+            .expect("seed v16 board");
+
+        let saved_view_tables: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'saved_views'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("统计保存视图表");
+        assert_eq!(saved_view_tables, 0, "v16 旧库不应有保存视图表");
+
+        // 走一次真实启动流程：建表（CREATE TABLE IF NOT EXISTS）+ 迁移。
+        init(&connection).expect("启动流程应补齐保存视图表");
+        init(&connection).expect("重复启动应保持幂等");
+
+        let saved_view_tables: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'saved_views'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("统计保存视图表");
+        assert_eq!(saved_view_tables, 1);
+        let builtin_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM saved_views WHERE board_id = 'b' AND is_builtin = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("统计内置视图");
+        assert_eq!(builtin_count, 3, "既有看板应补齐三个内置视图");
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("read user_version");

@@ -358,6 +358,7 @@ pub fn get_snapshot(conn: &Connection) -> DbResult<Snapshot> {
         automation_rules: crate::automation::get_automation_rules(conn)?,
         custom_fields: get_all_custom_fields(conn)?,
         card_field_values: get_all_card_field_values(conn)?,
+        saved_views: get_all_saved_views(conn)?,
     })
 }
 
@@ -2085,6 +2086,8 @@ pub fn create_board(conn: &mut Connection, input: NewBoardInput) -> DbResult<Boa
         ],
     )
     .map_err(db_err)?;
+    // V0.13.1：新建看板同时补齐内置保存视图（全部 / 我的任务 / 最近更新）。
+    ensure_builtin_saved_views(&tx, &board.id)?;
     tx.commit().map_err(db_err)?;
     Ok(board)
 }
@@ -3126,6 +3129,424 @@ pub fn set_card_field_values(
         .query_map([&input.card_id], row_to_card_field_value)
         .map_err(db_err)?;
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+}
+
+// ---------------------------------------------------------------------------
+// 保存的筛选视图（V0.13.1）
+// ---------------------------------------------------------------------------
+
+const SAVED_VIEW_COLUMNS: &str =
+    "id, board_id, name, view_type, filters_json, sort_json, is_builtin, created_at, updated_at";
+
+/// 内置视图的标识与名称：id 固定，重复补齐不会产生重复行。
+const BUILTIN_SAVED_VIEWS: [(&str, &str); 3] = [
+    ("all", "全部"),
+    ("mine", "我的任务"),
+    ("recent", "最近更新"),
+];
+
+/// 筛选条件 → JSON 文本；序列化失败返回可读错误。
+fn saved_view_filters_to_json(filters: &SavedViewFilters) -> DbResult<String> {
+    serde_json::to_string(filters).map_err(|error| format!("筛选条件序列化失败：{error}"))
+}
+
+/// JSON 文本 → 筛选条件；脏数据回退空条件。
+fn saved_view_filters_from_json(raw: &str) -> SavedViewFilters {
+    serde_json::from_str(raw).unwrap_or_default()
+}
+
+/// 排序方式 → JSON 文本；序列化失败返回可读错误。
+fn saved_view_sort_to_json(sort: &SavedViewSort) -> DbResult<String> {
+    serde_json::to_string(sort).map_err(|error| format!("排序方式序列化失败：{error}"))
+}
+
+/// JSON 文本 → 排序方式；脏数据回退默认排序。
+fn saved_view_sort_from_json(raw: &str) -> SavedViewSort {
+    serde_json::from_str(raw).unwrap_or_default()
+}
+
+fn row_to_saved_view(row: &Row<'_>) -> rusqlite::Result<SavedView> {
+    let filters_json: String = row.get("filters_json")?;
+    let sort_json: String = row.get("sort_json")?;
+    Ok(SavedView {
+        id: row.get("id")?,
+        board_id: row.get("board_id")?,
+        name: row.get("name")?,
+        view_type: row.get("view_type")?,
+        filters: saved_view_filters_from_json(&filters_json),
+        sort: saved_view_sort_from_json(&sort_json),
+        is_builtin: row.get::<_, i64>("is_builtin")? != 0,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+/// 筛选条件规范化：状态只认 all / active / completed，标签去空白。
+fn normalize_saved_view_filters(filters: SavedViewFilters) -> SavedViewFilters {
+    let status = match filters.status.trim() {
+        "active" => "active",
+        "completed" => "completed",
+        _ => "all",
+    }
+    .to_string();
+    SavedViewFilters {
+        keyword: filters.keyword.trim().to_string(),
+        status,
+        priorities: filters.priorities,
+        labels: filters
+            .labels
+            .into_iter()
+            .map(|label| label.trim().to_string())
+            .filter(|label| !label.is_empty())
+            .collect(),
+        field_filters: filters.field_filters,
+        blocked: filters.blocked,
+    }
+}
+
+/// 排序方式规范化：与前端 `normalizeSortKey` 同一套映射，
+/// 方向由排序键决定（以 -desc 结尾即倒序），无法识别的键回退默认排序。
+fn normalize_saved_view_sort(sort: SavedViewSort) -> SavedViewSort {
+    let descending = sort.direction.trim() == "desc";
+    let key = match sort.key.trim() {
+        "due-asc" => "due-asc",
+        "due-desc" => "due-desc",
+        "due" => {
+            if descending {
+                "due-desc"
+            } else {
+                "due-asc"
+            }
+        }
+        "priority" => "priority",
+        "created-desc" => "created-desc",
+        "created-asc" => "created-asc",
+        "created" => {
+            if descending {
+                "created-desc"
+            } else {
+                "created-asc"
+            }
+        }
+        "updated" | "updatedAt" | "updated-at" | "updated-desc" => "updated-desc",
+        _ => "due-asc",
+    };
+    let direction = if key.ends_with("-desc") {
+        "desc"
+    } else {
+        "asc"
+    };
+    SavedViewSort {
+        key: key.to_string(),
+        direction: direction.to_string(),
+    }
+}
+
+/// 视图类型规范化：空值按看板视图处理，其它值原样保留（类型词表由前端定义）。
+fn normalize_view_type(view_type: &str) -> String {
+    let trimmed = view_type.trim();
+    if trimmed.is_empty() {
+        "board".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 字段筛选净化：与前端 `degradeLocalSavedViewFilters` 同一套降级规则 ——
+/// 字段没了就丢掉整条条件，选项没了就去掉那个选项 id，选项被删光则整条失效。
+fn sanitize_saved_view_field_filters(
+    conn: &Connection,
+    board_id: &str,
+    filters: &mut SavedViewFilters,
+) -> DbResult<()> {
+    let fields = get_custom_fields(conn, board_id)?;
+    let mut kept: Vec<SavedViewFieldFilter> = Vec::new();
+    for mut filter in std::mem::take(&mut filters.field_filters) {
+        let Some(field) = fields.iter().find(|field| field.id == filter.field_id) else {
+            // 字段已被删除：丢掉整条条件
+            continue;
+        };
+        if filter.option_ids.is_empty() {
+            // 没有选项条件（数值区间等）：原样保留
+            kept.push(filter);
+            continue;
+        }
+        let valid: HashSet<&str> = field
+            .options
+            .iter()
+            .map(|option| option.id.as_str())
+            .collect();
+        filter
+            .option_ids
+            .retain(|option_id| valid.contains(option_id.as_str()));
+        if filter.option_ids.is_empty() {
+            // 选项被删光：条件失效
+            continue;
+        }
+        kept.push(filter);
+    }
+    filters.field_filters = kept;
+    Ok(())
+}
+
+/// 读取时净化保存视图：失效的字段引用被忽略，视图仍可正常还原。
+fn sanitize_saved_view(conn: &Connection, view: &mut SavedView) -> DbResult<()> {
+    view.filters = normalize_saved_view_filters(view.filters.clone());
+    view.sort = normalize_saved_view_sort(view.sort.clone());
+    sanitize_saved_view_field_filters(conn, &view.board_id, &mut view.filters)
+}
+
+/// 读取某个看板的保存视图（内置视图在前）。
+pub fn get_saved_views(conn: &Connection, board_id: &str) -> DbResult<Vec<SavedView>> {
+    let mut statement = conn
+        .prepare(&format!(
+            "SELECT {SAVED_VIEW_COLUMNS} FROM saved_views WHERE board_id = ?1 \
+             ORDER BY is_builtin DESC, created_at ASC, id ASC"
+        ))
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([board_id], row_to_saved_view)
+        .map_err(db_err)?;
+    let mut views = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
+    for view in &mut views {
+        sanitize_saved_view(conn, view)?;
+    }
+    Ok(views)
+}
+
+/// 读取全部保存视图（快照与备份用）。
+pub fn get_all_saved_views(conn: &Connection) -> DbResult<Vec<SavedView>> {
+    let mut statement = conn
+        .prepare(&format!(
+            "SELECT {SAVED_VIEW_COLUMNS} FROM saved_views \
+             ORDER BY board_id ASC, is_builtin DESC, created_at ASC, id ASC"
+        ))
+        .map_err(db_err)?;
+    let rows = statement.query_map([], row_to_saved_view).map_err(db_err)?;
+    let mut views = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
+    for view in &mut views {
+        sanitize_saved_view(conn, view)?;
+    }
+    Ok(views)
+}
+
+fn get_saved_view(conn: &Connection, id: &str) -> DbResult<SavedView> {
+    let mut view = conn
+        .query_row(
+            &format!("SELECT {SAVED_VIEW_COLUMNS} FROM saved_views WHERE id = ?1"),
+            [id],
+            row_to_saved_view,
+        )
+        .optional()
+        .map_err(db_err)?
+        .ok_or_else(|| format!("保存视图不存在：{id}"))?;
+    sanitize_saved_view(conn, &mut view)?;
+    Ok(view)
+}
+
+/// 同一看板内视图名唯一（内置视图也占名，避免切换条里出现两个「全部」）。
+fn ensure_unique_saved_view_name(
+    conn: &Connection,
+    board_id: &str,
+    name: &str,
+    exclude_id: Option<&str>,
+) -> DbResult<()> {
+    for view in get_saved_views(conn, board_id)? {
+        if exclude_id == Some(view.id.as_str()) {
+            continue;
+        }
+        if view.name.trim() == name {
+            return Err("该看板已存在同名视图".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// 新建保存视图：字段筛选条件里的失效引用在写入前就被丢弃。
+pub fn create_saved_view(conn: &mut Connection, input: NewSavedViewInput) -> DbResult<SavedView> {
+    let _ = get_board(conn, &input.board_id)?;
+    let name = input.name.trim().to_string();
+    if name.is_empty() {
+        return Err("请先填写视图名称".to_string());
+    }
+    ensure_unique_saved_view_name(conn, &input.board_id, &name, None)?;
+    let mut filters = normalize_saved_view_filters(input.filters);
+    sanitize_saved_view_field_filters(conn, &input.board_id, &mut filters)?;
+    let sort = normalize_saved_view_sort(input.sort);
+    let now = now_iso();
+    let view = SavedView {
+        id: create_id("sv"),
+        board_id: input.board_id,
+        name,
+        view_type: normalize_view_type(&input.view_type),
+        filters,
+        sort,
+        is_builtin: false,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    conn.execute(
+        "INSERT INTO saved_views \
+         (id, board_id, name, view_type, filters_json, sort_json, is_builtin, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
+        params![
+            &view.id,
+            &view.board_id,
+            &view.name,
+            &view.view_type,
+            saved_view_filters_to_json(&view.filters)?,
+            saved_view_sort_to_json(&view.sort)?,
+            &view.created_at,
+            &view.updated_at,
+        ],
+    )
+    .map_err(db_err)?;
+    touch_board(conn, &view.board_id)?;
+    Ok(view)
+}
+
+/// 修改保存视图：内置视图不可改。
+pub fn update_saved_view(
+    conn: &mut Connection,
+    input: UpdateSavedViewInput,
+) -> DbResult<SavedView> {
+    let mut view = get_saved_view(conn, &input.id)?;
+    if view.is_builtin {
+        return Err("内置视图不可修改".to_string());
+    }
+    if let Some(name) = input.patch.name {
+        let new_name = name.trim().to_string();
+        if new_name.is_empty() {
+            return Err("请先填写视图名称".to_string());
+        }
+        if new_name != view.name {
+            ensure_unique_saved_view_name(conn, &view.board_id, &new_name, Some(&view.id))?;
+        }
+        view.name = new_name;
+    }
+    if let Some(view_type) = input.patch.view_type {
+        view.view_type = normalize_view_type(&view_type);
+    }
+    if let Some(filters) = input.patch.filters {
+        let mut filters = normalize_saved_view_filters(filters);
+        sanitize_saved_view_field_filters(conn, &view.board_id, &mut filters)?;
+        view.filters = filters;
+    }
+    if let Some(sort) = input.patch.sort {
+        view.sort = normalize_saved_view_sort(sort);
+    }
+    view.updated_at = now_iso();
+    conn.execute(
+        "UPDATE saved_views SET name = ?1, view_type = ?2, filters_json = ?3, sort_json = ?4, \
+         updated_at = ?5 WHERE id = ?6",
+        params![
+            &view.name,
+            &view.view_type,
+            saved_view_filters_to_json(&view.filters)?,
+            saved_view_sort_to_json(&view.sort)?,
+            &view.updated_at,
+            &view.id,
+        ],
+    )
+    .map_err(db_err)?;
+    touch_board(conn, &view.board_id)?;
+    Ok(view)
+}
+
+/// 删除保存视图：内置视图不可删，避免用户把自己锁死。
+pub fn delete_saved_view(conn: &mut Connection, input: IdInput) -> DbResult<()> {
+    let view = get_saved_view(conn, &input.id)?;
+    if view.is_builtin {
+        return Err("内置视图不可删除".to_string());
+    }
+    conn.execute("DELETE FROM saved_views WHERE id = ?1", [&input.id])
+        .map_err(db_err)?;
+    touch_board(conn, &view.board_id)?;
+    Ok(())
+}
+
+/// 内置视图定义：id 固定，重复补齐不会产生重复行。
+fn builtin_saved_view(board_id: &str, key: &str, name: &str, now: &str) -> SavedView {
+    let (filters, sort) = match key {
+        // 我的任务：只看未完成
+        "mine" => (
+            SavedViewFilters {
+                status: "active".to_string(),
+                ..Default::default()
+            },
+            SavedViewSort {
+                key: "due-asc".to_string(),
+                direction: "asc".to_string(),
+            },
+        ),
+        // 最近更新：按更新时间倒序
+        "recent" => (
+            SavedViewFilters::default(),
+            SavedViewSort {
+                key: "updated-desc".to_string(),
+                direction: "desc".to_string(),
+            },
+        ),
+        _ => (
+            SavedViewFilters::default(),
+            SavedViewSort {
+                key: "due-asc".to_string(),
+                direction: "asc".to_string(),
+            },
+        ),
+    };
+    SavedView {
+        id: format!("sv_builtin_{board_id}_{key}"),
+        board_id: board_id.to_string(),
+        name: name.to_string(),
+        view_type: "board".to_string(),
+        filters,
+        sort,
+        is_builtin: true,
+        created_at: now.to_string(),
+        updated_at: now.to_string(),
+    }
+}
+
+/// 给某个看板补齐内置视图（幂等）。
+pub fn ensure_builtin_saved_views(conn: &Connection, board_id: &str) -> DbResult<()> {
+    let now = now_iso();
+    for (key, name) in BUILTIN_SAVED_VIEWS {
+        let view = builtin_saved_view(board_id, key, name, &now);
+        conn.execute(
+            "INSERT OR IGNORE INTO saved_views \
+             (id, board_id, name, view_type, filters_json, sort_json, is_builtin, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)",
+            params![
+                &view.id,
+                &view.board_id,
+                &view.name,
+                &view.view_type,
+                saved_view_filters_to_json(&view.filters)?,
+                saved_view_sort_to_json(&view.sort)?,
+                &view.created_at,
+                &view.updated_at,
+            ],
+        )
+        .map_err(db_err)?;
+    }
+    Ok(())
+}
+
+/// 给所有既有看板补齐内置视图（V0.13.1 迁移用，幂等）。
+pub fn backfill_builtin_saved_views(conn: &Connection) -> DbResult<()> {
+    let mut statement = conn
+        .prepare("SELECT id FROM boards ORDER BY created_at ASC, id ASC")
+        .map_err(db_err)?;
+    let board_ids = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(db_err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(db_err)?;
+    for board_id in board_ids {
+        ensure_builtin_saved_views(conn, &board_id)?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -5499,6 +5920,428 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM card_field_values", [], |row| row.get(0))
             .expect("统计字段值行");
         assert_eq!(orphans, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // 保存的筛选视图（V0.13.1）
+    // -----------------------------------------------------------------------
+
+    fn new_saved_view(
+        conn: &mut Connection,
+        board_id: &str,
+        name: &str,
+        filters: SavedViewFilters,
+        sort: SavedViewSort,
+    ) -> SavedView {
+        create_saved_view(
+            conn,
+            NewSavedViewInput {
+                board_id: board_id.to_string(),
+                name: name.to_string(),
+                view_type: "board".to_string(),
+                filters,
+                sort,
+            },
+        )
+        .expect("创建保存视图失败")
+    }
+
+    #[test]
+    fn create_saved_view_persists_filters_and_sort() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let view = new_saved_view(
+            &mut conn,
+            &board.id,
+            "本周重点",
+            SavedViewFilters {
+                keyword: "  发布 ".to_string(),
+                status: "active".to_string(),
+                priorities: vec![Priority::High],
+                labels: vec!["研发".to_string()],
+                field_filters: Vec::new(),
+                blocked: true,
+            },
+            SavedViewSort {
+                key: "created-desc".to_string(),
+                direction: "desc".to_string(),
+            },
+        );
+        assert!(!view.is_builtin);
+        assert_eq!(view.filters.keyword, "发布");
+        assert_eq!(view.filters.status, "active");
+        assert_eq!(view.filters.priorities, vec![Priority::High]);
+        assert_eq!(view.filters.labels, vec!["研发".to_string()]);
+        assert!(view.filters.blocked);
+        assert_eq!(view.sort.key, "created-desc");
+        assert_eq!(view.sort.direction, "desc");
+
+        let views = get_saved_views(&conn, &board.id).expect("读取视图");
+        let saved = views
+            .iter()
+            .find(|item| item.id == view.id)
+            .expect("视图应存在");
+        assert_eq!(saved.filters, view.filters);
+        assert_eq!(saved.sort, view.sort);
+    }
+
+    #[test]
+    fn builtin_saved_views_are_created_for_new_board() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let views = get_saved_views(&conn, &board.id).expect("读取视图");
+        assert_eq!(views.len(), 3);
+        assert!(views.iter().all(|view| view.is_builtin));
+        let names: Vec<&str> = views.iter().map(|view| view.name.as_str()).collect();
+        assert_eq!(names, vec!["全部", "我的任务", "最近更新"]);
+        let mine = views
+            .iter()
+            .find(|view| view.name == "我的任务")
+            .expect("我的任务视图");
+        assert_eq!(mine.filters.status, "active");
+        let recent = views
+            .iter()
+            .find(|view| view.name == "最近更新")
+            .expect("最近更新视图");
+        assert_eq!(recent.sort.key, "updated-desc");
+        assert_eq!(recent.sort.direction, "desc");
+    }
+
+    #[test]
+    fn builtin_saved_views_cannot_be_deleted_or_renamed() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let views = get_saved_views(&conn, &board.id).expect("读取视图");
+        let builtin = views[0].clone();
+        let error = delete_saved_view(&mut conn, id_input(&builtin.id)).expect_err("内置视图不可删除");
+        assert!(error.contains("内置视图不可删除"));
+        let error = update_saved_view(
+            &mut conn,
+            UpdateSavedViewInput {
+                id: builtin.id.clone(),
+                patch: SavedViewPatch {
+                    name: Some("改名".to_string()),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect_err("内置视图不可修改");
+        assert!(error.contains("内置视图不可修改"));
+    }
+
+    #[test]
+    fn saved_view_with_deleted_field_filter_degrades_gracefully() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "阶段",
+            CustomFieldType::Select,
+            vec![custom_field_option("opt_a", "甲")],
+        );
+        let view = new_saved_view(
+            &mut conn,
+            &board.id,
+            "按阶段",
+            SavedViewFilters {
+                field_filters: vec![SavedViewFieldFilter {
+                    field_id: field.id.clone(),
+                    option_ids: vec!["opt_a".to_string()],
+                    min: None,
+                    max: None,
+                }],
+                ..Default::default()
+            },
+            SavedViewSort::default(),
+        );
+        // 字段被删除后，视图读取时忽略该条件而不是报错
+        delete_custom_field(&mut conn, id_input(&field.id)).expect("删除字段");
+        let views = get_saved_views(&conn, &board.id).expect("读取视图");
+        let saved = views
+            .iter()
+            .find(|item| item.id == view.id)
+            .expect("视图应存在");
+        assert!(saved.filters.field_filters.is_empty());
+    }
+
+    #[test]
+    fn saved_view_with_removed_option_filter_degrades_gracefully() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "阶段",
+            CustomFieldType::Select,
+            vec![
+                custom_field_option("opt_a", "甲"),
+                custom_field_option("opt_b", "乙"),
+            ],
+        );
+        let view = new_saved_view(
+            &mut conn,
+            &board.id,
+            "按阶段",
+            SavedViewFilters {
+                field_filters: vec![SavedViewFieldFilter {
+                    field_id: field.id.clone(),
+                    option_ids: vec!["opt_a".to_string(), "opt_b".to_string()],
+                    min: None,
+                    max: None,
+                }],
+                ..Default::default()
+            },
+            SavedViewSort::default(),
+        );
+        update_custom_field(
+            &mut conn,
+            UpdateCustomFieldInput {
+                id: field.id.clone(),
+                patch: CustomFieldPatch {
+                    name: None,
+                    options: Some(vec![custom_field_option("opt_a", "甲")]),
+                    sort_order: None,
+                },
+            },
+        )
+        .expect("移除选项");
+        let views = get_saved_views(&conn, &board.id).expect("读取视图");
+        let saved = views
+            .iter()
+            .find(|item| item.id == view.id)
+            .expect("视图应存在");
+        assert_eq!(saved.filters.field_filters.len(), 1);
+        assert_eq!(
+            saved.filters.field_filters[0].option_ids,
+            vec!["opt_a".to_string()]
+        );
+    }
+
+    #[test]
+    fn number_range_filter_is_preserved_as_saved() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "工时",
+            CustomFieldType::Number,
+            Vec::new(),
+        );
+        let view = new_saved_view(
+            &mut conn,
+            &board.id,
+            "工时区间",
+            SavedViewFilters {
+                field_filters: vec![SavedViewFieldFilter {
+                    field_id: field.id.clone(),
+                    option_ids: Vec::new(),
+                    min: Some(2.0),
+                    max: Some(10.0),
+                }],
+                ..Default::default()
+            },
+            SavedViewSort::default(),
+        );
+        assert_eq!(view.filters.field_filters[0].min, Some(2.0));
+        assert_eq!(view.filters.field_filters[0].max, Some(10.0));
+    }
+
+    #[test]
+    fn saved_view_sort_is_normalized_like_frontend() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let view = new_saved_view(
+            &mut conn,
+            &board.id,
+            "排序归一",
+            SavedViewFilters::default(),
+            SavedViewSort {
+                key: "updatedAt".to_string(),
+                direction: "desc".to_string(),
+            },
+        );
+        assert_eq!(view.sort.key, "updated-desc");
+        assert_eq!(view.sort.direction, "desc");
+
+        let view = new_saved_view(
+            &mut conn,
+            &board.id,
+            "排序归一 2",
+            SavedViewFilters::default(),
+            SavedViewSort {
+                key: "due-asc".to_string(),
+                direction: "desc".to_string(),
+            },
+        );
+        assert_eq!(view.sort.key, "due-asc");
+        assert_eq!(view.sort.direction, "asc");
+    }
+
+    #[test]
+    fn blank_saved_view_name_is_rejected() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let error = create_saved_view(
+            &mut conn,
+            NewSavedViewInput {
+                board_id: board.id.clone(),
+                name: "   ".to_string(),
+                view_type: String::new(),
+                filters: SavedViewFilters::default(),
+                sort: SavedViewSort::default(),
+            },
+        )
+        .expect_err("空名称应被拒绝");
+        assert!(error.contains("请先填写视图名称"));
+    }
+
+    #[test]
+    fn duplicate_saved_view_name_in_same_board_is_rejected() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        new_saved_view(
+            &mut conn,
+            &board.id,
+            "本周重点",
+            SavedViewFilters::default(),
+            SavedViewSort::default(),
+        );
+        let error = create_saved_view(
+            &mut conn,
+            NewSavedViewInput {
+                board_id: board.id.clone(),
+                name: " 本周重点 ".to_string(),
+                view_type: String::new(),
+                filters: SavedViewFilters::default(),
+                sort: SavedViewSort::default(),
+            },
+        )
+        .expect_err("同看板内的同名视图应被拒绝");
+        assert!(error.contains("该看板已存在同名视图"));
+    }
+
+    #[test]
+    fn saved_view_can_be_updated_and_deleted() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let view = new_saved_view(
+            &mut conn,
+            &board.id,
+            "旧名",
+            SavedViewFilters {
+                status: "active".to_string(),
+                ..Default::default()
+            },
+            SavedViewSort::default(),
+        );
+        let updated = update_saved_view(
+            &mut conn,
+            UpdateSavedViewInput {
+                id: view.id.clone(),
+                patch: SavedViewPatch {
+                    name: Some("新名".to_string()),
+                    view_type: Some("table".to_string()),
+                    filters: Some(SavedViewFilters {
+                        status: "completed".to_string(),
+                        ..Default::default()
+                    }),
+                    sort: Some(SavedViewSort {
+                        key: "created-desc".to_string(),
+                        direction: "desc".to_string(),
+                    }),
+                },
+            },
+        )
+        .expect("更新视图");
+        assert_eq!(updated.name, "新名");
+        assert_eq!(updated.view_type, "table");
+        assert_eq!(updated.filters.status, "completed");
+        assert_eq!(updated.sort.key, "created-desc");
+
+        delete_saved_view(&mut conn, id_input(&view.id)).expect("删除视图");
+        assert!(get_saved_views(&conn, &board.id)
+            .expect("读取视图")
+            .iter()
+            .all(|item| item.id != view.id));
+    }
+
+    /// 锁定落库的 JSON 形态：前端按这套字段名读写，别随手改名。
+    #[test]
+    fn saved_view_json_shape_is_locked() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let field = new_custom_field(
+            &mut conn,
+            &board.id,
+            "阶段",
+            CustomFieldType::Select,
+            vec![custom_field_option("opt_a", "甲")],
+        );
+        let view = new_saved_view(
+            &mut conn,
+            &board.id,
+            "本周重点",
+            SavedViewFilters {
+                keyword: "发布".to_string(),
+                status: "active".to_string(),
+                priorities: vec![Priority::High],
+                labels: vec!["研发".to_string()],
+                field_filters: vec![SavedViewFieldFilter {
+                    field_id: field.id.clone(),
+                    option_ids: vec!["opt_a".to_string()],
+                    min: None,
+                    max: None,
+                }],
+                blocked: true,
+            },
+            SavedViewSort {
+                key: "created-desc".to_string(),
+                direction: "desc".to_string(),
+            },
+        );
+        let filters_json: String = conn
+            .query_row(
+                "SELECT filters_json FROM saved_views WHERE id = ?1",
+                [&view.id],
+                |row| row.get(0),
+            )
+            .expect("读取筛选条件 JSON");
+        let sort_json: String = conn
+            .query_row(
+                "SELECT sort_json FROM saved_views WHERE id = ?1",
+                [&view.id],
+                |row| row.get(0),
+            )
+            .expect("读取排序 JSON");
+        assert_eq!(
+            filters_json,
+            format!(
+                r#"{{"keyword":"发布","status":"active","priorities":["high"],"labels":["研发"],"fieldFilters":[{{"fieldId":"{}","optionIds":["opt_a"],"min":null,"max":null}}],"blocked":true}}"#,
+                field.id
+            )
+        );
+        assert_eq!(sort_json, r#"{"key":"created-desc","direction":"desc"}"#);
+    }
+
+    #[test]
+    fn snapshot_includes_saved_views() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        new_saved_view(
+            &mut conn,
+            &board.id,
+            "本周重点",
+            SavedViewFilters::default(),
+            SavedViewSort::default(),
+        );
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert!(snapshot
+            .saved_views
+            .iter()
+            .any(|view| view.name == "本周重点"));
+        assert!(snapshot.saved_views.iter().any(|view| view.is_builtin));
     }
 
     #[test]

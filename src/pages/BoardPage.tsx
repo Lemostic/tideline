@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
-import { PRIORITY_META, boardColorValue, type BoardView, type Card } from '@/lib/types';
+import { PRIORITY_META, boardColorValue, type BoardSortKey, type BoardView, type Card, type SavedView } from '@/lib/types';
+import { isBlocked } from '@/lib/dependencies';
+import { normalizeSortKey } from '@/lib/savedViews';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
@@ -11,7 +13,15 @@ import { CustomFieldsModal } from '@/features/board/CustomFieldsModal';
 import { BoardHeader } from '@/features/board/BoardHeader';
 import { CalendarView } from '@/features/board/CalendarView';
 import { EmptyBoard } from '@/features/board/EmptyBoard';
-import { EMPTY_FILTERS, filterCards, type BoardFilters } from '@/features/board/filters';
+import {
+  boardFiltersToSavedViewFilters,
+  EMPTY_FILTERS,
+  filterCards,
+  filtersEqual,
+  savedViewFiltersToBoardFilters,
+  type BoardFilters,
+} from '@/features/board/filters';
+import { SavedViewsBar } from '@/features/board/SavedViewsBar';
 import { GanttView } from '@/features/board/GanttView';
 import { KanbanBoard } from '@/features/board/KanbanBoard';
 import { TableView } from '@/features/board/TableView';
@@ -32,8 +42,15 @@ export function BoardPage() {
   const bulkDeleteCards = useAppStore((state) => state.bulkDeleteCards);
   const requestConfirm = useUiStore((state) => state.requestConfirm);
   const bulkUpdateCards = useAppStore((state) => state.bulkUpdateCards);
+  const createSavedView = useAppStore((state) => state.createSavedView);
+  const updateSavedView = useAppStore((state) => state.updateSavedView);
+  const deleteSavedView = useAppStore((state) => state.deleteSavedView);
   const [view, setView] = useState<BoardView>(() => defaultView);
   const [filters, setFilters] = useState<BoardFilters>(EMPTY_FILTERS);
+  /** 当前激活的保存视图（V0.13.1） */
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  /** 表格视图的排序键：保存视图会指定排序方式，因此由页面统一持有 */
+  const [tableSort, setTableSort] = useState<BoardSortKey>('due-asc');
   const [batchMode, setBatchMode] = useState(false);
   const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -55,8 +72,41 @@ export function BoardPage() {
     [snapshot.cards, boardId],
   );
 
+  // 本看板的自定义字段（V0.13.1）：字段筛选面板的数据源
+  const boardFields = useMemo(
+    () =>
+      boardId
+        ? snapshot.customFields
+            .filter((field) => field.boardId === boardId)
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+        : [],
+    [snapshot.customFields, boardId],
+  );
+
+  // 被前置任务卡住的任务：只认阻塞型关系，且前置必须还没完成
+  const blockedCardIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const card of boardCards) {
+      if (isBlocked(card.id, snapshot.dependencies, boardCards)) ids.add(card.id);
+    }
+    return ids;
+  }, [boardCards, snapshot.dependencies]);
+
+  // 本看板保存的视图（V0.13.1）
+  const savedViews = useMemo(
+    () => snapshot.savedViews.filter((item) => item.boardId === boardId),
+    [snapshot.savedViews, boardId],
+  );
+
   // 筛选跨视图生效：看板列、表格、甘特、日历都只看过滤后的任务
-  const visibleCards = useMemo(() => filterCards(boardCards, filters), [boardCards, filters]);
+  const visibleCards = useMemo(
+    () =>
+      filterCards(boardCards, filters, {
+        cardFieldValues: snapshot.cardFieldValues,
+        blockedCardIds,
+      }),
+    [boardCards, filters, snapshot.cardFieldValues, blockedCardIds],
+  );
 
   const hasBoardDependencies = useMemo(() => {
     if (!showDependencyLines || !boardId) return false;
@@ -99,6 +149,42 @@ export function BoardPage() {
     if (next !== 'board') exitBatch();
     setView(next);
   };
+  /** 应用一个保存视图：筛选条件、排序方式与视图类型一起切回去 */
+  const applySavedView = (target: SavedView) => {
+    setFilters(savedViewFiltersToBoardFilters(target.filters));
+    setTableSort(normalizeSortKey(target.sort.key, target.sort.direction));
+    setActiveViewId(target.id);
+    if (target.viewType) changeView(target.viewType);
+  };
+
+  const handleCreateView = async (name: string) => {
+    if (!boardId) return;
+    const created = await createSavedView({
+      boardId,
+      name,
+      viewType: view,
+      filters: boardFiltersToSavedViewFilters(filters),
+      sort: { key: tableSort, direction: tableSort.endsWith('-desc') ? 'desc' : 'asc' },
+    });
+    setActiveViewId(created.id);
+  };
+
+  const handleRenameView = async (target: SavedView, name: string) => {
+    await updateSavedView(target.id, { name });
+  };
+
+  const handleDeleteView = async (target: SavedView) => {
+    const confirmed = await requestConfirm({
+      title: '删除视图「' + target.name + '」',
+      description: '这个视图里的筛选条件会一起删除，无法恢复。',
+      confirmLabel: '删除视图',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    await deleteSavedView(target.id);
+    if (activeViewId === target.id) setActiveViewId(null);
+  };
+
   const toggleBatchMode = () => {
     if (batchMode) exitBatch();
     else setBatchMode(true);
@@ -146,6 +232,18 @@ export function BoardPage() {
     await runBulk(() => bulkDeleteCards(selectedCardIds));
   };
 
+  const activeSavedView = savedViews.find((item) => item.id === activeViewId) ?? null;
+
+  // 当前筛选或排序已经偏离激活的视图：视图标签上标一个点，提醒用户条件被改过
+  const viewDirty = useMemo(() => {
+    if (!activeSavedView) return false;
+    const sameFilters = filtersEqual(
+      filters,
+      savedViewFiltersToBoardFilters(activeSavedView.filters),
+    );
+    return !(sameFilters && activeSavedView.sort.key === tableSort);
+  }, [activeSavedView, filters, tableSort]);
+
   if (!board) {
     return (
       <div className="page">
@@ -176,10 +274,21 @@ export function BoardPage() {
         showDependencyLegend={view === 'board' && hasBoardDependencies}
         onOpenCustomFields={() => setCustomFieldsOpen(true)}
       />
+      <SavedViewsBar
+        views={savedViews}
+        activeViewId={activeViewId}
+        dirty={viewDirty}
+        onSelect={applySavedView}
+        onCreate={handleCreateView}
+        onRename={handleRenameView}
+        onDelete={handleDeleteView}
+      />
       <BoardFilterBar
         filters={filters}
         onChange={setFilters}
         cards={boardCards}
+        fields={boardFields}
+        blockedCount={blockedCardIds.size}
         visibleCount={visibleCards.length}
         totalCount={boardCards.length}
       />
@@ -198,7 +307,13 @@ export function BoardPage() {
           />
         )
       ) : view === 'table' ? (
-        <TableView board={board} lists={lists} cards={visibleCards} />
+        <TableView
+          board={board}
+          lists={lists}
+          cards={visibleCards}
+          sort={tableSort}
+          onSortChange={setTableSort}
+        />
       ) : view === 'gantt' ? (
         <GanttView board={board} lists={lists} cards={visibleCards} />
       ) : (

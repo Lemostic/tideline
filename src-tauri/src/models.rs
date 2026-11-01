@@ -726,6 +726,77 @@ pub struct CardFieldValue {
     pub value_number: Option<f64>,
 }
 
+// ---------------------------------------------------------------------------
+// 保存的筛选视图（V0.13.1）
+// ---------------------------------------------------------------------------
+
+/// 保存视图里针对自定义字段的筛选条件。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedViewFieldFilter {
+    /// 自定义字段 id
+    pub field_id: String,
+    /// 单选字段：命中的选项 id 集合（空 = 不限）
+    #[serde(default)]
+    pub option_ids: Vec<String>,
+    /// 数值字段：区间下限（null = 不限）
+    #[serde(default)]
+    pub min: Option<f64>,
+    /// 数值字段：区间上限（null = 不限）
+    #[serde(default)]
+    pub max: Option<f64>,
+}
+
+/// 保存视图的筛选条件：与看板筛选条同一套语义，再叠加自定义字段与关系筛选。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedViewFilters {
+    #[serde(default)]
+    pub keyword: String,
+    /// all / active / completed
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub priorities: Vec<Priority>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// 自定义字段筛选条件
+    #[serde(default)]
+    pub field_filters: Vec<SavedViewFieldFilter>,
+    /// 只看被阻塞的任务（只认 V0.12 的 blocks 关系）
+    #[serde(default)]
+    pub blocked: bool,
+}
+
+/// 保存视图的排序方式：筛选与排序必须一起存，否则切回来会排序错乱。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedViewSort {
+    /// 排序键，沿用表格视图的排序标识（如 due-asc / created-desc）
+    #[serde(default)]
+    pub key: String,
+    /// asc / desc；缺省按 asc 处理
+    #[serde(default)]
+    pub direction: String,
+}
+
+/// 保存的筛选视图（按看板隔离）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedView {
+    pub id: String,
+    pub board_id: String,
+    pub name: String,
+    /// 视图类型：board / table / gantt / calendar
+    pub view_type: String,
+    pub filters: SavedViewFilters,
+    pub sort: SavedViewSort,
+    /// 内置视图不可删除、不可改名
+    pub is_builtin: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// 启动时一次性拉取的全量快照。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -774,6 +845,9 @@ pub struct Snapshot {
     /// 任务在自定义字段上的取值（V0.13.0）。
     #[serde(default)]
     pub card_field_values: Vec<CardFieldValue>,
+    /// 保存的筛选视图（V0.13.1）。
+    #[serde(default)]
+    pub saved_views: Vec<SavedView>,
 }
 
 // ---------------------------------------------------------------------------
@@ -833,6 +907,9 @@ pub struct BackupFile {
     /// V0.13.0 新增；旧备份没有该字段时按空字段值处理。
     #[serde(default)]
     pub card_field_values: Vec<CardFieldValue>,
+    /// V0.13.1 新增；旧备份没有该字段时按空保存视图处理。
+    #[serde(default)]
+    pub saved_views: Vec<SavedView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -876,6 +953,9 @@ pub struct BackupSummary {
     /// V0.13.0 新增。
     #[serde(default)]
     pub card_field_values: usize,
+    /// V0.13.1 新增。
+    #[serde(default)]
+    pub saved_views: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1433,6 +1513,43 @@ pub struct CardFieldValueInput {
     /// select 字段存选项 id，number 字段存数字；两者都为 null 表示清空该字段
     pub value_text: Option<String>,
     pub value_number: Option<f64>,
+}
+
+/// 新建保存视图的入参（V0.13.1）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewSavedViewInput {
+    pub board_id: String,
+    pub name: String,
+    /// 视图类型：board / table / gantt / calendar，缺省看板视图
+    #[serde(default)]
+    pub view_type: String,
+    #[serde(default)]
+    pub filters: SavedViewFilters,
+    #[serde(default)]
+    pub sort: SavedViewSort,
+}
+
+/// 修改保存视图的入参（V0.13.1）：字段缺失 = 保持原值。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedViewPatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub view_type: Option<String>,
+    #[serde(default)]
+    pub filters: Option<SavedViewFilters>,
+    #[serde(default)]
+    pub sort: Option<SavedViewSort>,
+}
+
+/// 更新保存视图的入参（V0.13.1）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSavedViewInput {
+    pub id: String,
+    pub patch: SavedViewPatch,
 }
 
 /// 从磁盘读取的需求文档（V0.9）。

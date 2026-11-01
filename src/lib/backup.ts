@@ -5,12 +5,14 @@
  * `{ app, formatVersion: 1, exportedAt, boards, lists, cards, inbox }`
  * cards 包含回收站任务（deletedAt 非空），恢复时整体替换。
  */
+import { normalizeSavedViewFilters, normalizeSavedViewSort } from './savedViews';
 import type {
   AutomationRule,
   BackupFile,
   BackupSummary,
   Board,
   BoardSet,
+  BoardView,
   Card,
   CardActivity,
   CardDependency,
@@ -28,6 +30,9 @@ import type {
   ProjectRole,
   Recurrence,
   RelationType,
+  SavedView,
+  SavedViewFilters,
+  SavedViewSort,
   TeamMember,
   MemberTenure,
 } from './types';
@@ -59,6 +64,7 @@ export interface BackupData {
   /** V0.13.0 新增 */
   customFields: CustomField[];
   cardFieldValues: CardFieldValue[];
+  savedViews: SavedView[];
 }
 
 export function summarizeBackup(
@@ -67,7 +73,7 @@ export function summarizeBackup(
     'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets' | 'goals' |
       'teamMembers' | 'overtimeRecords' | 'performanceRecords' | 'memberTenures' | 'projects' |
       'projectMetaFields' | 'projectRoles' | 'recurrences' | 'automationRules' | 'cardActivity' |
-      'customFields' | 'cardFieldValues'
+      'customFields' | 'cardFieldValues' | 'savedViews'
   >,
 ): BackupSummary {
   return {
@@ -91,6 +97,7 @@ export function summarizeBackup(
     cardActivity: backup.cardActivity.length,
     customFields: backup.customFields.length,
     cardFieldValues: backup.cardFieldValues.length,
+    savedViews: backup.savedViews.length,
   };
 }
 
@@ -119,6 +126,7 @@ export function createBackup(data: BackupData): BackupFile {
     cardActivity: data.cardActivity,
     customFields: data.customFields,
     cardFieldValues: data.cardFieldValues,
+    savedViews: data.savedViews,
   };
 }
 
@@ -842,6 +850,67 @@ export function parseBackup(text: string): BackupFile {
     cardFieldValues.push({ cardId, fieldId, valueText, valueNumber });
   }
 
+  // V0.13.1 新增的保存视图；旧备份没有这一项时按空数组处理。
+  const rawSavedViews =
+    raw.savedViews === undefined ? [] : requireArray(raw.savedViews, 'savedViews');
+  const savedViews: SavedView[] = [];
+  const savedViewIds = new Set<string>();
+  const savedViewNames = new Map<string, Set<string>>();
+  for (const item of rawSavedViews) {
+    if (!isRecord(item)) throw new Error('备份中的保存视图格式不正确');
+    const id = requireString(item.id, 'savedViews[].id');
+    if (savedViewIds.has(id)) throw new Error('备份中存在重复的保存视图 id：' + id);
+    savedViewIds.add(id);
+    const name = requireString(item.name, 'savedViews[].name');
+    const boardId = requireString(item.boardId, 'savedViews[].boardId');
+    if (!boardIds.has(boardId)) {
+      throw new Error('保存视图「' + name + '」引用了不存在的看板');
+    }
+    const names = savedViewNames.get(boardId) ?? new Set<string>();
+    if (names.has(name.trim())) throw new Error('看板中存在同名的保存视图：' + name);
+    names.add(name.trim());
+    savedViewNames.set(boardId, names);
+    const viewType = typeof item.viewType === 'string' ? item.viewType.trim() : '';
+    if (!viewType) throw new Error('保存视图「' + name + '」缺少视图类型');
+    // 字段筛选必须指向本备份里真实存在的字段与选项，否则整份备份视为损坏
+    const filters = normalizeSavedViewFilters(item.filters as Partial<SavedViewFilters>);
+    for (const filter of filters.fieldFilters) {
+      const field = fieldById.get(filter.fieldId);
+      if (!field) {
+        throw new Error(
+          '保存视图「' + name + '」引用了不存在的自定义字段：' + filter.fieldId,
+        );
+      }
+      if (field.boardId !== boardId) {
+        throw new Error(
+          '保存视图「' + name + '」引用了其它看板的自定义字段：' + filter.fieldId,
+        );
+      }
+      if (filter.optionIds.length > 0) {
+        const valid = new Set(field.options.map((option) => option.id));
+        for (const optionId of filter.optionIds) {
+          if (!valid.has(optionId)) {
+            throw new Error('保存视图「' + name + '」引用了不存在的选项：' + optionId);
+          }
+        }
+      }
+    }
+    savedViews.push({
+      id,
+      boardId,
+      name,
+      viewType: viewType as BoardView,
+      filters,
+      sort: normalizeSavedViewSort(item.sort as Partial<SavedViewSort>),
+      isBuiltin: item.isBuiltin === true,
+      createdAt:
+        typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt:
+        typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
+
   return {
     app: BACKUP_APP,
     formatVersion: BACKUP_FORMAT_VERSION,
@@ -865,5 +934,6 @@ export function parseBackup(text: string): BackupFile {
     cardActivity,
     customFields,
     cardFieldValues,
+    savedViews,
   };
 }

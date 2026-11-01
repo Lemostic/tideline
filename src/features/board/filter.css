@@ -440,3 +440,68 @@
     animation: none;
   }
 }
+
+/* ---------- 自定义字段筛选（V0.13.1） ---------- */
+
+.bf-pop-field {
+  width: 252px;
+  max-height: 328px;
+  display: flex;
+  flex-direction: column;
+}
+
+.bf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.bf-field:last-child {
+  border-bottom: 0;
+}
+
+.bf-field-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px 3px;
+}
+
+.bf-field-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.bf-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px 0;
+}
+
+.bf-range-input {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.bf-range-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.bf-range-sep {
+  color: var(--faint);
+  font-size: 11px;
+}

@@ -86,7 +86,7 @@
 从 [GitHub Releases](https://github.com/Lemostic/tideline/releases/latest) 下载最新的 Windows 安装包：
 
 ```
-tideline-0.13.0-win64-setup.exe
+tideline-0.13.1-win64-setup.exe
 ```
 
 - 系统级安装，默认目录 **`C:\Program Files\Tideline`**，安装/卸载需要管理员权限。

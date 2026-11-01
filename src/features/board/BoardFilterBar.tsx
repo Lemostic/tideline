@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
-import { PRIORITY_META, type Card, type Priority } from '@/lib/types';
+import { PRIORITY_META, type Card, type CustomField, type Priority } from '@/lib/types';
 import {
+  clearFieldFilter,
   collectLabels,
   countActiveFilters,
   EMPTY_FILTERS,
+  fieldFilterOf,
   FILTER_STATUS_OPTIONS,
   hasActiveFilters,
+  setFieldRange,
+  toggleFieldOption,
   toggleLabel,
   togglePriority,
   type BoardFilters,
@@ -17,12 +21,16 @@ interface BoardFilterBarProps {
   filters: BoardFilters;
   onChange: (filters: BoardFilters) => void;
   cards: Card[];
+  /** 本看板的自定义字段（V0.13.1） */
+  fields: CustomField[];
+  /** 本看板被阻塞的任务数量（V0.13.1） */
+  blockedCount: number;
   /** 筛选后的可见任务数 / 全部任务数 */
   visibleCount: number;
   totalCount: number;
 }
 
-type PanelKey = 'priority' | 'labels' | null;
+type PanelKey = 'priority' | 'labels' | 'fields' | null;
 
 /**
  * 看板筛选条（V0.3）：搜索 + 状态分段 + 优先级/标签多选弹层 + chips 摘要。
@@ -34,6 +42,8 @@ export function BoardFilterBar({
   filters,
   onChange,
   cards,
+  fields,
+  blockedCount,
   visibleCount,
   totalCount,
 }: BoardFilterBarProps) {
@@ -82,7 +92,12 @@ export function BoardFilterBar({
 
   const active = hasActiveFilters(filters);
   const keyword = filters.keyword.trim();
-  const hasChips = keyword !== '' || filters.priorities.length > 0 || filters.labels.length > 0;
+  const hasChips =
+    keyword !== '' ||
+    filters.priorities.length > 0 ||
+    filters.labels.length > 0 ||
+    filters.fieldFilters.length > 0 ||
+    filters.blocked;
   const activeCount = countActiveFilters(filters);
 
   const patch = (next: Partial<BoardFilters>) => onChange({ ...filters, ...next });
@@ -255,6 +270,156 @@ export function BoardFilterBar({
         </div>
       ) : null}
 
+      {fields.length > 0 ? (
+        <div className="bf-pop-wrap">
+          <button
+            type="button"
+            className={
+              'bf-trigger' +
+              (filters.fieldFilters.length > 0 ? ' is-on' : '') +
+              (openPanel === 'fields' ? ' is-open' : '')
+            }
+            aria-haspopup="true"
+            aria-expanded={openPanel === 'fields'}
+            onClick={() => togglePanel('fields')}
+          >
+            <Icon name="sliders" size={13} />
+            <span>字段</span>
+            {filters.fieldFilters.length > 0 ? (
+              <span className="bf-badge">{filters.fieldFilters.length}</span>
+            ) : (
+              <Icon name="chevron-down" size={12} className="bf-caret" />
+            )}
+          </button>
+
+          {openPanel === 'fields' ? (
+            <div className="bf-pop bf-pop-field" role="group" aria-label="按自定义字段筛选">
+              <div className="bf-pop-head">
+                <span>字段</span>
+                {filters.fieldFilters.length > 0 ? (
+                  <button
+                    type="button"
+                    className="bf-pop-clear"
+                    onClick={() => patch({ fieldFilters: [] })}
+                  >
+                    清除
+                  </button>
+                ) : null}
+              </div>
+              <div className="bf-pop-body">
+                {fields.map((field) => {
+                  const current = fieldFilterOf(filters, field.id);
+                  return (
+                    <div className="bf-field" key={field.id}>
+                      <div className="bf-field-head">
+                        <span className="bf-field-name">{field.name}</span>
+                        {current ? (
+                          <button
+                            type="button"
+                            className="bf-pop-clear"
+                            onClick={() => onChange(clearFieldFilter(filters, field.id))}
+                          >
+                            清除
+                          </button>
+                        ) : null}
+                      </div>
+                      {field.fieldType === 'select' ? (
+                        field.options.map((option) => {
+                          const checked = current?.optionIds.includes(option.id) ?? false;
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              role="checkbox"
+                              aria-checked={checked}
+                              className={
+                                'bf-option' + (checked ? ' is-checked' : '')
+                              }
+                              onClick={() =>
+                                onChange(toggleFieldOption(filters, field.id, option.id))
+                              }
+                            >
+                              <span className="bf-check" aria-hidden="true">
+                                {checked ? <Icon name="check" size={10} /> : null}
+                              </span>
+                              <span
+                                className="dot"
+                                style={{ background: option.color }}
+                                aria-hidden="true"
+                              />
+                              <span className="bf-option-label">{option.label}</span>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <div className="bf-range">
+                          <input
+                            className="bf-range-input"
+                            type="number"
+                            inputMode="decimal"
+                            placeholder="最小"
+                            aria-label={field.name + ' 最小值'}
+                            value={current?.min ?? ''}
+                            onChange={(event) => {
+                              const raw = event.target.value;
+                              const parsed = raw === '' ? null : Number(raw);
+                              if (raw !== '' && !Number.isFinite(parsed)) return;
+                              onChange(
+                                setFieldRange(
+                                  filters,
+                                  field.id,
+                                  parsed,
+                                  current?.max ?? null,
+                                ),
+                              );
+                            }}
+                          />
+                          <span className="bf-range-sep">—</span>
+                          <input
+                            className="bf-range-input"
+                            type="number"
+                            inputMode="decimal"
+                            placeholder="最大"
+                            aria-label={field.name + ' 最大值'}
+                            value={current?.max ?? ''}
+                            onChange={(event) => {
+                              const raw = event.target.value;
+                              const parsed = raw === '' ? null : Number(raw);
+                              if (raw !== '' && !Number.isFinite(parsed)) return;
+                              onChange(
+                                setFieldRange(
+                                  filters,
+                                  field.id,
+                                  current?.min ?? null,
+                                  parsed,
+                                ),
+                              );
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {blockedCount > 0 ? (
+        <button
+          type="button"
+          className={'bf-trigger' + (filters.blocked ? ' is-on' : '')}
+          aria-pressed={filters.blocked}
+          title={'只看被阻塞的任务（共 ' + blockedCount + ' 个）'}
+          onClick={() => patch({ blocked: !filters.blocked })}
+        >
+          <Icon name="link" size={13} />
+          <span>被阻塞</span>
+          {filters.blocked ? <span className="bf-badge">{blockedCount}</span> : null}
+        </button>
+      ) : null}
       {hasChips ? (
         <div className="bf-chips" aria-label="已启用的筛选">
           {keyword ? (
@@ -307,6 +472,52 @@ export function BoardFilterBar({
               <Icon name="x" size={11} className="bf-chip-x" />
             </button>
           ))}
+          {filters.fieldFilters.map((filter) => {
+            const field = fields.find((item) => item.id === filter.fieldId);
+            if (!field) return null;
+            const optionLabels = filter.optionIds
+              .map((id) => field.options.find((option) => option.id === id)?.label ?? '')
+              .filter(Boolean);
+            let text = field.name;
+            if (optionLabels.length > 0) {
+              text = field.name + '：' + optionLabels.join('、');
+            } else if (filter.min !== null || filter.max !== null) {
+              text =
+                field.name +
+                '：' +
+                (filter.min ?? '不限') +
+                ' ~ ' +
+                (filter.max ?? '不限');
+            }
+            return (
+              <button
+                key={filter.fieldId}
+                type="button"
+                className="bf-chip"
+                aria-label={'移除字段筛选：' + text}
+                title={'移除字段筛选：' + text}
+                onClick={() => onChange(clearFieldFilter(filters, filter.fieldId))}
+              >
+                <Icon name="sliders" size={11} />
+                <span className="bf-chip-text">{text}</span>
+                <Icon name="x" size={11} className="bf-chip-x" />
+              </button>
+            );
+          })}
+
+          {filters.blocked ? (
+            <button
+              type="button"
+              className="bf-chip"
+              aria-label="移除被阻塞筛选"
+              title="移除被阻塞筛选"
+              onClick={() => patch({ blocked: false })}
+            >
+              <Icon name="link" size={11} />
+              <span className="bf-chip-text">被阻塞</span>
+              <Icon name="x" size={11} className="bf-chip-x" />
+            </button>
+          ) : null}
         </div>
       ) : (
         <span className="grow" />
