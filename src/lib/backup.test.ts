@@ -37,6 +37,8 @@ function card(overrides: Partial<Card> = {}): Card {
     description: '',
     dueDate: null,
     startDate: null,
+    estimatedMinutes: null,
+    actualMinutes: null,
     priority: null,
     completed: false,
     deletedAt: null,
@@ -105,6 +107,20 @@ describe('backup helpers', () => {
     expect(backup.formatVersion).toBe(BACKUP_FORMAT_VERSION);
     expect(backup.cards).toHaveLength(2);
     expect(backup.cards[1].deletedAt).toBe('2026-02-01T00:00:00.000Z');
+  });
+
+  it('旧备份缺少工时字段时补 null，并保留新备份中的零与分钟数', () => {
+    const old = validBackup();
+    const restored = parseBackup(JSON.stringify(old));
+    expect(restored.cards[0].estimatedMinutes).toBeNull();
+    expect(restored.cards[0].actualMinutes).toBeNull();
+
+    const withMinutes = validBackup();
+    withMinutes.cards[0].estimatedMinutes = 90;
+    withMinutes.cards[0].actualMinutes = 0;
+    const roundTrip = parseBackup(JSON.stringify(withMinutes));
+    expect(roundTrip.cards[0].estimatedMinutes).toBe(90);
+    expect(roundTrip.cards[0].actualMinutes).toBe(0);
   });
 
   it('拒绝非潮线备份、错误版本和非法 JSON', () => {

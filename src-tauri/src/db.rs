@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS cards (
     description TEXT NOT NULL DEFAULT '',
     due_date    TEXT,
     start_date  TEXT,
+    estimated_minutes INTEGER CHECK (estimated_minutes >= 0),
+    actual_minutes INTEGER CHECK (actual_minutes >= 0),
     priority    TEXT CHECK (priority IN ('low', 'medium', 'high') OR priority IS NULL),
     accent      TEXT,
     completed   INTEGER NOT NULL DEFAULT 0,
@@ -402,7 +404,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 12;
+const SCHEMA_VERSION: i64 = 13;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -422,6 +424,8 @@ const CARD_COLUMN_MIGRATIONS: &[(&str, &str)] = &[
     ),
     ("deleted_at", "ALTER TABLE cards ADD COLUMN deleted_at TEXT"),
     ("accent", "ALTER TABLE cards ADD COLUMN accent TEXT"),
+    ("estimated_minutes", "ALTER TABLE cards ADD COLUMN estimated_minutes INTEGER CHECK (estimated_minutes >= 0)"),
+    ("actual_minutes", "ALTER TABLE cards ADD COLUMN actual_minutes INTEGER CHECK (actual_minutes >= 0)"),
     // V0.11 自动化：重复任务配置与「由哪条重复配置生成」的溯源字段
     ("recurrence_id", "ALTER TABLE cards ADD COLUMN recurrence_id TEXT"),
     (
@@ -748,6 +752,8 @@ mod tests {
             "deleted_at",
             "recurrence_id",
             "generated_from_id",
+            "estimated_minutes",
+            "actual_minutes",
         ] {
             assert!(
                 columns.iter().any(|name| name == expected),
@@ -860,6 +866,38 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
             .expect("统计任务数");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn v12_cards_gain_nullable_minutes_without_losing_existing_values() {
+        let connection = Connection::open_in_memory().expect("memory database");
+        let v12_schema = SCHEMA.replace(
+            "    estimated_minutes INTEGER CHECK (estimated_minutes >= 0),\n    actual_minutes INTEGER CHECK (actual_minutes >= 0),\n",
+            "",
+        );
+        connection.execute_batch(&v12_schema).expect("create v12 schema");
+        connection.execute_batch(
+            "INSERT INTO boards (id, title, created_at, updated_at) VALUES ('b', 'board', 'now', 'now');
+             INSERT INTO lists (id, board_id, title, created_at) VALUES ('l', 'b', 'list', 'now');
+             INSERT INTO cards (id, board_id, list_id, title, created_at, updated_at)
+                 VALUES ('c', 'b', 'l', 'card', 'now', 'now');
+             PRAGMA user_version = 12;"
+        ).expect("seed v12 card");
+        migrate_schema(&connection).expect("migrate to v13");
+        let values: (String, Option<i64>, Option<i64>) = connection.query_row(
+            "SELECT title, estimated_minutes, actual_minutes FROM cards WHERE id = 'c'", [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).expect("read migrated card");
+        assert_eq!(values, ("card".to_string(), None, None));
+        connection.execute("UPDATE cards SET estimated_minutes = 55, actual_minutes = 22 WHERE id = 'c'", [])
+            .expect("set minutes");
+        migrate_schema(&connection).expect("idempotent migration");
+        let minutes: (Option<i64>, Option<i64>) = connection.query_row(
+            "SELECT estimated_minutes, actual_minutes FROM cards WHERE id = 'c'", [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).expect("read preserved minutes");
+        assert_eq!(minutes, (Some(55), Some(22)));
+        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), 13);
     }
 
     /// V0.1 的表结构（cards 还没有 start_date / labels / subtasks），用于迁移测试。
@@ -982,7 +1020,7 @@ CREATE TABLE cards (
         // 首次 open：执行幂等迁移，旧数据保留。
         let connection = open(&path).expect("打开并迁移旧库");
         let columns = table_columns(&connection, "cards").expect("读取迁移后的列名");
-        for expected in ["start_date", "labels", "subtasks", "deleted_at"] {
+        for expected in ["start_date", "labels", "subtasks", "deleted_at", "estimated_minutes", "actual_minutes"] {
             assert!(
                 columns.iter().any(|name| name == expected),
                 "迁移后 cards 缺少列 {expected}"

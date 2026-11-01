@@ -287,6 +287,11 @@ pub struct Card {
     pub due_date: Option<String>,
     /// 甘特视图的起始日期（YYYY-MM-DD），null 表示未排期。
     pub start_date: Option<String>,
+    /// V0.12：预估与实际工时（分钟）；旧备份缺少字段时保持未填写。
+    #[serde(default)]
+    pub estimated_minutes: Option<i64>,
+    #[serde(default)]
+    pub actual_minutes: Option<i64>,
     pub priority: Option<Priority>,
     /// 卡片强调色（V0.7），None 时使用默认卡片样式
     pub accent: Option<BoardColor>,
@@ -819,6 +824,10 @@ pub struct NewCardInput {
     #[serde(default)]
     pub start_date: Option<String>,
     #[serde(default)]
+    pub estimated_minutes: Option<i64>,
+    #[serde(default)]
+    pub actual_minutes: Option<i64>,
+    #[serde(default)]
     pub priority: Option<Priority>,
     #[serde(default)]
     pub accent: Option<BoardColor>,
@@ -850,6 +859,10 @@ pub struct CardPatch {
     pub due_date: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub start_date: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub estimated_minutes: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub actual_minutes: Option<Option<i64>>,
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub priority: Option<Option<Priority>>,
     #[serde(default, deserialize_with = "deserialize_double_option")]
@@ -1498,6 +1511,8 @@ mod tests {
             description: "".to_string(),
             due_date: Some("2026-01-10".to_string()),
             start_date: Some("2026-02-01".to_string()),
+            estimated_minutes: None,
+            actual_minutes: None,
             priority: Some(Priority::High),
             accent: None,
             completed: false,
@@ -1538,6 +1553,21 @@ mod tests {
             deleted_json["deletedAt"],
             serde_json::json!("2026-03-01T08:00:00.000Z")
         );
+    }
+
+    #[test]
+    fn task_minutes_use_camel_case_and_nullable_patch_semantics() {
+        let mut card = sample_card();
+        card.estimated_minutes = Some(90);
+        card.actual_minutes = Some(0);
+        let value = serde_json::to_value(card).expect("serialize task minutes");
+        assert_eq!(value["estimatedMinutes"], 90);
+        assert_eq!(value["actualMinutes"], 0);
+        let missing: CardPatch = serde_json::from_str("{}").expect("missing fields");
+        assert_eq!((missing.estimated_minutes, missing.actual_minutes), (None, None));
+        let patch: CardPatch = serde_json::from_str(r#"{"estimatedMinutes":null,"actualMinutes":0}"#)
+            .expect("nullable patch");
+        assert_eq!((patch.estimated_minutes, patch.actual_minutes), (Some(None), Some(Some(0))));
     }
 
     #[test]

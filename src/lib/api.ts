@@ -354,6 +354,15 @@ interface LocalDb extends Snapshot {
  * 兼容 V0.1 写入的旧数据：补齐 V0.2 新增的 startDate / labels / subtasks。
  * SQLite 侧由 Rust 迁移完成，这里处理浏览器 localStorage。
  */
+function validateCardMinutes(values: { estimatedMinutes?: number | null; actualMinutes?: number | null }) {
+  for (const field of ['estimatedMinutes', 'actualMinutes'] as const) {
+    const minutes = values[field];
+    if (minutes !== undefined && minutes !== null && (!Number.isSafeInteger(minutes) || minutes < 0)) {
+      throw new Error(`${field} 必须是非负整数分钟`);
+    }
+  }
+}
+
 function normalizeCard(raw: Card): Card {
   const subtasks: Subtask[] = Array.isArray(raw.subtasks)
     ? raw.subtasks
@@ -370,6 +379,8 @@ function normalizeCard(raw: Card): Card {
   return {
     ...raw,
     startDate: raw.startDate ?? null,
+    estimatedMinutes: raw.estimatedMinutes ?? null,
+    actualMinutes: raw.actualMinutes ?? null,
     deletedAt: raw.deletedAt ?? null,
     accent: raw.accent ?? null,
     labels,
@@ -576,6 +587,7 @@ function rollLocalRecurrence(db: LocalDb, card: Card): Card | null {
     id: createId('c'),
     completed: false,
     deletedAt: null,
+    actualMinutes: null,
     dueDate: generatedDue,
     startDate: null,
     labels: [...card.labels],
@@ -1247,6 +1259,7 @@ const localApi: TidelineApi = {
   },
 
   async createCard(input) {
+    validateCardMinutes(input);
     const db = loadLocalDb();
     requireList(db, input.listId);
     const siblings = db.cards.filter((c) => c.listId === input.listId && !c.deletedAt);
@@ -1259,6 +1272,8 @@ const localApi: TidelineApi = {
       description: input.description?.trim() ?? '',
       dueDate: input.dueDate ?? null,
       startDate: input.startDate ?? null,
+      estimatedMinutes: input.estimatedMinutes ?? null,
+      actualMinutes: input.actualMinutes ?? null,
       priority: input.priority ?? null,
       accent: input.accent ?? null,
       completed: false,
@@ -1279,6 +1294,7 @@ const localApi: TidelineApi = {
   },
 
   async updateCard({ id, patch }) {
+    validateCardMinutes(patch);
     const db = loadLocalDb();
     const card = requireCard(db, id);
     const previous = { ...card, labels: [...card.labels], subtasks: card.subtasks.map((item) => ({ ...item })) };
@@ -1286,6 +1302,8 @@ const localApi: TidelineApi = {
     if (patch.description !== undefined) card.description = patch.description;
     if (patch.dueDate !== undefined) card.dueDate = patch.dueDate;
     if (patch.startDate !== undefined) card.startDate = patch.startDate;
+    if (patch.estimatedMinutes !== undefined) card.estimatedMinutes = patch.estimatedMinutes;
+    if (patch.actualMinutes !== undefined) card.actualMinutes = patch.actualMinutes;
     if (patch.priority !== undefined) card.priority = patch.priority;
     if (patch.accent !== undefined) card.accent = patch.accent;
     if (patch.completed !== undefined) card.completed = patch.completed;
@@ -1478,6 +1496,8 @@ const localApi: TidelineApi = {
       description: item.content.includes('\n') ? item.content : '',
       dueDate: null,
       startDate: null,
+      estimatedMinutes: null,
+      actualMinutes: null,
       priority: null,
       accent: null,
       completed: false,

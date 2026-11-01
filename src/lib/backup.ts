@@ -187,6 +187,8 @@ export function parseBackup(text: string): BackupFile {
   const cards = (requireArray(raw.cards, 'cards') as Card[]).map((card) => ({
     ...card,
     accent: card.accent ?? null,
+    estimatedMinutes: card.estimatedMinutes ?? null,
+    actualMinutes: card.actualMinutes ?? null,
   }));
   const inbox = requireArray(raw.inbox, 'inbox') as InboxItem[];
 
@@ -224,6 +226,12 @@ export function parseBackup(text: string): BackupFile {
     cardIds.add(id);
     cardBoard.set(id, boardId);
     requireString(card.title ?? '', 'cards[].title');
+    for (const field of ['estimatedMinutes', 'actualMinutes'] as const) {
+      const minutes = card[field];
+      if (minutes !== null && (!Number.isSafeInteger(minutes) || minutes < 0)) {
+        throw new Error(`备份中的 ${field} 必须是非负整数或 null`);
+      }
+    }
   }
 
   // 依赖字段是 V0.4 新增的，旧备份（V0.4.0）没有该字段时按空数组处理。

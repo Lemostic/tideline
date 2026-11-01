@@ -59,6 +59,8 @@ export function TaskDrawer() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [estimatedMinutes, setEstimatedMinutes] = useState('');
+  const [actualMinutes, setActualMinutes] = useState('');
   const [descriptionMode, setDescriptionMode] = useState<DescriptionMode>('edit');
   const [subtaskDraft, setSubtaskDraft] = useState('');
   const [labelDraft, setLabelDraft] = useState('');
@@ -84,6 +86,8 @@ export function TaskDrawer() {
   useEffect(() => {
     setTitle(card?.title ?? '');
     setDescription(card?.description ?? '');
+    setEstimatedMinutes(card?.estimatedMinutes?.toString() ?? '');
+    setActualMinutes(card?.actualMinutes?.toString() ?? '');
     setDescriptionMode('edit');
     setSubtaskDraft('');
     setLabelDraft('');
@@ -172,6 +176,20 @@ export function TaskDrawer() {
 
   const commitDescription = () => {
     if (description !== card.description) void updateCard(card.id, { description });
+  };
+
+  const commitMinutes = (field: 'estimatedMinutes' | 'actualMinutes', draft: string) => {
+    const value = draft.trim();
+    const next = value === '' ? null : Number(value);
+    if (next !== null && (!Number.isSafeInteger(next) || next < 0)) {
+      if (field === 'estimatedMinutes') setEstimatedMinutes(card.estimatedMinutes?.toString() ?? '');
+      else setActualMinutes(card.actualMinutes?.toString() ?? '');
+      notify('请输入非负整数分钟', 'danger');
+      return;
+    }
+    if (field === 'estimatedMinutes') setEstimatedMinutes(next?.toString() ?? '');
+    else setActualMinutes(next?.toString() ?? '');
+    if (next !== card[field]) void updateCard(card.id, { [field]: next });
   };
 
   const setPriority = (priority: Priority | null) => {
@@ -451,6 +469,44 @@ export function TaskDrawer() {
                     <Icon name="x" size={13} />
                   </button>
                 ) : null}
+              </div>
+            </div>
+
+            <div className="meta-row">
+              <div className="meta-label">预估工时</div>
+              <div className="meta-value">
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  aria-label="预估工时（分钟）"
+                  placeholder="分钟"
+                  value={estimatedMinutes}
+                  onChange={(event) => setEstimatedMinutes(event.target.value)}
+                  onBlur={() => commitMinutes('estimatedMinutes', estimatedMinutes)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                />
+              </div>
+            </div>
+
+            <div className="meta-row">
+              <div className="meta-label">实际工时</div>
+              <div className="meta-value">
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  aria-label="实际工时（分钟）"
+                  placeholder="分钟"
+                  value={actualMinutes}
+                  onChange={(event) => setActualMinutes(event.target.value)}
+                  onBlur={() => commitMinutes('actualMinutes', actualMinutes)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                />
               </div>
             </div>
 

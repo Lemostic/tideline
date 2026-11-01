@@ -42,6 +42,8 @@ function card(
     description: '',
     dueDate: null,
     startDate: null,
+    estimatedMinutes: null,
+    actualMinutes: null,
     priority: null,
     completed: false,
     deletedAt: null,

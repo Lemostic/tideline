@@ -968,8 +968,8 @@ pub fn roll_recurrence(
         "INSERT INTO cards \
          (id, board_id, list_id, title, description, due_date, start_date, priority, accent, \
           completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, \
-          created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, 0, ?9, ?10, ?11, NULL, ?12, ?13, ?14, ?14)",
+          estimated_minutes, actual_minutes, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, 0, ?9, ?10, ?11, NULL, ?12, ?13, ?14, NULL, ?15, ?15)",
         params![
             &generated_id,
             &card.board_id,
@@ -984,6 +984,7 @@ pub fn roll_recurrence(
             position,
             &recurrence.id,
             &card.id,
+            card.estimated_minutes,
             &now,
         ],
     )
@@ -1161,6 +1162,8 @@ mod tests {
                 description: None,
                 due_date: Some("2026-01-05".to_string()),
                 start_date: None,
+                estimated_minutes: None,
+                actual_minutes: None,
                 priority: None,
                 accent: None,
                 labels: None,
@@ -1236,8 +1239,12 @@ mod tests {
         )
         .expect("创建重复配置");
 
+        conn.execute("UPDATE cards SET estimated_minutes = 120, actual_minutes = 75 WHERE id = ?1", [&card_id])
+            .expect("设置上一轮工时");
         let generated = roll_recurrence(&mut conn, &card_id).expect("滚动重复");
         let generated = generated.expect("应生成下一次任务");
+        assert_eq!(generated.estimated_minutes, Some(120));
+        assert_eq!(generated.actual_minutes, None);
         assert_eq!(generated.title, "写周报");
         assert!(!generated.completed, "新任务应是未完成状态");
         // 原任务截止 2026-01-05，下一次是 2026-01-06。

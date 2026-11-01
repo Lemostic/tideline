@@ -128,7 +128,7 @@ fn subtasks_from_json(raw: &str) -> Vec<Subtask> {
 
 const BOARD_COLUMNS: &str = "id, title, description, color, starred, created_at, updated_at";
 const LIST_COLUMNS: &str = "id, board_id, title, color, wip_limit, position, created_at";
-const CARD_COLUMNS: &str = "id, board_id, list_id, title, description, due_date, start_date, priority, accent, completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, created_at, updated_at";
+const CARD_COLUMNS: &str = "id, board_id, list_id, title, description, due_date, start_date, estimated_minutes, actual_minutes, priority, accent, completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, created_at, updated_at";
 const INBOX_COLUMNS: &str = "id, content, created_at";
 
 fn row_to_board(row: &Row<'_>) -> rusqlite::Result<Board> {
@@ -169,6 +169,8 @@ fn row_to_card(row: &Row<'_>) -> rusqlite::Result<Card> {
         description: row.get("description")?,
         due_date: row.get("due_date")?,
         start_date: row.get("start_date")?,
+        estimated_minutes: row.get("estimated_minutes")?,
+        actual_minutes: row.get("actual_minutes")?,
         priority: priority.as_deref().and_then(Priority::from_db),
         accent: accent.map(|value| BoardColor::from_db(&value)),
         completed: row.get::<_, i64>("completed")? != 0,
@@ -2232,6 +2234,15 @@ pub fn record_card_changes(
             new.start_date.clone().unwrap_or_default(),
         ));
     }
+    for (field, before, after) in [
+        ("estimatedMinutes", old.estimated_minutes, new.estimated_minutes),
+        ("actualMinutes", old.actual_minutes, new.actual_minutes),
+    ] {
+        if before != after {
+            changes.push((field, before.map(|value| value.to_string()).unwrap_or_default(),
+                after.map(|value| value.to_string()).unwrap_or_default()));
+        }
+    }
     if old.priority != new.priority {
         changes.push((
             "priority",
@@ -2280,6 +2291,15 @@ pub fn record_card_event(
     crate::automation::insert_activity(conn, card_id, event_type, "", "", detail)
 }
 
+fn validate_card_minutes(card: &Card) -> DbResult<()> {
+    if card.estimated_minutes.is_some_and(|minutes| minutes < 0)
+        || card.actual_minutes.is_some_and(|minutes| minutes < 0)
+    {
+        return Err("工时分钟数不能为负数".to_string());
+    }
+    Ok(())
+}
+
 pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card> {
     let tx = conn.transaction().map_err(db_err)?;
     get_list(&tx, &input.list_id)?;    let position: i64 = tx
@@ -2299,6 +2319,8 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
         description: trimmed_or_empty(input.description),
         due_date: input.due_date,
         start_date: input.start_date,
+        estimated_minutes: input.estimated_minutes,
+        actual_minutes: input.actual_minutes,
         priority: input.priority,
         accent: input.accent,
         completed: false,
@@ -2311,13 +2333,14 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
         created_at: now.clone(),
         updated_at: now,
     };
+    validate_card_minutes(&card)?;
     let labels_json = labels_to_json(&card.labels)?;
     let subtasks_json = subtasks_to_json(&card.subtasks)?;
     tx.execute(
         "INSERT INTO cards \
          (id, board_id, list_id, title, description, due_date, start_date, priority, accent, completed, \
-         labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, NULL, NULL, ?14, ?15)",
+         labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, estimated_minutes, actual_minutes, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, NULL, NULL, ?14, ?15, ?16, ?17)",
         params![
             &card.id,
             &card.board_id,
@@ -2332,6 +2355,8 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
             &labels_json,
             &subtasks_json,
             card.position,
+            card.estimated_minutes,
+            card.actual_minutes,
             &card.created_at,
             &card.updated_at,
         ],
@@ -2359,6 +2384,13 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
     if let Some(start_date) = input.patch.start_date {
         card.start_date = start_date;
     }
+    if let Some(minutes) = input.patch.estimated_minutes {
+        card.estimated_minutes = minutes;
+    }
+    if let Some(minutes) = input.patch.actual_minutes {
+        card.actual_minutes = minutes;
+    }
+    validate_card_minutes(&card)?;
     if let Some(priority) = input.patch.priority {
         card.priority = priority;
     }
@@ -2406,7 +2438,7 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
     tx.execute(
         "UPDATE cards SET title = ?1, description = ?2, due_date = ?3, start_date = ?4, \
          priority = ?5, accent = ?6, completed = ?7, labels = ?8, subtasks = ?9, position = ?10, \
-         updated_at = ?11 WHERE id = ?12",
+         estimated_minutes = ?11, actual_minutes = ?12, updated_at = ?13 WHERE id = ?14",
         params![
             &card.title,
             &card.description,
@@ -2418,6 +2450,8 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
             &labels_json,
             &subtasks_json,
             card.position,
+            card.estimated_minutes,
+            card.actual_minutes,
             &card.updated_at,
             &card.id,
         ],
@@ -2668,6 +2702,8 @@ pub fn convert_inbox_item(conn: &mut Connection, input: ConvertInboxInput) -> Db
         description,
         due_date: None,
         start_date: None,
+        estimated_minutes: None,
+        actual_minutes: None,
         priority: None,
         accent: None,
         completed: false,
@@ -3001,6 +3037,39 @@ mod tests {
                 done: false,
             },
         ]
+    }
+
+    #[test]
+    fn task_minutes_round_trip_and_nullable_patches() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "board");
+        let list = new_list(&mut conn, &board.id, "todo");
+        let card = create_card(&mut conn, NewCardInput {
+            board_id: board.id.clone(), list_id: list.id.clone(), title: "timed".into(),
+            estimated_minutes: Some(90), actual_minutes: Some(45), ..Default::default()
+        }).expect("create timed card");
+        assert_eq!((card.estimated_minutes, card.actual_minutes), (Some(90), Some(45)));
+        let updated = update_card(&mut conn, UpdateCardInput {
+            id: card.id.clone(), patch: CardPatch { title: Some("renamed".into()), ..Default::default() }
+        }).expect("update unrelated field");
+        assert_eq!((updated.estimated_minutes, updated.actual_minutes), (Some(90), Some(45)));
+        let cleared = update_card(&mut conn, UpdateCardInput {
+            id: card.id.clone(), patch: CardPatch {
+                estimated_minutes: Some(None), actual_minutes: Some(Some(0)), ..Default::default()
+            }
+        }).expect("clear estimate and set actual to zero");
+        assert_eq!((cleared.estimated_minutes, cleared.actual_minutes), (None, Some(0)));
+        let stored = get_snapshot(&conn).expect("snapshot").cards.into_iter()
+            .find(|item| item.id == card.id).expect("card");
+        assert_eq!((stored.estimated_minutes, stored.actual_minutes), (None, Some(0)));
+        assert!(update_card(&mut conn, UpdateCardInput {
+            id: card.id.clone(), patch: CardPatch { actual_minutes: Some(Some(-1)), ..Default::default() }
+        }).is_err());
+        assert_eq!(get_card(&conn, &card.id).expect("unchanged after rejected patch").actual_minutes, Some(0));
+        assert!(create_card(&mut conn, NewCardInput {
+            board_id: board.id, list_id: list.id, title: "invalid".into(),
+            estimated_minutes: Some(-1), ..Default::default()
+        }).is_err());
     }
 
     #[test]

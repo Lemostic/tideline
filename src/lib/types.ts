@@ -58,6 +58,9 @@ export interface Card {
   dueDate: string | null;
   /** YYYY-MM-DD，甘特视图的起始日期；null 表示未排期 */
   startDate: string | null;
+  /** V0.12：预估与实际工时（分钟）；null 表示尚未填写 */
+  estimatedMinutes: number | null;
+  actualMinutes: number | null;
   priority: Priority | null;
   /** 卡片强调色（V0.7）；null / undefined 使用默认卡片样式 */
   accent?: BoardColor | null;
@@ -365,6 +368,8 @@ export type CardPatch = Partial<
     | 'description'
     | 'dueDate'
     | 'startDate'
+    | 'estimatedMinutes'
+    | 'actualMinutes'
     | 'priority'
     | 'accent'
     | 'completed'
@@ -394,6 +399,8 @@ export interface NewCardInput {
   description?: string;
   dueDate?: string | null;
   startDate?: string | null;
+  estimatedMinutes?: number | null;
+  actualMinutes?: number | null;
   priority?: Priority | null;
   accent?: BoardColor | null;
   labels?: string[];

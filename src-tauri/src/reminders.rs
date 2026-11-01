@@ -434,6 +434,8 @@ mod tests {
                 description: None,
                 due_date: Some(due_date.to_string()),
                 start_date: None,
+                estimated_minutes: None,
+                actual_minutes: None,
                 priority: None,
                 accent: None,
                 labels: None,

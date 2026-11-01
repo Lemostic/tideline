@@ -301,6 +301,11 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         if *list_board_id != card.board_id {
             return Err(format!("任务「{}」的列表与看板不一致", card.title));
         }
+        if card.estimated_minutes.is_some_and(|minutes| minutes < 0)
+            || card.actual_minutes.is_some_and(|minutes| minutes < 0)
+        {
+            return Err(format!("任务「{}」的工时分钟数不能为负数", card.title));
+        }
         card_board.insert(card.id.as_str(), card.board_id.as_str());
     }
 
@@ -711,8 +716,8 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
             "INSERT INTO cards \
              (id, board_id, list_id, title, description, due_date, start_date, priority, accent, \
               completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, \
-              created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+              estimated_minutes, actual_minutes, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             params![
                 &card.id,
                 &card.board_id,
@@ -730,6 +735,8 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
                 &card.deleted_at,
                 &card.recurrence_id,
                 &card.generated_from_id,
+                card.estimated_minutes,
+                card.actual_minutes,
                 &card.created_at,
                 &card.updated_at,
             ],
@@ -1005,6 +1012,8 @@ mod tests {
                 description: Some("描述".to_string()),
                 due_date: Some("2026-05-01".to_string()),
                 start_date: Some("2026-04-01".to_string()),
+                estimated_minutes: None,
+                actual_minutes: None,
                 priority: Some(Priority::High),
                 accent: None,
                 labels: Some(vec!["研发".to_string()]),
@@ -1061,6 +1070,29 @@ mod tests {
         assert_eq!(trash[0].labels, vec!["研发".to_string()]);
         assert_eq!(trash[0].priority, Some(Priority::High));
         assert_eq!(trash[0].subtasks.len(), 1);
+    }
+
+    #[test]
+    fn task_minutes_survive_backup_and_old_backup_defaults_to_null() {
+        let mut conn = db::open_in_memory().expect("memory db");
+        let card = seed(&mut conn);
+        conn.execute("UPDATE cards SET estimated_minutes = 120, actual_minutes = 40 WHERE id = ?1", [&card.id])
+            .expect("set task minutes");
+        let backup = build(&conn).expect("export backup");
+        let json = serde_json::to_value(&backup).expect("serialize backup");
+        assert_eq!(json["cards"][0]["estimatedMinutes"], 120);
+        assert_eq!(json["cards"][0]["actualMinutes"], 40);
+        restore(&mut conn, &backup).expect("restore backup");
+        let restored = repo::get_snapshot(&conn).expect("snapshot").cards.remove(0);
+        assert_eq!((restored.estimated_minutes, restored.actual_minutes), (Some(120), Some(40)));
+
+        let mut old = json;
+        old["cards"][0].as_object_mut().expect("card object").remove("estimatedMinutes");
+        old["cards"][0].as_object_mut().expect("card object").remove("actualMinutes");
+        let old_backup: BackupFile = serde_json::from_value(old).expect("read old backup");
+        restore(&mut conn, &old_backup).expect("restore old backup");
+        let old_card = repo::get_snapshot(&conn).expect("snapshot").cards.remove(0);
+        assert_eq!((old_card.estimated_minutes, old_card.actual_minutes), (None, None));
     }
 
     #[test]
@@ -1237,6 +1269,8 @@ mod tests {
                 description: String::new(),
                 due_date: None,
                 start_date: None,
+                estimated_minutes: None,
+                actual_minutes: None,
                 priority: None,
                 accent: None,
                 completed: false,

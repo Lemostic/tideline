@@ -214,8 +214,11 @@ export function WorkbenchPage() {
             '所有看板'
           ) : (
             <>
-              {greetingForHour(now.getHours())}，今天有{' '}
-              <em className="headline-figure">{focusCards.length > 0 ? focusCards.length : '没有'}</em> 件需要关注
+              {greetingForHour(now.getHours())}，今天{focusCards.length > 0 ? (
+                <>有 <em className="headline-figure">{focusCards.length}</em> 件需要关注</>
+              ) : (
+                <><em className="headline-figure">没有</em>需要关注的事</>
+              )}
             </>
           )
         }

@@ -21,6 +21,8 @@ function card(overrides: Partial<Card> = {}): Card {
     description: '',
     dueDate: null,
     startDate: null,
+    estimatedMinutes: null,
+    actualMinutes: null,
     priority: null,
     completed: false,
     deletedAt: null,
