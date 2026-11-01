@@ -250,7 +250,7 @@
 }
 
 .tasks-col-count.is-overdue {
-  border-color: #f2d3d0;
+  border-color: var(--danger-line);
   background: var(--danger-soft);
   color: var(--danger);
 }
@@ -381,7 +381,7 @@
   padding: 0 6px;
   border-radius: 5px;
   background: var(--success-soft);
-  color: #2f8a53;
+  color: var(--success-ink);
   font-size: 10px;
   font-weight: 600;
   white-space: nowrap;

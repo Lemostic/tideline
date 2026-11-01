@@ -237,27 +237,27 @@
 }
 
 .team-role.role-dev {
-  background: rgba(76, 141, 255, 0.12);
-  color: #2f6fd0;
+  background: var(--primary-wash);
+  color: var(--primary-strong);
 }
 
 .team-role.role-test {
-  background: rgba(233, 162, 59, 0.14);
-  color: #9a6512;
+  background: var(--accent-wash);
+  color: var(--accent-ink);
 }
 
 .team-role.role-requirements {
-  background: rgba(15, 118, 110, 0.12);
+  background: var(--primary-wash);
   color: var(--primary-strong);
 }
 
 .team-role.role-design {
-  background: rgba(142, 124, 255, 0.14);
+  background: var(--accent-wash);
   color: #5a48c9;
 }
 
 .team-status.status-active {
-  background: rgba(15, 118, 110, 0.1);
+  background: var(--primary-wash);
   color: var(--primary-strong);
 }
 
@@ -267,12 +267,12 @@
 }
 
 .team-ot-status.status-planned {
-  background: rgba(233, 162, 59, 0.14);
-  color: #9a6512;
+  background: var(--accent-wash);
+  color: var(--accent-ink);
 }
 
 .team-ot-status.status-done {
-  background: rgba(15, 118, 110, 0.1);
+  background: var(--primary-wash);
   color: var(--primary-strong);
 }
 
@@ -389,7 +389,7 @@
 }
 
 .team-points.is-plus {
-  background: rgba(15, 118, 110, 0.1);
+  background: var(--primary-wash);
   color: var(--primary-strong);
 }
 

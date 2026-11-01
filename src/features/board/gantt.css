@@ -1,7 +1,7 @@
 /* 潮线 tideline — 看板甘特视图（V0.2）：任务列 + 时间轴 + 甘特条 */
 
 .gantt-view {
-  --gantt-weekend: #f1f4ec;
+  --gantt-weekend: var(--surface-sunken);
   flex: 1;
   min-height: 0;
   display: flex;
@@ -303,7 +303,7 @@
   font-weight: 600;
   white-space: nowrap;
   transform: translateX(-50%);
-  box-shadow: 0 1px 3px rgba(15, 118, 110, 0.35);
+  box-shadow: 0 1px 3px var(--primary-glow);
   pointer-events: none;
 }
 
@@ -500,7 +500,7 @@
   background: var(--primary);
   opacity: 0.8;
   pointer-events: none;
-  box-shadow: 0 0 0 1px rgba(15, 118, 110, 0.08);
+  box-shadow: 0 0 0 1px var(--primary-wash);
 }
 
 /* ---------- 响应式 ---------- */

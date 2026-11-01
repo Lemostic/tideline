@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon, type IconName } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { BoardCard, NewBoardCard } from '@/features/home/BoardCard';
 import { DeleteBoardDialog, RenameBoardDialog } from '@/features/home/BoardDialogs';
 import { PopMenu } from '@/features/board/PopMenu';
@@ -176,13 +177,11 @@ export function WorkbenchPage() {
   if (snapshot.boards.length === 0) {
     return (
       <div className="page workbench-page">
-        <header className="wb-head">
-          <div>
-            <div className="page-eyebrow">工作台 · {todaySummary(now)}</div>
-            <h1 className="wb-title">{greetingForHour(now.getHours())}，开始搭建你的工作台</h1>
-            <p className="wb-sub">把看板、目标和今天要做的事收在同一处。</p>
-          </div>
-        </header>
+        <PageHeadBand
+          eyebrow={`工作台 · ${todaySummary(now)}`}
+          title={`${greetingForHour(now.getHours())}，开始搭建你的工作台`}
+          description="把看板、目标和今天要做的事收在同一处。"
+        />
         <div className="home-empty-card">
           <EmptyState
             icon={<Icon name="layout-grid" size={22} />}
@@ -208,93 +207,83 @@ export function WorkbenchPage() {
 
   return (
     <div className="page workbench-page">
-      <header className="wb-head">
-        <div className="wb-head-main">
-          <div className="page-eyebrow">工作台 · {todaySummary(now)}</div>
-          <h1 className="wb-title">
-            {viewMode === 'boards' ? (
-              '所有看板'
-            ) : (
-              <>
-                {greetingForHour(now.getHours())}，今天有{' '}
-                <em>{focusCards.length > 0 ? focusCards.length : '没有'}</em> 件需要关注
-              </>
-            )}
-          </h1>
-          <p className="wb-sub">
-            {viewMode === 'boards'
-              ? `${snapshot.boards.length} 个看板 · ${snapshot.cards.length} 个任务 · 可切换回门户视图`
-              : `${snapshot.boards.length} 个看板 · ${openCards.length} 个进行中任务 · ${activeGoals.length} 个目标进行中`}
-          </p>
-        </div>
-        <div className="wb-actions">
-          <div className="wb-view-switch" role="tablist" aria-label="工作台视图">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'workbench'}
-              className={`wb-view-btn${viewMode === 'workbench' ? ' is-active' : ''}`}
-              onClick={() => switchView('workbench')}
-            >
-              <Icon name="layout-grid" size={12} />
-              工作台
+      <PageHeadBand
+        eyebrow={`工作台 · ${todaySummary(now)}`}
+        title={
+          viewMode === 'boards' ? (
+            '所有看板'
+          ) : (
+            <>
+              {greetingForHour(now.getHours())}，今天有{' '}
+              <em className="headline-figure">{focusCards.length > 0 ? focusCards.length : '没有'}</em> 件需要关注
+            </>
+          )
+        }
+        description={
+          viewMode === 'boards'
+            ? `${snapshot.boards.length} 个看板 · ${snapshot.cards.length} 个任务 · 可切换回门户视图`
+            : `${snapshot.boards.length} 个看板 · ${openCards.length} 个进行中任务 · ${activeGoals.length} 个目标进行中`
+        }
+        readouts={
+          viewMode === 'workbench'
+            ? [
+                { label: '看板', value: snapshot.boards.length, tone: 'muted' },
+                { label: '进行中', value: openCards.length },
+                {
+                  label: '已逾期',
+                  value: overdue.length,
+                  tone: overdue.length > 0 ? 'danger' : 'muted',
+                },
+                { label: '今天到期', value: dueToday.length, tone: 'accent' },
+                { label: '本周完成', value: recentCompleted },
+              ]
+            : [
+                { label: '看板', value: snapshot.boards.length, tone: 'muted' },
+                { label: '任务', value: snapshot.cards.length },
+              ]
+        }
+        actions={
+          <>
+            <div className="wb-view-switch" role="tablist" aria-label="工作台视图">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'workbench'}
+                className={`wb-view-btn${viewMode === 'workbench' ? ' is-active' : ''}`}
+                onClick={() => switchView('workbench')}
+              >
+                <Icon name="layout-grid" size={12} />
+                工作台
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'boards'}
+                className={`wb-view-btn${viewMode === 'boards' ? ' is-active' : ''}`}
+                onClick={() => switchView('boards')}
+              >
+                <Icon name="columns" size={12} />
+                看板列表
+              </button>
+            </div>
+            <button type="button" className="btn btn-primary btn-sm" onClick={openNewBoard}>
+              <Icon name="plus" size={14} />
+              新建看板
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'boards'}
-              className={`wb-view-btn${viewMode === 'boards' ? ' is-active' : ''}`}
-              onClick={() => switchView('boards')}
-            >
-              <Icon name="columns" size={12} />
-              看板列表
+            <button type="button" className="btn btn-ghost btn-sm" onClick={openSearch}>
+              <Icon name="search" size={14} />
+              全局搜索
             </button>
-          </div>
-          <button type="button" className="btn btn-primary btn-sm" onClick={openNewBoard}>
-            <Icon name="plus" size={14} />
-            新建看板
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={openSearch}>
-            <Icon name="search" size={14} />
-            全局搜索
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/inbox')}>
-            <Icon name="inbox" size={14} />
-            快速记录
-          </button>
-        </div>
-      </header>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/inbox')}>
+              <Icon name="inbox" size={14} />
+              快速记录
+            </button>
+          </>
+        }
+      />
 
       {viewMode === 'workbench' ? (
         <>
-      <section className="wb-kpis" aria-label="工作台指标">
-        <button type="button" className="wb-kpi" onClick={() => navigate('/')}>
-          <span className="wb-kpi-label">看板</span>
-          <strong>{snapshot.boards.length}</strong>
-          <span className="wb-kpi-hint">{snapshot.lists.length} 个列表</span>
-        </button>
-        <button type="button" className="wb-kpi" onClick={() => navigate('/tasks')}>
-          <span className="wb-kpi-label">进行中任务</span>
-          <strong>{openCards.length}</strong>
-          <span className="wb-kpi-hint">待推进</span>
-        </button>
-        <button type="button" className="wb-kpi is-danger" onClick={() => navigate('/tasks')}>
-          <span className="wb-kpi-label">已逾期</span>
-          <strong>{overdue.length}</strong>
-          <span className="wb-kpi-hint">{dueToday.length} 个今天到期</span>
-        </button>
-        <button type="button" className="wb-kpi" onClick={() => navigate('/tasks')}>
-          <span className="wb-kpi-label">本周完成</span>
-          <strong>{recentCompleted}</strong>
-          <span className="wb-kpi-hint">近 7 天</span>
-        </button>
-        <button type="button" className="wb-kpi" onClick={() => navigate('/goals')}>
-          <span className="wb-kpi-label">目标</span>
-          <strong>{activeGoals.length}</strong>
-          <span className="wb-kpi-hint">进行中</span>
-        </button>
-      </section>
-
       <div className="wb-grid">
         <section className="wb-card wb-focus">
           <div className="wb-card-head">

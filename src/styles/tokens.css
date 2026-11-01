@@ -1,6 +1,39 @@
-/* 潮线 tideline — 设计令牌：颜色、圆角、阴影、排版、动效 */
+/* 潮线 tideline — 设计令牌：颜色、圆角、阴影、排版、动效
+
+   颜色语义约定（每个色相只表达一件事）：
+   - 潮线青 primary  → 结构、品牌、可交互
+   - 暖沙   accent   → 需要注意（今天到期、超 WIP、星标）
+   - 危险   danger   → 已经越界（逾期）
+   - 成功   success  → 已完成
+   其余为中性色阶。所有主题由 5 个基础色派生，见 src/lib/theme.ts。 */
+
 :root {
   color-scheme: light;
+
+  /* 语义文字色：在柔和底色上仍然清晰的深色版本 */
+  --accent-ink: #9a6a14;
+  --danger-ink: #a84039;
+  --success-ink: #2f8a53;
+  --warn-ink: #b0791b;
+
+  /* 语义描边：柔和底色上的同色系边线 */
+  --accent-line: #f3dcb4;
+  --danger-line: #f3cfcc;
+  --success-line: #cbe8d5;
+
+  /* 悬停底色：强调色的浅色版本 */
+  --accent-hover: #fbe7c5;
+  --danger-hover: #fadfdc;
+
+  /* 聚焦态：主色描边，任何底色上都清晰 */
+  --focus-color: #0f766e;
+
+  /* 半透明层：底色淡染，用于 chip / 徽标 / 拖拽高亮 */
+  --primary-wash: rgba(15, 118, 110, 0.12);
+  --primary-glow: rgba(15, 118, 110, 0.26);
+  --accent-wash: rgba(233, 162, 59, 0.14);
+  --success-wash: rgba(47, 138, 83, 0.12);
+  --danger-glow: rgba(197, 74, 58, 0.24);
 
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
@@ -60,7 +93,10 @@
   --radius-lg: 14px;
   --radius-xl: 18px;
 
-  /* 阴影 */
+  /* 层级：三档，含义固定
+     flat    贴合底面，不投影（列容器、列表行、表格行）
+     raised  轻微浮起（卡片、看板卡片）
+     floating 明显浮起（菜单、弹窗、抽屉） */
   --shadow-xs: 0 1px 2px rgba(24, 38, 33, 0.04);
   --shadow-sm: 0 1px 2px rgba(24, 38, 33, 0.05), 0 2px 8px rgba(24, 38, 33, 0.04);
   --shadow-md: 0 2px 4px rgba(24, 38, 33, 0.05), 0 10px 28px rgba(24, 38, 33, 0.07);
@@ -76,7 +112,12 @@
   --card-min-height: 140px;
   --card-cover-height: 98px;
 
-  /* 动效 */
+  /* 动效：三档时长，只用在「按下 / 状态切换 / 进场」这三类时刻 */
+  --dur-press: 90ms;
+  --dur-state: 150ms;
+  --dur-enter: 220ms;
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-inout: cubic-bezier(0.65, 0.05, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
   --transition: 150ms var(--ease);
 }

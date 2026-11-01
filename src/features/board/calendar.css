@@ -183,15 +183,15 @@
 }
 
 .cal-cell.is-weekend {
-  background: #f3f6ef;
+  background: var(--surface-sunken);
 }
 
 .cal-cell.is-other-month {
-  background: #f8faf6;
+  background: var(--surface-muted);
 }
 
 .cal-cell.is-weekend.is-other-month {
-  background: #f1f4ec;
+  background: var(--surface-sunken);
 }
 
 .cal-cell.is-today {
@@ -234,7 +234,7 @@
 .cal-cell.is-today .cal-daynum {
   background: var(--primary);
   color: #fff;
-  box-shadow: 0 1px 3px rgba(15, 118, 110, 0.3);
+  box-shadow: 0 1px 3px var(--primary-glow);
 }
 
 .cal-today-tag {
@@ -285,7 +285,7 @@
 }
 
 .cal-entry:hover {
-  background: rgba(27, 42, 36, 0.06);
+  background: var(--hover-wash);
 }
 
 .cal-entry:focus-visible {
@@ -337,7 +337,7 @@
 }
 
 .cal-more:hover {
-  background: rgba(27, 42, 36, 0.06);
+  background: var(--hover-wash);
   color: var(--ink-2);
 }
 

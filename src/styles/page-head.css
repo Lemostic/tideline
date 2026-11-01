@@ -1,0 +1,162 @@
+/* 潮线 tideline — 页面标题带（潮汐表式读数条）
+
+   全站统一的页面头：左侧标题 + 说明，右侧读数，读数之间用会「垂下去」的
+   刻度线分隔。刻度只在真正承载数据时出现，不做装饰。 */
+
+.page-head-band {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 2px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.page-head-main {
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+/* 位置标记：标题上方的一行小字，前面带一道潮位刻度。
+   这是全站唯一允许的装饰性刻度，且只出现在每页一次的位置标记上。 */
+.page-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.page-eyebrow::before {
+  content: '';
+  width: 2px;
+  height: 11px;
+  flex: 0 0 auto;
+  border-radius: 1px;
+  background: var(--primary);
+  opacity: 0.75;
+}
+
+.page-head-title {
+  margin: 3px 0 0;
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  line-height: 1.28;
+}
+
+.page-head-sub {
+  margin: 5px 0 12px;
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+/* 读数条：一组标签 + 数值 */
+.readout {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  flex: 0 0 auto;
+  padding-bottom: 12px;
+}
+
+.readout-group {
+  display: flex;
+  align-items: baseline;
+}
+
+.readout-item {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 0 13px;
+  white-space: nowrap;
+}
+
+.readout-item:first-child {
+  padding-left: 0;
+}
+
+.readout-label {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.readout-value {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.005em;
+}
+
+.readout-value.is-danger {
+  color: var(--danger-ink);
+}
+
+.readout-value.is-accent {
+  color: var(--accent-ink);
+}
+
+.readout-value.is-muted {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* 刻度线：横穿基线并向下垂 6px，像刻度尺上的分度 */
+.readout-divider {
+  position: relative;
+  align-self: stretch;
+  width: 1px;
+  margin: 0 -1px;
+  background: var(--line);
+}
+
+.readout-divider::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -6px;
+  width: 1px;
+  height: 6px;
+  background: var(--line-strong);
+}
+
+/* 页面操作区：紧贴标题带下沿 */
+.page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+}
+
+@media (max-width: 860px) {
+  .page-head-band {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .readout {
+    flex-wrap: wrap;
+    gap: 2px 0;
+    padding-bottom: 8px;
+  }
+
+  .readout-item {
+    padding: 0 10px;
+  }
+
+  .readout-divider {
+    display: none;
+  }
+
+  .page-head-actions {
+    padding-bottom: 10px;
+  }
+}

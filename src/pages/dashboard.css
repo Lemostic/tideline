@@ -309,11 +309,11 @@
 }
 
 .dash-trend-line.is-created {
-  stroke: #0f766e;
+  stroke: var(--primary);
 }
 
 .dash-trend-line.is-completed {
-  stroke: #e9a23b;
+  stroke: var(--accent);
   stroke-dasharray: 5 4;
 }
 
@@ -323,12 +323,12 @@
 
 .dash-point.is-created {
   fill: #fff;
-  stroke: #0f766e;
+  stroke: var(--primary);
 }
 
 .dash-point.is-completed {
   fill: #fff;
-  stroke: #e9a23b;
+  stroke: var(--accent);
 }
 
 /* ---------- 状态环 ---------- */

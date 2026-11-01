@@ -32,7 +32,7 @@
 }
 
 .tmpl-tab:hover {
-  background: rgba(27, 42, 36, 0.05);
+  background: var(--hover-wash);
   color: var(--ink-2);
 }
 

@@ -30,10 +30,10 @@
   gap: 8px;
   margin: 0 0 12px;
   padding: 9px 12px;
-  border: 1px solid #cbe8d5;
+  border: 1px solid var(--success-line);
   border-radius: var(--radius-sm);
   background: var(--success-soft);
-  color: #2f8a53;
+  color: var(--success-ink);
   font-size: 12px;
   line-height: 1.6;
   animation: fade-in 150ms var(--ease);
@@ -60,7 +60,7 @@
 }
 
 .trash-flash-close:hover {
-  background: rgba(47, 138, 83, 0.1);
+  background: var(--success-wash);
   opacity: 1;
 }
 
@@ -248,7 +248,7 @@
   padding: 0 7px;
   border-radius: 999px;
   background: var(--success-soft);
-  color: #2f8a53;
+  color: var(--success-ink);
   font-size: 10px;
   font-weight: 600;
   white-space: nowrap;

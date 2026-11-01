@@ -61,15 +61,34 @@ ol {
   color: var(--ink);
 }
 
+/* 键盘焦点：主色实线 + 2px 留白，任何底色上都看得清 */
 :focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--focus-color);
   outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* 鼠标点击不显示焦点框，键盘 Tab 才显示 */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ---------- 动效偏好：全局关掉动效 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ---------- 滚动条 ---------- */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cdd5cd transparent;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -82,14 +101,14 @@ ol {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: #cdd5cd;
+  background: var(--line-strong);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #b5c0b8;
+  background: var(--faint);
   background-clip: content-box;
 }
 
@@ -151,8 +170,8 @@ ol {
   display: grid;
   place-items: center;
   color: #fff;
-  background: linear-gradient(145deg, #14897f 0%, #0b5f59 100%);
-  box-shadow: 0 4px 10px rgba(15, 118, 110, 0.28);
+  background: linear-gradient(145deg, #14897f 0%, var(--primary-strong) 100%);
+  box-shadow: 0 4px 10px var(--primary-glow);
   flex: 0 0 auto;
 }
 
@@ -169,19 +188,17 @@ ol {
 }
 
 .brand-sub {
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   color: var(--faint);
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .sidebar-section {
   padding: 16px 10px 6px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.08em;
   color: var(--faint);
   user-select: none;
 }
@@ -258,7 +275,7 @@ ol {
   padding: 3px 5px;
   border-radius: 4px;
   letter-spacing: 0.04em;
-  color: #9a6a14;
+  color: var(--accent-ink);
   background: var(--accent-soft);
 }
 
@@ -474,7 +491,7 @@ ol {
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #fadfdc;
+  background: var(--danger-hover);
 }
 
 .btn-sm {
@@ -602,7 +619,7 @@ ol {
 
 .chip-accent {
   background: var(--accent-soft);
-  color: #9a6a14;
+  color: var(--accent-ink);
 }
 
 .dot {
@@ -647,7 +664,7 @@ ol {
 
 .skeleton {
   border-radius: var(--radius-md);
-  background: linear-gradient(90deg, #edf0eb 25%, #f6f8f4 50%, #edf0eb 75%);
+  background: linear-gradient(90deg, var(--surface-sunken) 25%, var(--surface-muted) 50%, var(--surface-sunken) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s infinite;
 }
@@ -1012,7 +1029,7 @@ ol {
   border-radius: 14px;
   display: grid;
   place-items: center;
-  background: linear-gradient(145deg, #14897f 0%, #0b5f59 100%);
+  background: linear-gradient(145deg, #14897f 0%, var(--primary-strong) 100%);
   color: #fff;
   box-shadow: 0 10px 24px rgba(15, 118, 110, 0.24);
   animation: breathe 1.8s var(--ease) infinite;
@@ -1032,9 +1049,9 @@ ol {
   margin: 0 22px 8px;
   padding: 9px 12px;
   border-radius: var(--radius-sm);
-  border: 1px solid #f3cfcc;
+  border: 1px solid var(--danger-line);
   background: var(--danger-soft);
-  color: #a84039;
+  color: var(--danger-ink);
   font-size: 12px;
 }
 
@@ -1176,7 +1193,7 @@ ol {
   padding: 0 9px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
-  color: #9a6a14;
+  color: var(--accent-ink);
   font-size: 11px;
   font-weight: 600;
 }
@@ -1274,7 +1291,7 @@ ol {
   padding: 3px 9px;
   border-radius: 999px;
   background: var(--accent-soft);
-  color: #9a6a14;
+  color: var(--accent-ink);
   font-size: 10.5px;
   font-weight: 600;
 }
@@ -1377,7 +1394,7 @@ ol {
   }
   50% {
     transform: scale(1.04);
-    box-shadow: 0 14px 30px rgba(15, 118, 110, 0.3);
+    box-shadow: 0 14px 30px var(--primary-glow);
   }
 }
 
@@ -1439,7 +1456,7 @@ ol {
 
 .task-toggle.on {
   background: var(--success-soft);
-  border-color: #cbe8d5;
+  border-color: var(--success-line);
   color: var(--success);
   font-weight: 600;
 }

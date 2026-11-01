@@ -26,7 +26,7 @@
 
 .home-section-icon-star {
   background: var(--accent-soft);
-  color: #c4831f;
+  color: var(--accent-ink);
 }
 
 .home-section-hint {
@@ -137,7 +137,7 @@
 .home-board-star:hover,
 .home-board-more:hover,
 .home-board-more.open {
-  background: rgba(27, 42, 36, 0.06);
+  background: var(--hover-wash);
   color: var(--ink);
   opacity: 1;
 }
@@ -145,11 +145,11 @@
 .home-board-star.on {
   opacity: 1;
   background: var(--accent-soft);
-  color: #c4831f;
+  color: var(--accent-ink);
 }
 
 .home-board-star.on:hover {
-  background: #fbe7c5;
+  background: var(--accent-hover);
   color: #a86f10;
 }
 

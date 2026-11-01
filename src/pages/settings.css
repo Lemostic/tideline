@@ -238,7 +238,7 @@
 .settings-flash {
   margin: 0 0 14px;
   padding: 9px 12px;
-  border: 1px solid rgba(15, 118, 110, 0.22);
+  border: 1px solid var(--primary-glow);
   border-radius: var(--radius-md);
   background: var(--primary-soft);
   color: var(--primary-strong);
@@ -246,7 +246,7 @@
 }
 
 .settings-flash.is-error {
-  border-color: rgba(197, 74, 58, 0.25);
+  border-color: var(--danger-glow);
   background: var(--danger-soft);
   color: var(--danger);
 }

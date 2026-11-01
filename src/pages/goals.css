@@ -151,7 +151,7 @@
 }
 
 .goal-row.goal-scope-team {
-  border-left-color: #4c8dff;
+  border-left-color: var(--data-blue);
 }
 
 .goal-row.goal-scope-personal {
@@ -199,18 +199,18 @@
 }
 
 .goal-scope-badge.scope-company {
-  background: rgba(15, 118, 110, 0.12);
+  background: var(--primary-wash);
   color: var(--primary-strong);
 }
 
 .goal-scope-badge.scope-team {
-  background: rgba(76, 141, 255, 0.12);
-  color: #2f6fd0;
+  background: var(--primary-wash);
+  color: var(--primary-strong);
 }
 
 .goal-scope-badge.scope-personal {
-  background: rgba(233, 162, 59, 0.14);
-  color: #9a6512;
+  background: var(--accent-wash);
+  color: var(--accent-ink);
 }
 
 .goal-status {
@@ -223,13 +223,13 @@
 }
 
 .goal-status-active {
-  background: rgba(15, 118, 110, 0.1);
+  background: var(--primary-wash);
   color: var(--primary-strong);
 }
 
 .goal-status-completed {
-  background: rgba(76, 141, 255, 0.12);
-  color: #2f6fd0;
+  background: var(--primary-wash);
+  color: var(--primary-strong);
 }
 
 .goal-status-archived {
@@ -373,13 +373,13 @@
 }
 
 .goal-detail-icon.goal-scope-team {
-  background: rgba(76, 141, 255, 0.12);
-  color: #2f6fd0;
+  background: var(--primary-wash);
+  color: var(--primary-strong);
 }
 
 .goal-detail-icon.goal-scope-personal {
-  background: rgba(233, 162, 59, 0.14);
-  color: #9a6512;
+  background: var(--accent-wash);
+  color: var(--accent-ink);
 }
 
 .goal-detail-badges {
@@ -709,7 +709,7 @@ button.goal-child {
 }
 
 .goal-child-dot.status-completed {
-  background: #4c8dff;
+  background: var(--data-blue);
 }
 
 .goal-child-dot.status-archived {

@@ -238,6 +238,10 @@ export type ThemePalette = Record<string, string>;
 
 /**
  * 由 5 个基础色派生完整设计令牌。所有派生色保持与背景一致的冷暖倾向。
+ *
+ * 颜色语义固定：primary 表达结构与可交互，accent 表达「需要注意」，
+ * danger 表达「已经越界」，success 表达「已完成」。四个色相各司其职，
+ * 组件因此不需要再判断「这个颜色是什么意思」。
  */
 export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
   const base = normalizeCustomTheme(colors);
@@ -247,6 +251,9 @@ export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
   const primarySoft = mix(primary, '#ffffff', 0.88);
   const primarySoft2 = mix(primary, '#ffffff', 0.74);
   const accentSoft = mix(accent, '#ffffff', 0.84);
+  const accentInk = mix(accent, ink, 0.52);
+  const accentLine = mix(accent, '#ffffff', 0.62);
+  const accentHover = mix(accent, '#ffffff', 0.72);
   const bgDeep = mix(bg, '#000000', 0.035);
   const surfaceMuted = mix(surface, bg, 0.55);
   const surfaceHover = mix(surface, primary, 0.055);
@@ -257,10 +264,29 @@ export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
   const line = mix(bg, ink, 0.1);
   const lineStrong = mix(bg, ink, 0.18);
   const success = mix('#1f9d72', primary, 0.22);
+  const successInk = mix(success, ink, 0.45);
   const successSoft = mix('#eaf7f0', bg, 0.25);
+  const successLine = mix(success, '#ffffff', 0.62);
   const danger = mix('#d9534a', primary, 0.08);
+  const dangerInk = mix(danger, ink, 0.35);
   const dangerSoft = mix('#fdeceb', bg, 0.22);
+  const dangerLine = mix(danger, '#ffffff', 0.6);
+  const dangerHover = mix(danger, '#ffffff', 0.82);
   const warn = mix('#c98a24', accent, 0.2);
+  const warnInk = mix(warn, ink, 0.45);
+  // 半透明层：底色淡染，用于 chip / 徽标 / 拖拽高亮
+  const primaryWash = alpha(primary, 0.12);
+  const primaryGlow = alpha(primary, 0.26);
+  const accentWash = alpha(accent, 0.14);
+  const successWash = alpha(success, 0.12);
+  const dangerGlow = alpha(danger, 0.24);
+  // 数据色对应的淡染底：看板色板里四种语义色的小面积背景
+  const dataBlue = '#4c8dff';
+  const dataAmber = '#e9a23b';
+  const dataGreen = '#3fae6d';
+  const dataViolet = '#8e7cff';
+  const dataCoral = '#ff7a59';
+  const dataRose = '#e5638d';
 
   return {
     '--bg-app': bg,
@@ -282,13 +308,34 @@ export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
     '--primary-soft-2': primarySoft2,
     '--accent': accent,
     '--accent-soft': accentSoft,
+    '--accent-ink': accentInk,
+    '--accent-line': accentLine,
+    '--accent-hover': accentHover,
     '--hover-wash': alpha(ink, 0.06),
     '--backdrop': alpha(ink, 0.34),
     '--danger': danger,
+    '--danger-ink': dangerInk,
     '--danger-soft': dangerSoft,
+    '--danger-line': dangerLine,
+    '--danger-hover': dangerHover,
     '--warn': warn,
+    '--warn-ink': warnInk,
     '--success': success,
+    '--success-ink': successInk,
     '--success-soft': successSoft,
+    '--success-line': successLine,
+    '--focus-color': primary,
+    '--primary-wash': primaryWash,
+    '--primary-glow': primaryGlow,
+    '--accent-wash': accentWash,
+    '--success-wash': successWash,
+    '--danger-glow': dangerGlow,
+    '--data-blue': dataBlue,
+    '--data-amber': dataAmber,
+    '--data-green': dataGreen,
+    '--data-violet': dataViolet,
+    '--data-coral': dataCoral,
+    '--data-rose': dataRose,
     '--shadow-xs': `0 1px 2px ${alpha(ink, 0.05)}`,
     '--shadow-sm': `0 1px 2px ${alpha(ink, 0.05)}, 0 2px 8px ${alpha(ink, 0.045)}`,
     '--shadow-md': `0 2px 4px ${alpha(ink, 0.05)}, 0 10px 28px ${alpha(ink, 0.08)}`,
