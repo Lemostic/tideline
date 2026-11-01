@@ -10,39 +10,6 @@
   padding-bottom: 14px;
 }
 
-.tasks-head {
-  flex: 0 0 auto;
-  align-items: center;
-  row-gap: 8px;
-}
-
-.tasks-head-main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.tasks-overdue {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  padding: 0 9px;
-  border-radius: 999px;
-  background: var(--danger-soft);
-  color: var(--danger);
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-
-.tasks-overdue.calm {
-  background: var(--surface-sunken);
-  color: var(--muted);
-  font-weight: 600;
-}
-
 /* ---------- 工具栏：看板筛选 / 排序 / 显示已完成 ---------- */
 .tasks-toolbar {
   display: flex;

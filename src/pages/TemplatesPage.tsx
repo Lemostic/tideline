@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { EmptyState, Modal } from '@/components/Modal';
 import {
   TEMPLATE_CATEGORIES,
@@ -88,10 +89,11 @@ export function TemplatesPage() {
 
   return (
     <div className="page tmpl-page">
-      <div className="page-head">
-        <h1 className="page-title">模板中心</h1>
-        <p className="page-sub">挑一个模板，几十秒搭出看板骨架，再按自己的节奏补充细节。</p>
-      </div>
+      <PageHeadBand
+        title="模板中心"
+        description="挑一个模板，几十秒搭出看板骨架，再按自己的节奏补充细节。"
+        readouts={[{ label: '模板', value: templates.length, tone: 'muted' }]}
+      />
 
       <div className="tmpl-tabs" role="tablist" aria-label="模板分类">
         {TEMPLATE_CATEGORIES.map((item) => {

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Icon } from '@/components/Icon';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { EmptyState } from '@/components/Modal';
 import {
   dueBucket,
@@ -84,15 +85,18 @@ export function MyTasksPage() {
 
   return (
     <div className="page tasks-page">
-      <div className="page-head tasks-head">
-        <div className="tasks-head-main">
-          <h1 className="page-title">我的任务</h1>
-          <span className={`tasks-overdue${overdueCount > 0 ? '' : ' calm'}`}>
-            {overdueCount > 0 ? `${overdueCount} 条逾期` : '没有逾期'}
-          </span>
-        </div>
-        <p className="page-sub">{todaySummary(now)}</p>
-
+      <PageHeadBand
+        eyebrow={todaySummary(now)}
+        title="我的任务"
+        readouts={[
+          { label: '显示中', value: visibleCount },
+          {
+            label: '已逾期',
+            value: overdueCount,
+            tone: overdueCount > 0 ? 'danger' : 'muted',
+          },
+        ]}
+        actions={
         <div className="page-actions">
           <div className="tasks-toolbar">
             <label className="tasks-tool" title="按看板筛选">
@@ -149,7 +153,8 @@ export function MyTasksPage() {
             </button>
           </div>
         </div>
-      </div>
+        }
+      />
 
       {snapshot.cards.length === 0 ? (
         <EmptyState

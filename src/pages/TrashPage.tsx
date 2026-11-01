@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { dueBucket, formatDueLabel, formatRelativeTime } from '@/lib/date';
 import { boardColorValue, PRIORITY_META, type Card } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
@@ -124,11 +125,13 @@ export function TrashPage() {
 
   return (
     <div className="page trash-page">
-      <div className="page-head trash-head">
-        <h1 className="page-title">回收站</h1>
-        <span className="trash-pill">{loading ? '读取中…' : `${trash.length} 个任务`}</span>
-        <p className="page-sub">删除的任务会先放在这里，确认不需要了再彻底删除。</p>
-        <div className="page-actions">
+      <PageHeadBand
+        title="回收站"
+        description="删除的任务会先放在这里，确认不需要了再彻底删除。"
+        readouts={[
+          { label: '待清理', value: loading ? '…' : trash.length, tone: trash.length > 0 ? 'accent' : 'muted' },
+        ]}
+        actions={
           <button
             type="button"
             className="btn btn-ghost btn-sm"
@@ -138,8 +141,8 @@ export function TrashPage() {
             <Icon name="trash" size={13} />
             清空回收站
           </button>
-        </div>
-      </div>
+        }
+      />
 
       {loading ? (
         <div className="trash-skeleton" role="status" aria-label="正在加载回收站">

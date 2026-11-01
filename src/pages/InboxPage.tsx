@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
+import { PageHeadBand } from '@/components/PageHeadBand';
 import { EmptyState, Modal } from '@/components/Modal';
 import { formatRelativeTime } from '@/lib/date';
 import type { InboxItem } from '@/lib/types';
@@ -57,16 +58,13 @@ export function InboxPage() {
 
   return (
     <div className="page inbox-page">
-      <div className="page-head">
-        <h1 className="page-title">收件箱</h1>
-        <p className="page-sub">先把念头记下来，不用想清楚属于哪个看板</p>
-        <div className="page-actions">
-          <span className={`inbox-pill${items.length === 0 ? ' is-empty' : ''}`}>
-            <Icon name="inbox" size={13} />
-            {items.length} 条待整理
-          </span>
-        </div>
-      </div>
+      <PageHeadBand
+        title="收件箱"
+        description="先把念头记下来，不用想清楚属于哪个看板。"
+        readouts={[
+          { label: '待整理', value: items.length, tone: items.length > 0 ? 'accent' : 'muted' },
+        ]}
+      />
 
       <div className="inbox-composer">
         <textarea
