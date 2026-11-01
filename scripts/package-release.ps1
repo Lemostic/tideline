@@ -22,7 +22,10 @@ try {
 
     # 1. 构建安装包
     Write-Host '==> 1/4 构建 NSIS 安装包' -ForegroundColor Cyan
-    pnpm tauri build --bundles nsis
+    # 用 npx 调用本地 @tauri-apps/cli：pnpm 在部分 Windows 环境里的全局 shim 会失效
+    # （PowerShell 执行策略拦截 pnpm.ps1，或 shim 指向了 bash 脚本），
+    # npx.cmd 只依赖 Node 自带的 npm，不受影响。
+    npx tauri build --bundles nsis
     if ($LASTEXITCODE -ne 0) { throw "tauri build 失败（退出码 $LASTEXITCODE）" }
 
     $src = Join-Path $root "src-tauri\target\release\bundle\nsis\tideline_${version}_x64-setup.exe"
