@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon, type IconName } from '@/components/Icon';
 import { boardColorValue, type Board, type BoardView } from '@/lib/types';
@@ -44,11 +44,6 @@ export function BoardHeader({
   const [editingTitle, setEditingTitle] = useState(false);
 
   const accent = boardColorValue(board.color);
-  const statText = useMemo(() => {
-    if (totalCards === 0) return '还没有任务';
-    if (completedCards > 0) return `共 ${totalCards} 个任务 · 已完成 ${completedCards}`;
-    return `共 ${totalCards} 个任务`;
-  }, [totalCards, completedCards]);
 
   const handleDelete = async () => {
     const confirmed = await requestConfirm({
@@ -117,7 +112,27 @@ export function BoardHeader({
             前置任务 → 后置任务
           </span>
         ) : null}
-        <span className="board-stat">{statText}</span>
+        <span className="board-readout">
+          {totalCards === 0 ? (
+            <span className="board-readout-empty">还没有任务</span>
+          ) : (
+            <>
+              <span className="board-readout-item">
+                <span className="board-readout-label">任务</span>
+                <span className="board-readout-value">{totalCards}</span>
+              </span>
+              {completedCards > 0 ? (
+                <>
+                  <span className="board-readout-divider" aria-hidden="true" />
+                  <span className="board-readout-item">
+                    <span className="board-readout-label">已完成</span>
+                    <span className="board-readout-value is-success">{completedCards}</span>
+                  </span>
+                </>
+              ) : null}
+            </>
+          )}
+        </span>
       </div>
 
       <div className="board-toolbar">

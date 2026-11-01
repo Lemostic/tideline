@@ -1,6 +1,6 @@
 import { useRef, type DragEvent, type KeyboardEvent } from 'react';
 import { Icon } from '@/components/Icon';
-import { dueBucket, formatDueLabel, formatMonthDay, formatRelativeTime } from '@/lib/date';
+import { dueBucket, formatDueLabel, formatMonthDay } from '@/lib/date';
 import { blockersFor } from '@/lib/dependencies';
 import { PRIORITY_META, boardColorValue, type Card } from '@/lib/types';
 import { useSnapshot } from '@/store/appStore';
@@ -24,8 +24,8 @@ interface TaskCardProps {
 const DESC_SNIPPET_MAX = 72;
 
 /**
- * 看板卡片：标题 + 描述摘要 + 标签 + 截止日期 / 优先级 / 子任务进度 + 更新时间。
- * 没填写的字段用弱化的「无…」占位，提示这张卡还可以补充哪些信息。
+ * 看板卡片：标题 + 描述摘要 + 标签 + 截止日期 / 优先级 / 子任务进度。
+ * 卡片只呈现已填写的字段；全都空着时给一条安静提示，而不是三行「无……」占位。
  */
 export function TaskCard({
   card,
@@ -179,24 +179,14 @@ export function TaskCard({
             <Icon name="clock" size={11} />
             {dueLabel}
           </span>
-        ) : (
-          <span className="task-card-meta-item is-placeholder" title="还没有设置截止日期">
-            <Icon name="clock" size={11} />
-            无截止日期
-          </span>
-        )}
+        ) : null}
 
         {priority ? (
           <span className="task-card-meta-item task-card-priority" title={`优先级：${priority.label}`}>
             <span className="dot" style={{ background: priority.color }} />
             {priority.label}优先级
           </span>
-        ) : (
-          <span className="task-card-meta-item is-placeholder" title="还没有设置优先级">
-            <span className="dot is-empty" />
-            无优先级
-          </span>
-        )}
+        ) : null}
 
         {subtaskTotal > 0 ? (
           <span
@@ -214,12 +204,7 @@ export function TaskCard({
               />
             </span>
           </span>
-        ) : (
-          <span className="task-card-meta-item is-placeholder" title="还没有拆分子任务">
-            <Icon name="check-circle" size={11} />
-            无子任务
-          </span>
-        )}
+        ) : null}
 
         {card.startDate ? (
           <span className="task-card-meta-item is-start" title={`开始日期 ${card.startDate}`}>
@@ -227,20 +212,25 @@ export function TaskCard({
             开始 {formatMonthDay(card.startDate)}
           </span>
         ) : null}
+
+        {/* 什么都没填时，只给一条安静的提示，而不是三行「无……」占位 */}
+        {!dueLabel && !priority && subtaskTotal === 0 && !card.startDate ? (
+          <span className="task-card-hint" title="补充截止日期、优先级或子任务，让这张卡可被跟进">
+            补充截止日期或优先级
+          </span>
+        ) : null}
       </div>
 
-      <div className="task-card-foot">
-        <span className="task-card-updated">
-          <Icon name="refresh" size={10} />
-          更新于 {formatRelativeTime(card.updatedAt)}
-        </span>
-        {card.completed ? (
+      {/* 底栏只承载「已完成」这一个状态；更新时间由工作台的「最近更新」统一呈现，
+          每张卡都挂一行时间只会淹没真正重要的信息 */}
+      {card.completed ? (
+        <div className="task-card-foot">
           <span className="task-card-completed">
             <Icon name="check" size={10} />
             已完成
           </span>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </article>
   );
 }

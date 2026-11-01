@@ -93,6 +93,54 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 看板头部的读数条：与页面标题带同一套语言 */
+.board-readout {
+  display: flex;
+  align-items: baseline;
+  flex: 0 0 auto;
+  gap: 0;
+  padding-right: 2px;
+}
+
+.board-readout-item {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.board-readout-item:first-child {
+  padding-left: 0;
+}
+
+.board-readout-label {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.board-readout-value {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-readout-value.is-success {
+  color: var(--success-ink);
+}
+
+.board-readout-empty {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.board-readout-divider {
+  align-self: stretch;
+  width: 1px;
+  background: var(--line-strong);
+}
+
 .board-toolbar {
   display: flex;
   align-items: center;
@@ -232,6 +280,7 @@
   max-height: 100%;
   border: 1px solid var(--line);
   border-radius: 12px;
+  /* flat 层：列是凹槽，卡片浮在它上面 */
   background: var(--surface-sunken);
   transition: background var(--transition), border-color var(--transition),
     box-shadow var(--transition);
@@ -253,6 +302,7 @@
 .board-column.is-drop-over {
   border-color: var(--primary-soft-2);
   background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px var(--primary-soft-2);
 }
 
 .board-column-head {
@@ -369,31 +419,41 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
+  /* raised 层：卡片浮在列容器之上，悬停时再升一级 */
   box-shadow: var(--shadow-xs);
   cursor: grab;
   outline: none;
-  transition: border-color var(--transition), box-shadow var(--transition),
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition),
+    transform var(--dur-press) var(--ease),
     opacity var(--transition);
 }
 
 .task-card:hover {
   border-color: var(--line-strong);
   box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+/* 按下时卡片微微下沉，和「浮起」形成一对 */
+.task-card:active {
+  cursor: grabbing;
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
 }
 
 .task-card:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
-}
-
-.task-card:active {
-  cursor: grabbing;
+  transform: translateY(-1px);
 }
 
 .task-card.is-dragging {
   border-style: dashed;
   opacity: 0.42;
   box-shadow: none;
+  transform: none;
   cursor: grabbing;
 }
 
@@ -504,6 +564,14 @@
   white-space: nowrap;
 }
 
+/* 什么都还没填时的提示：一条安静的虚线，不用三行「无……」占位 */
+.task-card-hint {
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 18px;
+  font-style: italic;
+}
+
 .task-card-meta-item.is-placeholder {
   color: var(--faint);
   opacity: 0.8;
@@ -579,11 +647,10 @@
   background: var(--primary);
 }
 
-/* 底部信息行 */
+/* 底部状态行：只在任务完成时出现 */
 .task-card-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 6px;
   margin-top: 7px;
   padding-top: 6px;
@@ -592,19 +659,16 @@
   font-size: 10px;
 }
 
-.task-card-updated,
 .task-card-completed {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-}
-
-.task-card-completed {
-  color: var(--primary-strong);
+  color: var(--success-ink);
   font-weight: 600;
 }
 
-/* 拖拽落点指示线：用伪元素，避免插入元素导致布局抖动 */
+/* 拖拽落点指示线：用伪元素，避免插入元素导致布局抖动。
+   线左端带一个短横，构成「插到哪里」的插入标记，而不是一根装饰条。 */
 .task-card.drop-before::before,
 .task-card.drop-end::after {
   content: '';
@@ -618,12 +682,29 @@
   pointer-events: none;
 }
 
+/* 左端的插入端点 */
+.task-card.drop-before::before,
+.task-card.drop-end::after {
+  background-image: linear-gradient(
+    to right,
+    var(--primary) 0 9px,
+    transparent 9px
+  );
+}
+
 .task-card.drop-before::before {
   top: -6px;
 }
 
 .task-card.drop-end::after {
   bottom: -6px;
+}
+
+/* 落点卡片本身轻微抬起，落点位置一目了然 */
+.task-card.drop-before,
+.task-card.drop-end {
+  border-color: var(--primary-soft-2);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ---------- 行内新增卡片 ---------- */
