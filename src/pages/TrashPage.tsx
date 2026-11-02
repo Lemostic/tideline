@@ -208,10 +208,9 @@ export function TrashPage() {
                 const board = boardMap.get(card.boardId);
                 const listTitle = listMap.get(card.listId);
                 const priority = PRIORITY_META.find((item) => item.key === card.priority) ?? null;
-                const subtaskTotal = card.subtasks.length;
-                const subtaskDone = card.subtasks.filter((item) => item.done).length;
-                const subtaskPercent =
-                  subtaskTotal === 0 ? 0 : Math.round((subtaskDone / subtaskTotal) * 100);
+                const parentTitle = card.parentCardId
+                  ? trash.find((item) => item.id === card.parentCardId)?.title ?? '未知任务'
+                  : null;
                 const rowAction = pending?.id === card.id ? pending.action : null;
                 const busy = busyId === card.id;
                 const dueTone = card.dueDate ? dueBucket(card.dueDate) : 'none';
@@ -310,22 +309,14 @@ export function TrashPage() {
                           </>
                         ) : null}
 
-                        {subtaskTotal > 0 ? (
+                        {parentTitle ? (
                           <>
                             <span className="trash-meta-sep" aria-hidden="true">
                               ·
                             </span>
-                            <span
-                              className="trash-meta trash-subtasks"
-                              title={`子任务完成 ${subtaskDone} / ${subtaskTotal}`}
-                            >
-                              <span className="trash-subtasks-track">
-                                <span
-                                  className="trash-subtasks-fill"
-                                  style={{ width: `${subtaskPercent}%` }}
-                                />
-                              </span>
-                              子任务 {subtaskDone} / {subtaskTotal}
+                            <span className="trash-meta" title={`父任务：${parentTitle}`}>
+                              <Icon name="list" size={11} />
+                              父任务：{parentTitle}
                             </span>
                           </>
                         ) : null}

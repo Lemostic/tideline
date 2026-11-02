@@ -15,6 +15,7 @@ import {
   goalProgressDetail,
 } from '@/lib/goals';
 import { boardColorValue } from '@/lib/types';
+import { rootCards } from '@/lib/taskTree';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useUiStore } from '@/store/uiStore';
 import './goals.css';
@@ -67,7 +68,7 @@ export function GoalDetailPage() {
     );
   }
 
-  const progress = goalProgressDetail(goal, snapshot.goals, snapshot.cards);
+  const progress = goalProgressDetail(goal, snapshot.goals, rootCards(snapshot.cards));
   const children = directGoalChildren(goal.id, snapshot.goals);
   const linkedCards = goal.cardIds
     .map((id) => snapshot.cards.find((card) => card.id === id))
@@ -288,7 +289,11 @@ export function GoalDetailPage() {
           ) : (
             <ul className="goal-child-list">
               {children.map((child) => {
-                const childProgress = goalProgressDetail(child, snapshot.goals, snapshot.cards);
+                const childProgress = goalProgressDetail(
+                  child,
+                  snapshot.goals,
+                  rootCards(snapshot.cards),
+                );
                 return (
                   <li key={child.id}>
                     <button
@@ -351,7 +356,7 @@ export function GoalDetailPage() {
 
       <TaskLinkModal
         open={linkOpen}
-        cards={snapshot.cards}
+        cards={rootCards(snapshot.cards)}
         boards={snapshot.boards}
         lists={snapshot.lists}
         initialCardIds={goal.cardIds}

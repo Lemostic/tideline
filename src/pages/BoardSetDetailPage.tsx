@@ -11,6 +11,7 @@ import {
   type Priority,
 } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
+import { rootCards } from '@/lib/taskTree';
 import { useUiStore } from '@/store/uiStore';
 import './board-sets.css';
 
@@ -77,7 +78,10 @@ export function BoardSetDetailPage() {
   }, [set, snapshot.boards]);
   const boardIds = useMemo(() => new Set(boards.map((board) => board.id)), [boards]);
   const cards = useMemo(
-    () => (set ? snapshot.cards.filter((card) => boardIds.has(card.boardId)) : []),
+    () =>
+      set
+        ? rootCards(snapshot.cards.filter((card) => boardIds.has(card.boardId)))
+        : [],
     [set, snapshot.cards, boardIds],
   );
   const listById = useMemo(

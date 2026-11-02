@@ -378,7 +378,9 @@ export function buildEfficiency(
 
 function boardHealth(snapshot: Snapshot, now: Date, weekStartsOn: WeekStart): BoardHealth[] {
   return snapshot.boards.map((board) => {
-    const cards = snapshot.cards.filter((card) => card.boardId === board.id);
+    const cards = snapshot.cards.filter(
+      (card) => card.boardId === board.id && card.parentCardId === null,
+    );
     const completed = cards.filter((card) => card.completed).length;
     const overdue = cards.filter(
       (card) => !card.completed && dueBucket(card.dueDate, now, weekStartsOn) === 'overdue',
@@ -414,9 +416,11 @@ export function buildDashboard(
     ? snapshot.boards.find((board) => board.id === filters.boardId) ?? null
     : null;
   const boardId = selectedBoard?.id ?? null;
-  const baseCards = boardId
+  // V0.14.0：任务类指标只统计主任务；子任务只进入「子任务完成率」。
+  const allCards = boardId
     ? snapshot.cards.filter((card) => card.boardId === boardId)
     : snapshot.cards;
+  const baseCards = allCards.filter((card) => card.parentCardId === null);
 
   const listsById = new Map(snapshot.lists.map((list) => [list.id, list]));
   const boardsById = new Map(snapshot.boards.map((board) => [board.id, board]));
@@ -452,11 +456,9 @@ export function buildDashboard(
   const dueWeek = uncompleted.filter(
     (card) => dueBucket(card.dueDate, now, filters.weekStartsOn) === 'week',
   );
-  const subtaskTotal = activeCards.reduce((total, card) => total + card.subtasks.length, 0);
-  const subtaskDone = activeCards.reduce(
-    (total, card) => total + card.subtasks.filter((subtask) => subtask.done).length,
-    0,
-  );
+  const subtaskCards = allCards.filter((card) => card.parentCardId !== null);
+  const subtaskTotal = subtaskCards.length;
+  const subtaskDone = subtaskCards.filter((card) => card.completed).length;
   const blockedCards = uncompleted.filter((card) => isBlocked(card, cardsById, snapshot.dependencies));
   const trend = buildTrend(activeCards, now, filters.rangeDays);
   const today = toDateKey(now);

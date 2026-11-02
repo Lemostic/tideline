@@ -15,6 +15,7 @@ import {
   topLevelGoals,
 } from '@/lib/goals';
 import type { Card, Goal, GoalScope, GoalStatus } from '@/lib/types';
+import { rootCards } from '@/lib/taskTree';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import './goals.css';
 
@@ -31,6 +32,8 @@ function percentText(value: number): string {
 export function GoalsPage() {
   const navigate = useNavigate();
   const snapshot = useSnapshot();
+  // V0.14.0：目标进度与关联选择器只统计主任务。
+  const taskCards = useMemo(() => rootCards(snapshot.cards), [snapshot.cards]);
   const createGoal = useAppStore((state) => state.createGoal);
   const [formOpen, setFormOpen] = useState(false);
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all');
@@ -49,7 +52,7 @@ export function GoalsPage() {
         ? 0
         : Math.round(
             roots.reduce(
-              (sum, goal) => sum + goalProgressDetail(goal, snapshot.goals, snapshot.cards).percent,
+              (sum, goal) => sum + goalProgressDetail(goal, snapshot.goals, taskCards).percent,
               0,
             ) / roots.length,
           );
@@ -59,7 +62,7 @@ export function GoalsPage() {
       linked: linkedIds.size,
       average,
     };
-  }, [activeGoals, snapshot.goals, snapshot.cards]);
+  }, [activeGoals, snapshot.goals, taskCards]);
 
   const visibleGoals = useMemo(
     () =>
@@ -205,7 +208,7 @@ export function GoalsPage() {
               goal={goal}
               depth={0}
               goals={snapshot.goals}
-              cards={snapshot.cards}
+              cards={taskCards}
               visibleIds={visibleIds}
               onOpen={(id) => navigate(`/goals/${id}`)}
             />

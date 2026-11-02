@@ -10,6 +10,7 @@ import {
   type DueBucket,
 } from '@/lib/date';
 import { boardColorValue, PRIORITY_META, type Board, type Card } from '@/lib/types';
+import { rootCards } from '@/lib/taskTree';
 import {
   countOverdue,
   dueChipClass,
@@ -56,24 +57,27 @@ export function MyTasksPage() {
     boardFilter === ALL_BOARDS || snapshot.boards.some((board) => board.id === boardFilter);
   const activeBoardId = filterValid && boardFilter !== ALL_BOARDS ? boardFilter : null;
 
+  // V0.14.0：我的任务只看主任务，子任务折叠在父任务详情里。
+  const taskCards = useMemo(() => rootCards(snapshot.cards), [snapshot.cards]);
+
   // 以快照变化为节拍刷新「今天」，避免分组与 chip 文案跨天失真
-  const now = useMemo(() => new Date(), [snapshot.cards]);
+  const now = useMemo(() => new Date(), [taskCards]);
 
   const groups = useMemo(
     () =>
-      selectTaskGroups(snapshot.cards, {
+      selectTaskGroups(taskCards, {
         boardId: activeBoardId,
         showCompleted,
         sort,
         now,
         weekStartsOn,
       }),
-    [snapshot.cards, activeBoardId, showCompleted, sort, now, weekStartsOn],
+    [taskCards, activeBoardId, showCompleted, sort, now, weekStartsOn],
   );
 
   const overdueCount = useMemo(
-    () => countOverdue(snapshot.cards, activeBoardId, now),
-    [snapshot.cards, activeBoardId, now],
+    () => countOverdue(taskCards, activeBoardId, now),
+    [taskCards, activeBoardId, now],
   );
 
   const boardById = useMemo(

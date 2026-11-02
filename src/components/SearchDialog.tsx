@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
+import { breadcrumbOf } from '@/lib/taskTree';
 import { useSnapshot } from '@/store/appStore';
 import { useUiStore } from '@/store/uiStore';
 
@@ -128,7 +129,14 @@ export function SearchDialog() {
                       <Icon name="check-circle" size={15} />
                       <span className="search-result-main">
                         <span className="search-result-title">{card.title}</span>
-                        <span className="search-result-meta">{boardName(card.boardId)}</span>
+                        <span className="search-result-meta">
+                          {[
+                            boardName(card.boardId),
+                            ...breadcrumbOf(snapshot.cards, card.id)
+                              .slice(0, -1)
+                              .map((node) => node.title),
+                          ].join(' › ')}
+                        </span>
                       </span>
                       <Icon name="arrow-up-right" size={13} />
                     </button>

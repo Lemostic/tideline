@@ -9,6 +9,7 @@ import {
   type DashboardFilters,
 } from './dashboard';
 import type { Board, Card, CardDependency, List, Snapshot } from './types';
+import { rootCards } from './taskTree';
 
 const now = new Date(2026, 5, 15); // 2026-06-15 周一
 
@@ -67,20 +68,19 @@ function snapshot(): Snapshot {
       dueDate: '2026-06-12',
       updatedAt: '2026-06-14T02:00:00.000Z',
       priority: 'high',
-      subtasks: [
-        { id: 's1', title: '一', done: true },
-        { id: 's2', title: '二', done: false },
-      ],
     }),
     card('c3', 'b1', 'l1', {
       dueDate: '2026-06-15',
       priority: 'medium',
       createdAt: '2026-06-15T02:00:00.000Z',
-      subtasks: [{ id: 's3', title: '三', done: true }],
     }),
     card('c4', 'b1', 'l1', { dueDate: '2026-06-17' }),
     card('c5', 'b1', 'l1', { dueDate: null }),
     card('c6', 'b2', 'l2', { dueDate: '2026-06-01' }),
+    // V0.14.0：子任务是真实卡片，只进入子任务完成率，不计入任务 KPI。
+    card('c2s1', 'b1', 'l1', { parentCardId: 'c2', completed: true }),
+    card('c2s2', 'b1', 'l1', { parentCardId: 'c2' }),
+    card('c3s1', 'b1', 'l1', { parentCardId: 'c3', completed: true }),
   ];
   const dependencies: CardDependency[] = [
     { cardId: 'c3', dependsOnCardId: 'c1' },
@@ -151,7 +151,7 @@ describe('dashboard aggregation', () => {
 
 describe('BI 维度聚合', () => {
   it('吞吐节奏按周分桶，净增 = 新建 - 完成', () => {
-    const points = buildThroughput(snapshot().cards, now, 30, 1);
+    const points = buildThroughput(rootCards(snapshot().cards), now, 30, 1);
     expect(points).toHaveLength(5);
     const totalCreated = points.reduce((sum, point) => sum + point.created, 0);
     const totalCompleted = points.reduce((sum, point) => sum + point.completed, 0);
@@ -163,7 +163,7 @@ describe('BI 维度聚合', () => {
   });
 
   it('结构维度按分组统计总数、已完成与占比', () => {
-    const slices = buildDimension(snapshot().cards, now, 1, (card) =>
+    const slices = buildDimension(rootCards(snapshot().cards), now, 1, (card) =>
       card.boardId === 'b1' ? { key: 'b1', label: '看板一' } : { key: 'b2', label: '看板二' },
     );
     expect(slices[0].key).toBe('b1');
@@ -174,7 +174,7 @@ describe('BI 维度聚合', () => {
   });
 
   it('效率指标给出中位周期、积压与本周净增', () => {
-    const metrics = buildEfficiency(snapshot().cards, now, 1);
+    const metrics = buildEfficiency(rootCards(snapshot().cards), now, 1);
     // c2 于 6-10 创建、6-14 完成，周期 4 天
     expect(metrics.medianCycleDays).toBe(4);
     expect(metrics.averageCycleDays).toBe(4);
@@ -182,7 +182,7 @@ describe('BI 维度聚合', () => {
   });
 
   it('任务年龄分桶只统计未完成任务', () => {
-    const buckets = buildAging(snapshot().cards, now);
+    const buckets = buildAging(rootCards(snapshot().cards), now);
     const total = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
     // 5 个未完成任务
     expect(total).toBe(5);

@@ -14,6 +14,7 @@ import {
 } from '@/lib/date';
 import { goalProgressDetail, topLevelGoals } from '@/lib/goals';
 import { boardColorValue, type Board, type Card, type List } from '@/lib/types';
+import { rootCards } from '@/lib/taskTree';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useUiStore } from '@/store/uiStore';
 import './home.css';
@@ -49,6 +50,8 @@ function greetingForHour(hour: number): string {
 export function WorkbenchPage() {
   const navigate = useNavigate();
   const snapshot = useSnapshot();
+  // V0.14.0：工作台只展示主任务，子任务折叠在父任务里。
+  const taskCards = useMemo(() => rootCards(snapshot.cards), [snapshot.cards]);
   const openNewBoard = useUiStore((state) => state.openNewBoard);
   const openCard = useUiStore((state) => state.openCard);
   const openSearch = useUiStore((state) => state.openSearch);
@@ -71,7 +74,7 @@ export function WorkbenchPage() {
     void toggleStar(board.id).catch(() => undefined);
   };
 
-  const now = useMemo(() => new Date(), [snapshot.cards]);
+  const now = useMemo(() => new Date(), [taskCards]);
   const today = useMemo(() => {
     const date = new Date();
     return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
@@ -90,7 +93,7 @@ export function WorkbenchPage() {
         listCount: snapshot.lists.filter((list) => list.boardId === board.id).length,
       });
     }
-    for (const card of snapshot.cards) {
+    for (const card of taskCards) {
       const stat = map.get(card.boardId);
       if (!stat) continue;
       stat.total += 1;
@@ -98,11 +101,11 @@ export function WorkbenchPage() {
       else if (card.dueDate !== null && card.dueDate < today) stat.overdue += 1;
     }
     return map;
-  }, [snapshot.boards, snapshot.lists, snapshot.cards, today]);
+  }, [snapshot.boards, snapshot.lists, taskCards, today]);
 
   const openCards = useMemo(
-    () => snapshot.cards.filter((card) => !card.completed),
-    [snapshot.cards],
+    () => taskCards.filter((card) => !card.completed),
+    [taskCards],
   );
   const overdue = useMemo(
     () => openCards.filter((card) => card.dueDate !== null && card.dueDate < today),
@@ -118,10 +121,10 @@ export function WorkbenchPage() {
   );
   const recentCompleted = useMemo(() => {
     const threshold = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    return snapshot.cards.filter(
+    return taskCards.filter(
       (card) => card.completed && Date.parse(card.updatedAt) >= threshold,
     ).length;
-  }, [snapshot.cards]);
+  }, [taskCards]);
 
   const focusCards = useMemo(() => {
     const rank: Record<string, number> = { overdue: 0, today: 1, week: 2 };
@@ -146,14 +149,14 @@ export function WorkbenchPage() {
         .slice(0, 4)
         .map((goal) => ({
           goal,
-          progress: goalProgressDetail(goal, snapshot.goals, snapshot.cards),
+          progress: goalProgressDetail(goal, snapshot.goals, taskCards),
         })),
-    [activeGoals, snapshot.goals, snapshot.cards],
+    [activeGoals, snapshot.goals, taskCards],
   );
 
   const recentCards = useMemo(
-    () => [...snapshot.cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_LIMIT),
-    [snapshot.cards],
+    () => [...taskCards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, RECENT_LIMIT),
+    [taskCards],
   );
   const boardRows = useMemo(
     () =>
@@ -242,7 +245,7 @@ export function WorkbenchPage() {
               ]
             : [
                 { label: '看板', value: snapshot.boards.length, tone: 'muted' },
-                { label: '任务', value: snapshot.cards.length },
+                { label: '任务', value: taskCards.length },
               ]
         }
         actions={
@@ -510,7 +513,7 @@ export function WorkbenchPage() {
       ) : (
         <BoardGallery
           boards={snapshot.boards}
-          cards={snapshot.cards}
+          cards={taskCards}
           lists={snapshot.lists}
           onToggleStar={handleToggleStar}
           onRename={setRenameTarget}
