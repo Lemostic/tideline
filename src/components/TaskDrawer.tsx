@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DatePicker } from '@/components/DatePicker';
 import { Icon } from '@/components/Icon';
 import { ActivitySection, RecurrenceSection } from '@/components/RecurrenceSection';
 import { formatDateCN, formatRelativeTime, todayKey } from '@/lib/date';
+import { breadcrumbOf, childrenOf, subtaskProgress } from '@/lib/taskTree';
 import {
   blockersFor,
   crossBoardRelationCandidates,
   dependencyCandidates,
   relationTypeOf,
 } from '@/lib/dependencies';
-import { createId } from '@/lib/ids';
 import { labelColorKey, labelStyle } from '@/lib/labelColors';
 import { isBlankMarkdown, renderMarkdown } from '@/lib/markdown';
 import {
@@ -48,14 +49,22 @@ export function TaskDrawer() {
   const notify = useUiStore((state) => state.notify);
   const snapshot = useSnapshot();
   const updateCard = useAppStore((state) => state.updateCard);
+  const createCard = useAppStore((state) => state.createCard);
   const updateBoard = useAppStore((state) => state.updateBoard);
   const deleteCard = useAppStore((state) => state.deleteCard);
   const setDependencies = useAppStore((state) => state.setDependencies);
   const setCardFieldValues = useAppStore((state) => state.setCardFieldValues);
 
+  /** V0.14.0：任务树内逐级查看时使用的当前卡片 id；null 表示跟随全局打开的任务。 */
+  const [viewCardId, setViewCardId] = useState<string | null>(null);
+  useEffect(() => {
+    setViewCardId(editingCardId ?? null);
+  }, [editingCardId]);
+  const activeCardId = viewCardId ?? editingCardId;
+
   const card = useMemo(
-    () => snapshot.cards.find((item) => item.id === editingCardId),
-    [snapshot.cards, editingCardId],
+    () => snapshot.cards.find((item) => item.id === activeCardId),
+    [snapshot.cards, activeCardId],
   );
   const board = useMemo(
     () => snapshot.boards.find((item) => item.id === card?.boardId),
@@ -176,11 +185,67 @@ export function TaskDrawer() {
       ? { key: 'doing', label: '进行中' }
       : { key: 'todo', label: '待开始' };
 
-  const subtaskTotal = card.subtasks.length;
-  const subtaskDone = card.subtasks.filter((item) => item.done).length;
-  const subtaskPercent =
-    subtaskTotal === 0 ? 0 : Math.round((subtaskDone / subtaskTotal) * 100);
+  const progress = subtaskProgress(snapshot.cards, card.id);
+  const subtaskTotal = progress.total;
+  const subtaskDone = progress.done;
+  const subtaskPercent = progress.percent;
   const allSubtasksDone = subtaskTotal > 0 && subtaskDone === subtaskTotal;
+  const isSubtask = card.parentCardId !== null;
+  const breadcrumb = breadcrumbOf(snapshot.cards, card.id);
+
+  /** 递归渲染任务树（任意层级，超过 6 层后缩进固定）。 */
+  const renderTreeRows = (parentId: string, depth: number): ReactNode =>
+    childrenOf(snapshot.cards, parentId).map((child) => {
+      const priority = PRIORITY_META.find((meta) => meta.key === child.priority);
+      return (
+        <Fragment key={child.id}>
+          <li
+            className="td-subtask td-tree-row"
+            style={{ paddingLeft: `${8 + Math.min(depth, 6) * 14}px` }}
+          >
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={child.completed}
+              aria-label={child.completed ? `取消完成：${child.title}` : `完成：${child.title}`}
+              className={`td-check${child.completed ? ' on' : ''}`}
+              onClick={() => toggleSubtask(child.id)}
+            >
+              {child.completed ? <Icon name="check" size={11} strokeWidth={2.6} /> : null}
+            </button>
+            <button
+              type="button"
+              className={`td-subtask-title td-subtask-link${child.completed ? ' done' : ''}`}
+              title="打开子任务详情"
+              onClick={() => setViewCardId(child.id)}
+            >
+              {child.title}
+            </button>
+            <span className="td-tree-meta">
+              {priority ? (
+                <span className="td-tree-chip" style={{ color: priority.color }}>
+                  {priority.label}
+                </span>
+              ) : null}
+              {child.dueDate ? <span className="td-tree-chip">截止 {child.dueDate.slice(5)}</span> : null}
+              {child.labels.length > 0 ? (
+                <span className="td-tree-chip">{child.labels.length} 标签</span>
+              ) : null}
+            </span>
+            <button
+              type="button"
+              className="td-icon-btn td-subtask-del"
+              onClick={() => void removeSubtask(child.id)}
+              aria-label={`删除子任务：${child.title}`}
+              title="删除子任务"
+            >
+              <Icon name="x" size={12} />
+            </button>
+          </li>
+          {renderTreeRows(child.id, depth + 1)}
+        </Fragment>
+      );
+    });
   const labelLimitReached = card.labels.length >= MAX_LABELS;
   const blockers = blockersFor(card.id, snapshot.dependencies, snapshot.cards);
   const unfinishedBlockers = blockers.filter((blocker) => !blocker.completed);
@@ -286,25 +351,33 @@ export function TaskDrawer() {
   };
 
   const toggleSubtask = (subtaskId: string) => {
-    patchCard((current) => ({
-      subtasks: current.subtasks.map((item) =>
-        item.id === subtaskId ? { ...item, done: !item.done } : item,
-      ),
-    }));
+    const current = useAppStore.getState().snapshot.cards.find((item) => item.id === subtaskId);
+    if (!current) return;
+    void updateCard(subtaskId, { completed: !current.completed });
   };
 
-  const removeSubtask = (subtaskId: string) => {
-    patchCard((current) => ({
-      subtasks: current.subtasks.filter((item) => item.id !== subtaskId),
-    }));
+  const removeSubtask = async (subtaskId: string) => {
+    const current = useAppStore.getState().snapshot.cards.find((item) => item.id === subtaskId);
+    if (!current) return;
+    const confirmed = await requestConfirm({
+      title: `删除子任务「${current.title}」`,
+      description: '它和它的下级子任务会一起移入回收站，可随时恢复。',
+      confirmLabel: '移入回收站',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    void deleteCard(subtaskId);
   };
 
   const submitSubtask = () => {
     const value = subtaskDraft.trim();
     if (!value) return;
-    patchCard((current) => ({
-      subtasks: [...current.subtasks, { id: createId('s'), title: value, done: false }],
-    }));
+    void createCard({
+      boardId: card.boardId,
+      listId: card.listId,
+      title: value,
+      parentCardId: card.id,
+    });
     setSubtaskDraft('');
     subtaskInputRef.current?.focus();
   };
@@ -385,6 +458,24 @@ export function TaskDrawer() {
 
         <div className="drawer-body">
           <div>
+            {breadcrumb.length > 1 ? (
+              <nav className="td-tree-crumb" aria-label="任务层级">
+                {breadcrumb.map((node, index) => (
+                  <Fragment key={node.id}>
+                    {index > 0 ? <Icon name="chevron-right" size={11} /> : null}
+                    <button
+                      type="button"
+                      className={node.id === card.id ? 'is-current' : ''}
+                      disabled={node.id === card.id}
+                      title={node.title}
+                      onClick={() => setViewCardId(node.id)}
+                    >
+                      {node.title}
+                    </button>
+                  </Fragment>
+                ))}
+              </nav>
+            ) : null}
             <div className="drawer-board-crumb">
               <Icon name="layout-grid" size={13} />
               <span>{board?.title ?? '未知看板'}</span>
@@ -467,18 +558,25 @@ export function TaskDrawer() {
                 所属列表
               </div>
               <div className="meta-value">
-                <select
-                  className="select"
-                  value={card.listId}
-                  onChange={(event) => void updateCard(card.id, { listId: event.target.value })}
-                  aria-label="移动到列表"
-                >
-                  {lists.map((list) => (
-                    <option key={list.id} value={list.id}>
-                      {list.title}
-                    </option>
-                  ))}
-                </select>
+                {isSubtask ? (
+                  <span className="td-readonly" title="子任务的列表跟随父任务">
+                    {lists.find((list) => list.id === card.listId)?.title ?? '未知列表'}
+                    <em>跟随父任务</em>
+                  </span>
+                ) : (
+                  <select
+                    className="select"
+                    value={card.listId}
+                    onChange={(event) => void updateCard(card.id, { listId: event.target.value })}
+                    aria-label="移动到列表"
+                  >
+                    {lists.map((list) => (
+                      <option key={list.id} value={list.id}>
+                        {list.title}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
             </div>
 
@@ -611,36 +709,38 @@ export function TaskDrawer() {
               </div>
             </div>
 
-            <div className="meta-row">
-              <div className="meta-label">
-                <Icon name="flag" size={14} />
-                卡片颜色
-              </div>
-              <div className="meta-value">
-                <div className="card-accent-group">
-                  <button
-                    type="button"
-                    className={`card-accent-none${!card.accent ? ' active' : ''}`}
-                    onClick={() => void updateCard(card.id, { accent: null })}
-                    title="默认样式"
-                  >
-                    默认
-                  </button>
-                  {BOARD_COLORS.map((color) => (
+            {!isSubtask ? (
+              <div className="meta-row">
+                <div className="meta-label">
+                  <Icon name="flag" size={14} />
+                  卡片颜色
+                </div>
+                <div className="meta-value">
+                  <div className="card-accent-group">
                     <button
-                      key={color.key}
                       type="button"
-                      className={`card-accent-swatch${card.accent === color.key ? ' active' : ''}`}
-                      style={{ background: color.value }}
-                      title={color.label}
-                      aria-label={`卡片颜色：${color.label}`}
-                      aria-pressed={card.accent === color.key}
-                      onClick={() => void updateCard(card.id, { accent: color.key })}
-                    />
-                  ))}
+                      className={`card-accent-none${!card.accent ? ' active' : ''}`}
+                      onClick={() => void updateCard(card.id, { accent: null })}
+                      title="默认样式"
+                    >
+                      默认
+                    </button>
+                    {BOARD_COLORS.map((color) => (
+                      <button
+                        key={color.key}
+                        type="button"
+                        className={`card-accent-swatch${card.accent === color.key ? ' active' : ''}`}
+                        style={{ background: color.value }}
+                        title={color.label}
+                        aria-label={`卡片颜色：${color.label}`}
+                        aria-pressed={card.accent === color.key}
+                        onClick={() => void updateCard(card.id, { accent: color.key })}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : null}
           </div>
 
           {rangeNote || invalidRange ? (
@@ -861,32 +961,7 @@ export function TaskDrawer() {
 
             {subtaskTotal > 0 ? (
               <ul className="td-subtasks">
-                {card.subtasks.map((item) => (
-                  <li className="td-subtask" key={item.id}>
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={item.done}
-                      aria-label={item.done ? `取消完成：${item.title}` : `完成：${item.title}`}
-                      className={`td-check${item.done ? ' on' : ''}`}
-                      onClick={() => toggleSubtask(item.id)}
-                    >
-                      {item.done ? <Icon name="check" size={11} strokeWidth={2.6} /> : null}
-                    </button>
-                    <span className={`td-subtask-title${item.done ? ' done' : ''}`}>
-                      {item.title}
-                    </span>
-                    <button
-                      type="button"
-                      className="td-icon-btn td-subtask-del"
-                      onClick={() => removeSubtask(item.id)}
-                      aria-label={`删除子任务：${item.title}`}
-                      title="删除子任务"
-                    >
-                      <Icon name="x" size={12} />
-                    </button>
-                  </li>
-                ))}
+                {renderTreeRows(card.id, 0)}
               </ul>
             ) : (
               <p className="td-subtasks-empty">
@@ -1020,7 +1095,7 @@ export function TaskDrawer() {
             ) : null}
           </div>
 
-          <RecurrenceSection card={card} />
+          {!isSubtask ? <RecurrenceSection card={card} /> : null}
 
           <ActivitySection cardId={card.id} />
 

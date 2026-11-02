@@ -1186,3 +1186,91 @@
   outline: none;
   box-shadow: 0 0 0 3px var(--primary-wash);
 }
+
+/* ---------- 任务树（V0.14.0） ---------- */
+.td-tree-crumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 6px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.td-tree-crumb button {
+  max-width: 240px;
+  overflow: hidden;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.td-tree-crumb button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--ink-2);
+}
+
+.td-tree-crumb button.is-current {
+  color: var(--ink-2);
+  font-weight: 650;
+  cursor: default;
+}
+
+.td-readonly {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.td-readonly em {
+  color: var(--faint);
+  font-size: 9.5px;
+  font-style: normal;
+}
+
+.td-tree-row {
+  align-items: center;
+}
+
+.td-subtask-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.td-subtask-link:hover {
+  color: var(--primary-strong);
+  text-decoration: underline;
+}
+
+.td-tree-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.td-tree-chip {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
