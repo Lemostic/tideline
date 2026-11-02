@@ -310,7 +310,9 @@ pub struct Card {
     pub deleted_at: Option<String>,
     /// 自由标签，数据库里存 JSON 数组文本。
     pub labels: Vec<String>,
-    /// 子任务清单，数据库里存 JSON 数组文本。
+    /// 旧版子任务清单（V0.1）；V0.14.0 起子任务是真实卡片，本字段仅用于旧数据/旧备份迁移，
+    /// 不再向前端输出、也不再写入新备份。
+    #[serde(default, skip_serializing)]
     pub subtasks: Vec<Subtask>,
     pub position: i64,
     /// V0.11：所属重复配置 id；非空表示这张任务由重复任务滚动而来。
@@ -1871,10 +1873,8 @@ mod tests {
         let json = serde_json::to_value(sample_card()).expect("序列化卡片");
         assert_eq!(json["startDate"], serde_json::json!("2026-02-01"));
         assert_eq!(json["labels"], serde_json::json!(["研发"]));
-        assert_eq!(
-            json["subtasks"],
-            serde_json::json!([{ "id": "s1", "title": "步骤", "done": true }])
-        );
+        // V0.14.0：子任务是真实卡片，旧 subtasks JSON 不再向前端序列化。
+        assert!(json.get("subtasks").is_none());
         // V0.1 已有字段名保持不变
         assert_eq!(json["dueDate"], serde_json::json!("2026-01-10"));
         assert!(json.get("start_date").is_none());

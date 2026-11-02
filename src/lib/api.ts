@@ -16,6 +16,7 @@ import {
   parseBackup,
   serializeBackup,
   summarizeBackup,
+  type LegacyCard,
 } from './backup';
 import { createId, nowISO } from './ids';
 import {
@@ -107,7 +108,7 @@ import type {
   SetCardFieldValuesInput,
   Snapshot,
   StorageInfo,
-  Subtask,
+  LegacySubtask,
   TeamMember,
   TeamMemberPatch,
   TenurePatch,
@@ -421,10 +422,10 @@ function validateCardMinutes(values: { estimatedMinutes?: number | null; actualM
   }
 }
 
-function normalizeCard(raw: Card): Card {
-  const subtasks: Subtask[] = Array.isArray(raw.subtasks)
+function normalizeCard(raw: LegacyCard): LegacyCard {
+  const subtasks: LegacySubtask[] = Array.isArray(raw.subtasks)
     ? raw.subtasks
-        .filter((item): item is Subtask => Boolean(item) && typeof item.title === 'string')
+        .filter((item): item is LegacySubtask => Boolean(item) && typeof item.title === 'string')
         .map((item) => ({
           id: typeof item.id === 'string' && item.id ? item.id : createId('s'),
           title: item.title,
@@ -536,9 +537,6 @@ function recordLocalCardChanges(db: LocalDb, old: Card, next: Card): void {
   if (old.labels.join(',') !== next.labels.join(',')) {
     push('labels', old.labels.join(','), next.labels.join(','));
   }
-  const oldTitles = old.subtasks.map((item) => item.title).join(',');
-  const newTitles = next.subtasks.map((item) => item.title).join(',');
-  if (oldTitles !== newTitles) push('subtasks', oldTitles, newTitles);
 }
 
 /**
@@ -562,7 +560,6 @@ function runLocalRules(
   if (matching.length === 0) return;
 
   let labels = [...card.labels];
-  let subtasks = [...card.subtasks];
   let priority = card.priority;
 
   for (const rule of matching) {
@@ -571,18 +568,13 @@ function runLocalRules(
       rule.lastError = error;
       continue;
     }
-    const patch = applyRuleActions(
-      { ...card, labels, subtasks, priority },
-      rule.actions,
-      today,
-    );
+    const outcome = applyRuleActions({ ...card, labels, priority }, rule.actions, today);
+    const patch = outcome.patch;
     try {
       if (patch.dueDate !== undefined) card.dueDate = patch.dueDate;
       if (patch.priority !== undefined) card.priority = patch.priority;
       if (patch.labels !== undefined) labels = patch.labels;
-      if (patch.subtasks !== undefined) subtasks = patch.subtasks;
       card.labels = labels;
-      card.subtasks = subtasks;
       priority = card.priority;
       if (patch.dueDate !== undefined) {
         pushActivity(db, {
@@ -608,12 +600,15 @@ function runLocalRules(
           newValue: patch.labels.join(','),
         });
       }
-      if (patch.subtasks !== undefined) {
+      if (outcome.subtaskTitles.length > 0) {
+        for (const title of outcome.subtaskTitles) {
+          appendLocalSubtaskCard(db, card, title);
+        }
         pushActivity(db, {
           cardId: card.id,
           eventType: 'updated',
           field: 'subtasks',
-          newValue: patch.subtasks.map((item) => item.title).join(','),
+          newValue: outcome.subtaskTitles.join(','),
         });
       }
       rule.lastError = '';
@@ -623,12 +618,54 @@ function runLocalRules(
   }
 }
 
+/** V0.14.0：规则「追加子任务」创建真实子任务卡片（同名未删除子任务跳过）。 */
+function appendLocalSubtaskCard(db: LocalDb, parent: Card, title: string): void {
+  if (
+    db.cards.some(
+      (card) =>
+        card.parentCardId === parent.id && !card.deletedAt && card.title === title,
+    )
+  ) {
+    return;
+  }
+  const now = nowISO();
+  const siblings = db.cards.filter(
+    (card) => card.parentCardId === parent.id && !card.deletedAt,
+  );
+  db.cards.push({
+    id: createId('c'),
+    boardId: parent.boardId,
+    listId: parent.listId,
+    parentCardId: parent.id,
+    title,
+    description: '',
+    dueDate: null,
+    startDate: null,
+    estimatedMinutes: null,
+    actualMinutes: null,
+    priority: null,
+    accent: null,
+    completed: false,
+    deletedAt: null,
+    labels: [],
+    position: siblings.length
+      ? Math.max(...siblings.map((card) => card.position)) + 1
+      : 0,
+    recurrenceId: null,
+    generatedFromId: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  touchBoard(db, parent.boardId);
+}
+
 /**
  * 浏览器端滚动重复任务：克隆原任务生成下一次未完成任务。
  *
  * 幂等性由 `generatedFromId` 保证：同一张任务只会被生成一次。
  */
 function rollLocalRecurrence(db: LocalDb, card: Card): Card | null {
+  if (card.parentCardId) return null;
   const recurrence = db.recurrences.find(
     (item) => item.cardId === card.id || item.id === card.recurrenceId,
   );
@@ -650,7 +687,6 @@ function rollLocalRecurrence(db: LocalDb, card: Card): Card | null {
     dueDate: generatedDue,
     startDate: null,
     labels: [...card.labels],
-    subtasks: card.subtasks.map((item) => ({ ...item, done: false })),
     position: siblings.length ? Math.max(...siblings.map((c) => c.position)) + 1 : 0,
     recurrenceId: recurrence.id,
     generatedFromId: card.id,
@@ -1014,7 +1050,7 @@ function loadLocalDb(): LocalDb {
         : [],
     };
     // 旧数据没有保存视图：给每个看板补齐内置视图（与 Rust 侧迁移同一套语义）
-    db.cards = expandLegacySubtaskCards(db.cards);
+    db.cards = expandLegacySubtaskCards(db.cards as LegacyCard[]);
     for (const board of db.boards) ensureLocalBuiltinSavedViews(db, board.id);
     return db;
   } catch {
@@ -1629,7 +1665,6 @@ const localApi: TidelineApi = {
       completed: false,
       deletedAt: null,
       labels: input.labels ? [...input.labels] : [],
-      subtasks: input.subtasks ? input.subtasks.map((item) => ({ ...item })) : [],
       position: siblings.length ? Math.max(...siblings.map((c) => c.position)) + 1 : 0,
       recurrenceId: null,
       generatedFromId: null,
@@ -1647,7 +1682,7 @@ const localApi: TidelineApi = {
     validateCardMinutes(patch);
     const db = loadLocalDb();
     const card = requireCard(db, id);
-    const previous = { ...card, labels: [...card.labels], subtasks: card.subtasks.map((item) => ({ ...item })) };
+    const previous = { ...card, labels: [...card.labels] };
     if (patch.title !== undefined) card.title = patch.title.trim() || '未命名任务';
     if (patch.description !== undefined) card.description = patch.description;
     if (patch.dueDate !== undefined) card.dueDate = patch.dueDate;
@@ -1658,7 +1693,6 @@ const localApi: TidelineApi = {
     if (patch.accent !== undefined) card.accent = patch.accent;
     if (patch.completed !== undefined) card.completed = patch.completed;
     if (patch.labels !== undefined) card.labels = [...patch.labels];
-    if (patch.subtasks !== undefined) card.subtasks = patch.subtasks.map((item) => ({ ...item }));
     if (card.parentCardId && patch.listId !== undefined && patch.listId !== card.listId) {
       throw new Error('子任务不能单独移动列表');
     }
@@ -2097,7 +2131,6 @@ const localApi: TidelineApi = {
       completed: false,
       deletedAt: null,
       labels: [],
-      subtasks: [],
       position: db.cards.filter((c) => c.listId === targetListId).length,
       createdAt: now,
       updatedAt: now,

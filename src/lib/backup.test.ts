@@ -44,7 +44,6 @@ function card(overrides: Partial<Card> = {}): Card {
     deletedAt: null,
     labels: [],
     parentCardId: null,
-    subtasks: [],
     position: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -422,21 +421,20 @@ describe('backup helpers', () => {
   it('旧备份的子任务清单展开为真实子卡片', () => {
     const backup = validBackup();
     backup.dependencies = [];
-    backup.cards = [
-      {
-        ...card(),
-        id: 'c_legacy',
-        subtasks: [
-          { id: 's1', title: '子1', done: false },
-          { id: 's2', title: '子2', done: true },
-        ],
-      },
-    ];
+    const legacyCard = {
+      ...card(),
+      id: 'c_legacy',
+      subtasks: [
+        { id: 's1', title: '子1', done: false },
+        { id: 's2', title: '子2', done: true },
+      ],
+    } as unknown as Card;
+    backup.cards = [legacyCard];
     const parsed = parseBackup(JSON.stringify(backup));
     const children = parsed.cards.filter((item) => item.parentCardId === 'c_legacy');
     expect(children.map((item) => item.title)).toEqual(['子1', '子2']);
     expect(children[1].completed).toBe(true);
-    expect(parsed.cards.find((item) => item.id === 'c_legacy')?.subtasks).toEqual([]);
+    expect(parsed.cards).toHaveLength(3);
   });
 
   it('拒绝父任务缺失或成环的备份任务树', () => {

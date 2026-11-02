@@ -5,7 +5,6 @@
  * Rust 侧 `src-tauri/src/automation.rs` 保持同一套语义。
  */
 import { addDaysKey, parseDateKey, toDateKey } from './date';
-import { createId } from './ids';
 import type {
   Card,
   Priority,
@@ -164,20 +163,21 @@ export function validateRuleActions(actions: RuleAction[]): string | null {
 /**
  * 计算规则动作对任务产生的字段变更。
  *
- * 只返回真正发生变化的字段：标签与子任务按「追加且去重」处理，
- * 已存在的标签 / 同名子任务不会被重复写入。
+ * 只返回真正发生变化的字段：标签按「追加且去重」处理；
+ * 追加子任务改为返回待创建的子任务标题（V0.14.0 起子任务是真实卡片）。
  */
 export function applyRuleActions(
   card: Card,
   actions: RuleAction[],
   today: string,
-): Partial<Pick<Card, 'dueDate' | 'priority' | 'labels' | 'subtasks'>> {
-  const patch: Partial<
-    Pick<Card, 'dueDate' | 'priority' | 'labels' | 'subtasks'>
-  > = {};
+): {
+  patch: Partial<Pick<Card, 'dueDate' | 'priority' | 'labels'>>;
+  subtaskTitles: string[];
+} {
+  const patch: Partial<Pick<Card, 'dueDate' | 'priority' | 'labels'>> = {};
 
   let labels = [...card.labels];
-  let subtasks = [...card.subtasks];
+  const subtaskTitles: string[] = [];
 
   for (const action of actions) {
     switch (action.kind) {
@@ -204,13 +204,7 @@ export function applyRuleActions(
       case 'append_subtasks': {
         for (const title of action.subtasks ?? []) {
           const value = title.trim();
-          if (value && !subtasks.some((item) => item.title === value)) {
-            subtasks.push({
-              id: createId('s'),
-              title: value,
-              done: false,
-            });
-          }
+          if (value && !subtaskTitles.includes(value)) subtaskTitles.push(value);
         }
         break;
       }
@@ -220,8 +214,7 @@ export function applyRuleActions(
   }
 
   if (labels.length !== card.labels.length) patch.labels = labels;
-  if (subtasks.length !== card.subtasks.length) patch.subtasks = subtasks;
-  return patch;
+  return { patch, subtaskTitles };
 }
 
 /** 活动日志字段的中文名 */

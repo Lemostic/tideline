@@ -24,7 +24,6 @@ function card(id: string, completed: boolean): Card {
     deletedAt: null,
     labels: [],
     parentCardId: null,
-    subtasks: [],
     position: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',

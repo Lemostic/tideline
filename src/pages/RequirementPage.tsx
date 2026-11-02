@@ -4,7 +4,6 @@ import { Icon } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
 import { PageHeadBand } from '@/components/PageHeadBand';
 import { api } from '@/lib/api';
-import { createId } from '@/lib/ids';
 import {
   countRequirementNodes,
   maxRequirementLevel,
@@ -146,17 +145,22 @@ export function RequirementPage() {
     let created = 0;
     try {
       for (const card of targets) {
-        await createCard({
+        const parent = await createCard({
           boardId,
           listId,
           title: card.title,
           description: card.description,
-          subtasks: card.subtasks.map((title) => ({
-            id: createId('s'),
-            title,
-            done: false,
-          })),
         });
+        // V0.14.0：子任务是真实卡片，与父任务同看板同列表。
+        for (const title of card.subtasks) {
+          await createCard({
+            boardId,
+            listId,
+            parentCardId: parent.id,
+            title,
+            description: '',
+          });
+        }
         created += 1;
       }
       setResult({ created, skipped: plan.cards.length - created });

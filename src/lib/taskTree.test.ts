@@ -33,7 +33,6 @@ const base = (
   completed,
   deletedAt: null,
   labels: [],
-  subtasks: [],
   position,
   recurrenceId: null,
   generatedFromId: null,

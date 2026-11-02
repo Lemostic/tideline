@@ -28,7 +28,6 @@ function card(overrides: Partial<Card> = {}): Card {
     deletedAt: null,
     labels: [],
     parentCardId: null,
-    subtasks: [],
     position: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -156,17 +155,17 @@ describe('规则动作校验', () => {
 
 describe('规则动作计算', () => {
   it('设置日期偏移按今天计算', () => {
-    const patch = applyRuleActions(card(), [{ kind: 'set_due_date_offset', offsetDays: 3 }], '2026-01-05');
+    const { patch } = applyRuleActions(card(), [{ kind: 'set_due_date_offset', offsetDays: 3 }], '2026-01-05');
     expect(patch.dueDate).toBe('2026-01-08');
   });
 
   it('清除日期写入 null', () => {
-    const patch = applyRuleActions(card({ dueDate: '2026-01-05' }), [{ kind: 'clear_due_date' }], '2026-01-05');
+    const { patch } = applyRuleActions(card({ dueDate: '2026-01-05' }), [{ kind: 'clear_due_date' }], '2026-01-05');
     expect(patch.dueDate).toBeNull();
   });
 
   it('追加标签去重，不重复写入已有标签', () => {
-    const patch = applyRuleActions(
+    const { patch } = applyRuleActions(
       card({ labels: ['研发'] }),
       [{ kind: 'add_labels', labels: ['研发', '高风险'] }],
       '2026-01-05',
@@ -175,7 +174,7 @@ describe('规则动作计算', () => {
   });
 
   it('没有真实变化时不返回该字段', () => {
-    const patch = applyRuleActions(
+    const { patch } = applyRuleActions(
       card({ labels: ['研发'] }),
       [{ kind: 'add_labels', labels: ['研发'] }],
       '2026-01-05',
@@ -183,13 +182,13 @@ describe('规则动作计算', () => {
     expect(patch.labels).toBeUndefined();
   });
 
-  it('追加子任务跳过同名项', () => {
-    const patch = applyRuleActions(
-      card({ subtasks: [{ id: 's_1', title: '第一步', done: false }] }),
+  it('追加子任务返回待创建标题，由数据层创建真实子任务卡片', () => {
+    const outcome = applyRuleActions(
+      card(),
       [{ kind: 'append_subtasks', subtasks: ['第一步', '第二步'] }],
       '2026-01-05',
     );
-    expect(patch.subtasks?.map((item) => item.title)).toEqual(['第一步', '第二步']);
+    expect(outcome.subtaskTitles).toEqual(['第一步', '第二步']);
   });
 
   it('多个动作按顺序叠加', () => {
@@ -197,7 +196,7 @@ describe('规则动作计算', () => {
       { kind: 'set_due_date_offset', offsetDays: 1 },
       { kind: 'set_priority', priority: 'high' },
     ];
-    const patch = applyRuleActions(card(), actions, '2026-01-05');
+    const { patch } = applyRuleActions(card(), actions, '2026-01-05');
     expect(patch.dueDate).toBe('2026-01-06');
     expect(patch.priority).toBe('high');
   });

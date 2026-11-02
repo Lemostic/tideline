@@ -30,6 +30,7 @@ import type {
   List,
   OvertimeRecord,
   OvertimeStatus,
+  LegacySubtask,
   PerformanceRecord,
   Project,
   ProjectMetaField,
@@ -107,22 +108,27 @@ export function summarizeBackup(
   };
 }
 
+/** 旧版备份卡片的形状：额外带 `subtasks` JSON，V0.14.0 起解析时展开为真实卡片。 */
+export type LegacyCard = Card & { subtasks?: LegacySubtask[] };
+
 /**
  * V0.14.0：把旧 `cards[].subtasks` 清单展开为真实子卡片。
  *
  * 与桌面端迁移等价：保留标题、完成状态与顺序；子卡片继承父任务的看板/列表/
  * 删除状态；id 冲突时追加序号后缀；父任务 `subtasks` 清空。
  */
-export function expandLegacySubtaskCards(cards: Card[]): Card[] {
+export function expandLegacySubtaskCards(cards: LegacyCard[]): Card[] {
   const existing = new Set(cards.map((card) => card.id));
   const result: Card[] = [];
   for (const card of cards) {
-    const legacy = Array.isArray(card.subtasks) ? card.subtasks : [];
-    const parent: Card = {
+    const { subtasks } = card;
+    const legacy = Array.isArray(subtasks) ? subtasks : [];
+    const base: Card = {
       ...card,
       parentCardId: typeof card.parentCardId === 'string' ? card.parentCardId : null,
-      subtasks: [],
     };
+    delete (base as LegacyCard).subtasks;
+    const parent = base;
     result.push(parent);
     legacy.forEach((subtask, index) => {
       let id = `sub_${card.id}_${index}`;
@@ -147,7 +153,6 @@ export function expandLegacySubtaskCards(cards: Card[]): Card[] {
         accent: null,
         deletedAt: parent.deletedAt,
         labels: [],
-        subtasks: [],
         position: index,
         recurrenceId: null,
         generatedFromId: null,

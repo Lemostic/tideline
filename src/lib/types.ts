@@ -76,8 +76,6 @@ export interface Card {
   deletedAt: string | null;
   /** 自由标签，例如「研发」「高风险」 */
   labels: string[];
-  /** 子任务清单（旧版 JSON）；V0.14.0 起不再写入，仅用于旧数据迁移，Task 8 后删除 */
-  subtasks: Subtask[];
   /** 同一列表内的排序序号，从 0 递增 */
   position: number;
   /** V0.11：所属重复配置 id；非空表示这张任务由重复任务滚动而来 */
@@ -592,7 +590,6 @@ export type CardPatch = Partial<
     | 'completed'
     | 'listId'
     | 'labels'
-    | 'subtasks'
   >
 >;
 
@@ -623,8 +620,6 @@ export interface NewCardInput {
   priority?: Priority | null;
   accent?: BoardColor | null;
   labels?: string[];
-  /** @deprecated V0.14.0：旧接口字段，新代码改用 parentCardId */
-  subtasks?: Subtask[];
 }
 
 export interface MoveCardInput {

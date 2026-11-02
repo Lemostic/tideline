@@ -1257,6 +1257,24 @@ async function seedDemoIfNeeded(): Promise<boolean> {
     const snapshot = await api.getSnapshot();
     if (snapshot.boards.length > 0) return false;
 
+    /** V0.14.0：演示数据里的子任务是真实卡片，先建父任务再逐条挂子任务。 */
+    const addSubtasks = async (
+      parent: Card,
+      items: Array<{ title: string; done?: boolean }>,
+    ) => {
+      for (const item of items) {
+        const child = await api.createCard({
+          boardId: parent.boardId,
+          listId: parent.listId,
+          parentCardId: parent.id,
+          title: item.title,
+        });
+        if (item.done) {
+          await api.updateCard({ id: child.id, patch: { completed: true } });
+        }
+      }
+    };
+
     const product = await api.createBoard({
       title: '产品发布 · V0.2',
       color: 'blue',
@@ -1268,7 +1286,7 @@ async function seedDemoIfNeeded(): Promise<boolean> {
     const productDoing = await api.createList({ boardId: product.id, title: '进行中' });
     const productDone = await api.createList({ boardId: product.id, title: '已完成' });
 
-    await api.createCard({
+    const dbCard = await api.createCard({
       boardId: product.id,
       listId: productTodo.id,
       title: '补充本地数据库索引',
@@ -1278,13 +1296,13 @@ async function seedDemoIfNeeded(): Promise<boolean> {
       dueDate: dateKeyOffset(-2),
       priority: 'high',
       labels: ['研发', '性能'],
-      subtasks: [
-        { id: 's_db_1', title: '排查慢查询', done: true },
-        { id: 's_db_2', title: '写索引迁移脚本', done: false },
-        { id: 's_db_3', title: '压测验证', done: false },
-      ],
     });
-    await api.createCard({
+    await addSubtasks(dbCard, [
+      { title: '排查慢查询', done: true },
+      { title: '写索引迁移脚本' },
+      { title: '压测验证' },
+    ]);
+    const docCard = await api.createCard({
       boardId: product.id,
       listId: productTodo.id,
       title: '编写 V0.2 发布说明',
@@ -1293,11 +1311,11 @@ async function seedDemoIfNeeded(): Promise<boolean> {
       dueDate: dateKeyOffset(6),
       priority: 'medium',
       labels: ['文档'],
-      subtasks: [
-        { id: 's_doc_1', title: '整理功能清单', done: true },
-        { id: 's_doc_2', title: '补截图与动图', done: false },
-      ],
     });
+    await addSubtasks(docCard, [
+      { title: '整理功能清单', done: true },
+      { title: '补截图与动图' },
+    ]);
     await api.createCard({
       boardId: product.id,
       listId: productTodo.id,
@@ -1307,7 +1325,7 @@ async function seedDemoIfNeeded(): Promise<boolean> {
       dueDate: dateKeyOffset(12),
       labels: ['研发'],
     });
-    await api.createCard({
+    const tableCard = await api.createCard({
       boardId: product.id,
       listId: productDoing.id,
       title: '实现表格视图',
@@ -1316,13 +1334,13 @@ async function seedDemoIfNeeded(): Promise<boolean> {
       dueDate: dateKeyOffset(0),
       priority: 'high',
       labels: ['研发', '体验'],
-      subtasks: [
-        { id: 's_table_1', title: '字段表格', done: true },
-        { id: 's_table_2', title: '行内编辑', done: true },
-        { id: 's_table_3', title: '筛选与排序', done: false },
-      ],
     });
-    await api.createCard({
+    await addSubtasks(tableCard, [
+      { title: '字段表格', done: true },
+      { title: '行内编辑', done: true },
+      { title: '筛选与排序' },
+    ]);
+    const sqliteCard = await api.createCard({
       boardId: product.id,
       listId: productDoing.id,
       title: '接入 SQLite 持久化',
@@ -1331,17 +1349,17 @@ async function seedDemoIfNeeded(): Promise<boolean> {
       dueDate: dateKeyOffset(2),
       priority: 'medium',
       labels: ['研发', '数据'],
-      subtasks: [{ id: 's_db_4', title: '建表与迁移', done: true }],
     });
-    await api.createCard({
+    await addSubtasks(sqliteCard, [{ title: '建表与迁移', done: true }]);
+    const archCard = await api.createCard({
       boardId: product.id,
       listId: productDone.id,
       title: '确定技术选型',
       description: 'Tauri 2 + React + TypeScript，本地优先。',
       priority: 'low',
       labels: ['决策'],
-      subtasks: [{ id: 's_arch_1', title: '对比 Electron / Tauri', done: true }],
     });
+    await addSubtasks(archCard, [{ title: '对比 Electron / Tauri', done: true }]);
     const doneCard = await api.createCard({
       boardId: product.id,
       listId: productDone.id,
@@ -1401,7 +1419,7 @@ async function seedDemoIfNeeded(): Promise<boolean> {
       listId: contentIdeas.id,
       title: '整理 10 个看板工具的使用场景',
     });
-    await api.createCard({
+    const postCard = await api.createCard({
       boardId: content.id,
       listId: contentWriting.id,
       title: '写一篇 V0.2 开发复盘',
@@ -1410,12 +1428,12 @@ async function seedDemoIfNeeded(): Promise<boolean> {
       dueDate: dateKeyOffset(5),
       priority: 'high',
       labels: ['写作'],
-      subtasks: [
-        { id: 's_post_1', title: '列提纲', done: true },
-        { id: 's_post_2', title: '写完初稿', done: false },
-        { id: 's_post_3', title: '配图与校对', done: false },
-      ],
     });
+    await addSubtasks(postCard, [
+      { title: '列提纲', done: true },
+      { title: '写完初稿' },
+      { title: '配图与校对' },
+    ]);
     const published = await api.createCard({
       boardId: content.id,
       listId: contentDone.id,

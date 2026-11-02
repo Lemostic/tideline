@@ -147,6 +147,5 @@ describe('任务树（V0.14.0 浏览器模式）', () => {
     );
     expect(children.map((card) => card.title).sort()).toEqual(['旧子1', '旧子2']);
     expect(children.find((card) => card.title === '旧子2')?.completed).toBe(true);
-    expect(snapshot.cards.find((card) => card.id === 'legacy_parent')?.subtasks).toEqual([]);
   });
 });

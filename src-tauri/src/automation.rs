@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, Row};
 use crate::models::{
     AutomationRule, AutomationRulePatch, Card, CardActivity, NewAutomationRuleInput,
     NewRecurrenceInput, Priority, Recurrence, RecurrenceFrequency, RecurrencePatch, RuleAction,
-    RuleActionKind, RuleTrigger, Subtask,
+    RuleActionKind, RuleTrigger,
 };
 use crate::repo::{self, DbResult};
 
@@ -161,7 +161,8 @@ pub struct RuleOutcome {
     pub due_date: Option<Option<String>>,
     pub priority: Option<Option<Priority>>,
     pub labels: Option<Vec<String>>,
-    pub subtasks: Option<Vec<Subtask>>,
+    /// V0.14.0：追加子任务改为返回待创建的子任务标题（子任务是真实卡片）。
+    pub subtask_titles: Option<Vec<String>>,
 }
 
 /// 校验规则动作；合法返回 None，非法返回可读错误。
@@ -214,14 +215,13 @@ pub fn validate_rule_actions(actions: &[RuleAction]) -> Option<String> {
 /// 计算规则动作对任务产生的字段变更（只含真正变化的字段）。
 pub fn apply_rule_actions(
     labels: &[String],
-    subtasks: &[Subtask],
     priority: Option<Priority>,
     actions: &[RuleAction],
     today: &str,
 ) -> RuleOutcome {
     let mut outcome = RuleOutcome::default();
     let mut next_labels = labels.to_vec();
-    let mut next_subtasks = subtasks.to_vec();
+    let mut next_subtask_titles: Vec<String> = Vec::new();
 
     for action in actions {
         match action.kind {
@@ -248,13 +248,9 @@ pub fn apply_rule_actions(
                 for title in &action.subtasks {
                     let value = title.trim();
                     if !value.is_empty()
-                        && !next_subtasks.iter().any(|item| item.title == value)
+                        && !next_subtask_titles.iter().any(|item| item == value)
                     {
-                        next_subtasks.push(Subtask {
-                            id: crate::repo::create_id("s"),
-                            title: value.to_string(),
-                            done: false,
-                        });
+                        next_subtask_titles.push(value.to_string());
                     }
                 }
             }
@@ -264,8 +260,8 @@ pub fn apply_rule_actions(
     if next_labels.len() != labels.len() {
         outcome.labels = Some(next_labels);
     }
-    if next_subtasks.len() != subtasks.len() {
-        outcome.subtasks = Some(next_subtasks);
+    if !next_subtask_titles.is_empty() {
+        outcome.subtask_titles = Some(next_subtask_titles);
     }
     let _ = priority;
     outcome
@@ -773,11 +769,10 @@ pub fn run_rules(
 
     // 多条规则依次生效：后一条在前一条的结果上继续叠加。
     let mut labels = card.labels.clone();
-    let mut subtasks = card.subtasks.clone();
     let mut priority = card.priority;
 
     for rule in matching {
-        let outcome = apply_rule_actions(&labels, &subtasks, priority, &rule.actions, today);
+        let outcome = apply_rule_actions(&labels, priority, &rule.actions, today);
         let mut patch_parts: Vec<(String, String)> = Vec::new();
         if let Some(due_date) = outcome.due_date.clone() {
             patch_parts.push((
@@ -795,15 +790,8 @@ pub fn run_rules(
         if let Some(labels) = outcome.labels.clone() {
             patch_parts.push(("labels".to_string(), labels.join(",")));
         }
-        if let Some(subtasks) = outcome.subtasks.clone() {
-            patch_parts.push((
-                "subtasks".to_string(),
-                subtasks
-                    .iter()
-                    .map(|item| item.title.clone())
-                    .collect::<Vec<String>>()
-                    .join(","),
-            ));
+        if let Some(titles) = outcome.subtask_titles.clone() {
+            patch_parts.push(("subtasks".to_string(), titles.join(",")));
         }
         if patch_parts.is_empty() {
             continue;
@@ -811,6 +799,18 @@ pub fn run_rules(
 
         match apply_rule_patch(conn, &card.id, &outcome) {
             Ok(()) => {
+                // V0.14.0：追加子任务改为创建真实子任务卡片。
+                if let Some(titles) = outcome.subtask_titles.clone() {
+                    if let Err(message) = create_rule_subtasks(conn, card, &titles) {
+                        conn.execute(
+                            "UPDATE automation_rules SET last_error = ?1 WHERE id = ?2",
+                            params![message, &rule.id],
+                        )
+                        .map_err(|error| error.to_string())?;
+                        result.error = Some(message);
+                        continue;
+                    }
+                }
                 for (field, value) in &patch_parts {
                     insert_activity(conn, &card.id, "updated", field, "", value)?;
                 }
@@ -821,9 +821,6 @@ pub fn run_rules(
                 }
                 if let Some(value) = outcome.labels.clone() {
                     labels = value;
-                }
-                if let Some(value) = outcome.subtasks.clone() {
-                    subtasks = value;
                 }
                 // 规则执行成功，清掉上次的失败提示
                 conn.execute(
@@ -858,10 +855,6 @@ fn apply_rule_patch(
         Some(labels) => serde_json::to_string(labels).map_err(|error| error.to_string())?,
         None => String::new(),
     };
-    let subtasks_json = match &outcome.subtasks {
-        Some(subtasks) => serde_json::to_string(subtasks).map_err(|error| error.to_string())?,
-        None => String::new(),
-    };
     let due_touched = i64::from(outcome.due_date.is_some());
     let due_value: Option<String> = outcome.due_date.clone().flatten();
     let priority_touched = i64::from(outcome.priority.is_some());
@@ -871,15 +864,13 @@ fn apply_rule_patch(
         .flatten()
         .map(|item| item.as_str().to_string());
     let labels_touched = i64::from(outcome.labels.is_some());
-    let subtasks_touched = i64::from(outcome.subtasks.is_some());
     conn.execute(
         "UPDATE cards SET \
          due_date = CASE WHEN ?1 = 0 THEN due_date ELSE ?2 END, \
          priority = CASE WHEN ?3 = 0 THEN priority ELSE ?4 END, \
          labels = CASE WHEN ?5 = 0 THEN labels ELSE ?6 END, \
-         subtasks = CASE WHEN ?7 = 0 THEN subtasks ELSE ?8 END, \
-         updated_at = ?9 \
-         WHERE id = ?10",
+         updated_at = ?7 \
+         WHERE id = ?8",
         params![
             due_touched,
             due_value,
@@ -887,13 +878,77 @@ fn apply_rule_patch(
             priority_value,
             labels_touched,
             labels_json,
-            subtasks_touched,
-            subtasks_json,
             repo::now_iso(),
             card_id,
         ],
     )
     .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// V0.14.0：规则「追加子任务」创建真实子任务卡片。
+///
+/// 同名（未删除）子任务已存在时跳过；子任务与父任务同看板同列表，位置追加到末尾。
+fn create_rule_subtasks(
+    conn: &Connection,
+    card: &Card,
+    titles: &[String],
+) -> Result<(), String> {
+    let mut existing_titles: Vec<String> = {
+        let mut statement = conn
+            .prepare(
+                "SELECT title FROM cards WHERE parent_card_id = ?1 AND deleted_at IS NULL",
+            )
+            .map_err(|error| error.to_string())?;
+        let mapped = statement
+            .query_map([&card.id], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        mapped
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())?
+    };
+    let mut position: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM cards \
+             WHERE parent_card_id = ?1 AND deleted_at IS NULL",
+            [&card.id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let now = repo::now_iso();
+    for title in titles {
+        let value = title.trim();
+        if value.is_empty() || existing_titles.iter().any(|item| item == value) {
+            continue;
+        }
+        let child_id = repo::create_id("c");
+        conn.execute(
+            "INSERT INTO cards \
+             (id, board_id, list_id, parent_card_id, title, description, completed, \
+              labels, subtasks, position, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, '', 0, '[]', '[]', ?6, ?7, ?7)",
+            params![
+                child_id,
+                &card.board_id,
+                &card.list_id,
+                &card.id,
+                value,
+                position,
+                now,
+            ],
+        )
+        .map_err(|error| format!("创建子任务「{value}」失败：{error}"))?;
+        insert_activity(conn, &child_id, "created", "", "", "")?;
+        existing_titles.push(value.to_string());
+        position += 1;
+    }
+    if position > 0 {
+        conn.execute(
+            "UPDATE boards SET updated_at = ?1 WHERE id = ?2",
+            params![now, &card.board_id],
+        )
+        .map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 
@@ -1088,11 +1143,6 @@ mod tests {
     #[test]
     fn rule_actions_only_report_real_changes() {
         let labels = vec!["研发".to_string()];
-        let subtasks = vec![Subtask {
-            id: "s1".to_string(),
-            title: "写文档".to_string(),
-            done: false,
-        }];
         let actions = vec![RuleAction {
             kind: RuleActionKind::AddLabels,
             offset_days: 0,
@@ -1100,12 +1150,12 @@ mod tests {
             labels: vec!["研发".to_string(), "高风险".to_string()],
             subtasks: Vec::new(),
         }];
-        let outcome = apply_rule_actions(&labels, &subtasks, None, &actions, "2026-01-01");
+        let outcome = apply_rule_actions(&labels, None, &actions, "2026-01-01");
         assert_eq!(
             outcome.labels,
             Some(vec!["研发".to_string(), "高风险".to_string()])
         );
-        assert_eq!(outcome.subtasks, None);
+        assert_eq!(outcome.subtask_titles, None);
     }
 
     #[test]
@@ -1496,8 +1546,14 @@ mod tests {
         .expect("移动任务");
         let card = crate::repo::get_card(&conn, &card_id).expect("读取任务");
         assert_eq!(card.labels, vec!["研发".to_string()]);
-        assert_eq!(card.subtasks.len(), 1);
-        assert_eq!(card.subtasks[0].title, "补充数据");
+        let snapshot = crate::repo::get_snapshot(&conn).expect("快照");
+        let children: Vec<_> = snapshot
+            .cards
+            .iter()
+            .filter(|item| item.parent_card_id.as_deref() == Some(card_id.as_str()))
+            .collect();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].title, "补充数据");
     }
 
     #[test]
