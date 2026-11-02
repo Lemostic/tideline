@@ -164,6 +164,8 @@ pub struct List {    pub id: String,
 }
 
 /// 任务内的子任务（清单项），在数据库里以 JSON 文本存在 `cards.subtasks`。
+/// 子任务清单项（V0.1）：V0.14.0 起子任务是真实卡片（`parent_card_id`），
+/// 该结构仅保留给旧数据库/旧备份迁移使用。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Subtask {
@@ -171,6 +173,9 @@ pub struct Subtask {
     pub title: String,
     pub done: bool,
 }
+
+/// 任务树技术层级上限：防止脏数据/异常备份构造超深任务链。
+pub const MAX_TASK_DEPTH: usize = 100;
 
 /// 重复频率（V0.11）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -284,6 +289,9 @@ pub struct Card {
     pub id: String,
     pub board_id: String,
     pub list_id: String,
+    /// V0.14.0：父任务 id；None 表示主任务（任务树的根）。
+    #[serde(default)]
+    pub parent_card_id: Option<String>,
     pub title: String,
     pub description: String,
     pub due_date: Option<String>,
@@ -1043,6 +1051,9 @@ pub struct UpdateListInput {
 pub struct NewCardInput {
     pub board_id: String,
     pub list_id: String,
+    /// V0.14.0：父任务 id；提供时创建子任务（必须与父任务同看板、同列表）。
+    #[serde(default)]
+    pub parent_card_id: Option<String>,
     pub title: String,
     #[serde(default)]
     pub description: Option<String>,
@@ -1830,6 +1841,7 @@ mod tests {
             id: "c_1".to_string(),
             board_id: "b_1".to_string(),
             list_id: "l_1".to_string(),
+            parent_card_id: None,
             title: "任务".to_string(),
             description: "".to_string(),
             due_date: Some("2026-01-10".to_string()),

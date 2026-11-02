@@ -386,6 +386,9 @@ pub fn create_recurrence(
     input: NewRecurrenceInput,
 ) -> DbResult<Recurrence> {
     let card = repo::get_card(conn, &input.card_id)?;
+    if card.parent_card_id.is_some() {
+        return Err("子任务不支持重复任务".to_string());
+    }
     if card.deleted_at.is_some() {
         return Err("回收站中的任务不能设置重复".to_string());
     }
@@ -1158,6 +1161,7 @@ mod tests {
             crate::models::NewCardInput {
                 board_id: board.id.clone(),
                 list_id: todo.id.clone(),
+                parent_card_id: None,
                 title: "写周报".to_string(),
                 description: None,
                 due_date: Some("2026-01-05".to_string()),

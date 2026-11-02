@@ -430,6 +430,7 @@ mod tests {
             crate::models::NewCardInput {
                 board_id: board.id.clone(),
                 list_id: list.id.clone(),
+                parent_card_id: None,
                 title: title.to_string(),
                 description: None,
                 due_date: Some(due_date.to_string()),

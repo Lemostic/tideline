@@ -6,7 +6,10 @@
 //! V0.2 起任务表新增 `start_date / labels / subtasks` 三列，V0.3 再新增 `deleted_at`
 //! 软删除列：新库直接按最新结构建表，旧库（V0.1 / V0.2 已有用户数据）在启动时按列存在性
 //! 做幂等 `ALTER TABLE` 迁移，不重建表。V0.4 新增 `card_dependencies` 依赖表。
-//! 迁移完成后写入 `PRAGMA user_version = 18`。
+//! 迁移完成后写入 `PRAGMA user_version = 19`。
+//!
+//! V0.14.0：`cards` 增加 `parent_card_id`（自引用，NULL = 主任务），子任务成为
+//! 真实卡片；旧库的 `cards.subtasks` JSON 在迁移时展开为子卡片并清空。
 //!
 //! V0.13.2 为 `overtime_records` 增加 `absence_reason` 列（未出勤原因），
 //! 旧库按列存在性幂等补齐；`status` 新增 `absent` 取值，无需改表约束。
@@ -125,6 +128,7 @@ CREATE TABLE IF NOT EXISTS cards (
     id          TEXT PRIMARY KEY NOT NULL,
     board_id    TEXT NOT NULL REFERENCES boards (id) ON DELETE CASCADE,
     list_id     TEXT NOT NULL REFERENCES lists (id) ON DELETE CASCADE,
+    parent_card_id TEXT REFERENCES cards (id) ON DELETE CASCADE,
     title       TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     due_date    TEXT,
@@ -458,7 +462,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 18;
+const SCHEMA_VERSION: i64 = 19;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -556,6 +560,12 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
             "absence_reason",
             "ALTER TABLE overtime_records ADD COLUMN absence_reason TEXT NOT NULL DEFAULT ''",
         ),
+        // V0.14.0：任务树父任务列（NULL = 主任务）。
+        (
+            "cards",
+            "parent_card_id",
+            "ALTER TABLE cards ADD COLUMN parent_card_id TEXT REFERENCES cards (id) ON DELETE CASCADE",
+        ),
         (
             "performance_records",
             "project_id",
@@ -631,9 +641,91 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
     ensure_notification_settings(connection)?;
     // V0.13.1：既有看板补齐内置保存视图（全部 / 我的任务 / 最近更新）。
     crate::repo::backfill_builtin_saved_views(connection)?;
+    // V0.14.0：任务树索引与旧子任务 JSON 展开（列已在上方按存在性补齐）。
+    connection
+        .execute_batch("CREATE INDEX IF NOT EXISTS idx_cards_parent ON cards (parent_card_id);")
+        .map_err(|error| format!("创建 cards.parent_card_id 索引失败：{error}"))?;
+    expand_legacy_subtasks(connection)?;
     connection
         .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|error| format!("写入 user_version 失败：{error}"))?;
+    Ok(())
+}
+
+/// V0.14.0：把旧 `cards.subtasks` JSON 展开为真实子卡片，并清空旧 JSON。
+///
+/// 幂等：子卡片 id 使用 `sub_<父任务id>_<序号>`，重复执行时 `INSERT OR IGNORE`
+/// 不会重复插入，父任务 JSON 清空后不再命中。整个展开在一个事务中完成。
+fn expand_legacy_subtasks(connection: &Connection) -> Result<(), String> {
+    let rows: Vec<(String, String, String, String, String)> = {
+        let mut statement = connection
+            .prepare(
+                "SELECT id, board_id, list_id, subtasks, updated_at FROM cards \
+                 WHERE parent_card_id IS NULL AND subtasks != '[]'",
+            )
+            .map_err(|error| format!("读取旧子任务失败：{error}"))?;
+        let mapped = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(|error| format!("读取旧子任务失败：{error}"))?;
+        let collected = mapped
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| format!("读取旧子任务失败：{error}"))?;
+        collected
+    };
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    connection
+        .execute_batch("BEGIN IMMEDIATE")
+        .map_err(|error| format!("迁移 cards.subtasks 失败：{error}"))?;
+    let migrate = || -> Result<(), String> {
+        for (parent_id, board_id, list_id, subtasks_json, updated_at) in &rows {
+            let subtasks: Vec<crate::models::Subtask> = serde_json::from_str(subtasks_json)
+                .map_err(|error| format!("迁移 cards.subtasks 失败：{parent_id} 的清单不是有效 JSON（{error}）"))?;
+            for (index, subtask) in subtasks.iter().enumerate() {
+                let child_id = format!("sub_{parent_id}_{index}");
+                connection
+                    .execute(
+                        "INSERT OR IGNORE INTO cards \
+                         (id, board_id, list_id, parent_card_id, title, description, completed, \
+                          labels, subtasks, position, created_at, updated_at) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, '', ?6, '[]', '[]', ?7, ?8, ?8)",
+                        rusqlite::params![
+                            child_id,
+                            board_id,
+                            list_id,
+                            parent_id,
+                            subtask.title,
+                            i64::from(subtask.done),
+                            index as i64,
+                            updated_at,
+                        ],
+                    )
+                    .map_err(|error| format!("迁移 cards.subtasks 失败：写入子任务出错（{error}）"))?;
+            }
+            connection
+                .execute("UPDATE cards SET subtasks = '[]' WHERE id = ?1", [parent_id])
+                .map_err(|error| format!("迁移 cards.subtasks 失败：清空父任务清单出错（{error}）"))?;
+        }
+        Ok(())
+    };
+
+    if let Err(error) = migrate() {
+        let _ = connection.execute_batch("ROLLBACK");
+        return Err(error);
+    }
+    connection
+        .execute_batch("COMMIT")
+        .map_err(|error| format!("迁移 cards.subtasks 失败：提交事务出错（{error}）"))?;
     Ok(())
 }
 
@@ -1100,6 +1192,67 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
     }
 
+    /// V0.14.0：旧库（v18）没有 `parent_card_id` 列时，启动流程补列并把
+    /// `cards.subtasks` JSON 展开为真实子卡片，重复迁移保持幂等。
+    #[test]
+    fn v18_database_gains_parent_card_id_and_expands_legacy_subtasks() {
+        let connection = Connection::open_in_memory().expect("memory database");
+        // 模拟 v18 旧库：从建表语句中剔除 V0.14.0 新增的列。
+        let v18_schema = SCHEMA.replace(
+            "    parent_card_id TEXT REFERENCES cards (id) ON DELETE CASCADE,\n",
+            "",
+        );
+        assert!(!v18_schema.contains("parent_card_id"));
+        connection.execute_batch(&v18_schema).expect("create v18 schema");
+        connection
+            .execute_batch(
+                "INSERT INTO boards (id, title, created_at, updated_at) VALUES ('b', 'b', 'now', 'now');
+                 INSERT INTO lists (id, board_id, title, created_at) VALUES ('l', 'b', 'l', 'now');
+                 INSERT INTO cards (id, board_id, list_id, title, subtasks, created_at, updated_at)
+                   VALUES ('c', 'b', 'l', '父任务',
+                     '[{\"id\":\"s1\",\"title\":\"子1\",\"done\":false},{\"id\":\"s2\",\"title\":\"子2\",\"done\":true}]',
+                     'now', 'now');
+                 PRAGMA user_version = 18;",
+            )
+            .expect("seed v18");
+
+        init(&connection).expect("迁移应成功");
+        init(&connection).expect("重复迁移应幂等");
+
+        let rows: Vec<(String, Option<String>, i64)> = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT title, parent_card_id, completed FROM cards \
+                     WHERE parent_card_id = 'c' ORDER BY position ASC",
+                )
+                .expect("查询子任务");
+            let mapped = statement
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .expect("读取子任务");
+            mapped
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .expect("收集子任务")
+        };
+        assert_eq!(
+            rows,
+            vec![
+                ("子1".to_string(), Some("c".to_string()), 0),
+                ("子2".to_string(), Some("c".to_string()), 1),
+            ]
+        );
+
+        let subtasks: String = connection
+            .query_row("SELECT subtasks FROM cards WHERE id = 'c'", [], |row| row.get(0))
+            .expect("读取父任务 subtasks");
+        assert_eq!(subtasks, "[]");
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user_version");
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
     /// V0.13.2：旧库（v17）的 `overtime_records` 没有 `absence_reason` 列时，
     /// 启动流程幂等补列、保留已有加班记录，并把 `user_version` 升到 18。
     #[test]
@@ -1424,16 +1577,27 @@ CREATE TABLE cards (
         assert_eq!(title, "V0.2 任务");
         assert_eq!(start_date.as_deref(), Some("2026-02-01"));
         assert_eq!(labels, r#"["研发"]"#);
-        assert_eq!(subtasks, r#"[{"id":"s_1","title":"步骤","done":true}]"#);
+        // V0.14.0：旧 subtasks JSON 已展开为真实子卡片，父任务 JSON 清空。
+        assert_eq!(subtasks, "[]");
         assert_eq!(deleted_at, None);
+        let (child_title, child_parent, child_done): (String, Option<String>, i64) = connection
+            .query_row(
+                "SELECT title, parent_card_id, completed FROM cards WHERE id = 'sub_c_1_0'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("读取展开后的子任务");
+        assert_eq!(child_title, "步骤");
+        assert_eq!(child_parent.as_deref(), Some("c_1"));
+        assert_eq!(child_done, 1);
         drop(connection);
 
-        // 再次 open：迁移幂等。
+        // 再次 open：迁移幂等，子任务不会重复展开。
         let connection = open(&path).expect("重复打开 V0.2 旧库");
         let count: i64 = connection
             .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
             .expect("统计任务");
-        assert_eq!(count, 1);
+        assert_eq!(count, 2);
         drop(connection);
         remove_db_files(&path);
     }

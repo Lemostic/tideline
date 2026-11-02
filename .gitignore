@@ -32,3 +32,7 @@ coverage/
 
 # 本地临时文件
 paseo.json
+
+# 本地 cargo 镜像配置（构建环境临时文件）
+.cargo/
+

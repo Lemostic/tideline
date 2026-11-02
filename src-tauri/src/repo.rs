@@ -128,7 +128,7 @@ fn subtasks_from_json(raw: &str) -> Vec<Subtask> {
 
 const BOARD_COLUMNS: &str = "id, title, description, color, starred, label_colors, created_at, updated_at";
 const LIST_COLUMNS: &str = "id, board_id, title, color, wip_limit, position, created_at";
-const CARD_COLUMNS: &str = "id, board_id, list_id, title, description, due_date, start_date, estimated_minutes, actual_minutes, priority, accent, completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, created_at, updated_at";
+const CARD_COLUMNS: &str = "id, board_id, list_id, parent_card_id, title, description, due_date, start_date, estimated_minutes, actual_minutes, priority, accent, completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, created_at, updated_at";
 const INBOX_COLUMNS: &str = "id, content, created_at";
 
 fn row_to_board(row: &Row<'_>) -> rusqlite::Result<Board> {
@@ -166,6 +166,7 @@ fn row_to_card(row: &Row<'_>) -> rusqlite::Result<Card> {
         id: row.get("id")?,
         board_id: row.get("board_id")?,
         list_id: row.get("list_id")?,
+        parent_card_id: row.get("parent_card_id")?,
         title: row.get("title")?,
         description: row.get("description")?,
         due_date: row.get("due_date")?,
@@ -267,7 +268,8 @@ fn normalize_card_positions(conn: &Connection, list_id: &str) -> DbResult<()> {
     let ids: Vec<String> = {
         let mut statement = conn
             .prepare(
-                "SELECT id FROM cards WHERE list_id = ?1 AND deleted_at IS NULL \
+                "SELECT id FROM cards WHERE list_id = ?1 AND parent_card_id IS NULL \
+                 AND deleted_at IS NULL \
                  ORDER BY position ASC, created_at ASC, id ASC",
             )
             .map_err(db_err)?;
@@ -2355,21 +2357,100 @@ fn validate_card_minutes(card: &Card) -> DbResult<()> {
     Ok(())
 }
 
+/// 递归子树 id（含自身）。
+fn subtree_ids(conn: &Connection, root_id: &str) -> DbResult<Vec<String>> {
+    let mut statement = conn
+        .prepare(
+            "WITH RECURSIVE subtree(id) AS ( \
+                 SELECT ?1 \
+                 UNION ALL \
+                 SELECT cards.id FROM cards JOIN subtree ON cards.parent_card_id = subtree.id \
+             ) SELECT id FROM subtree",
+        )
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([root_id], |row| row.get::<_, String>(0))
+        .map_err(db_err)?;
+    rows.collect::<rusqlite::Result<Vec<String>>>()
+        .map_err(db_err)
+}
+
+/// 沿父链计算深度（主任务为 0）；超过技术上限直接报错，防止脏数据成环。
+fn card_depth(conn: &Connection, card_id: &str) -> DbResult<usize> {
+    let mut depth = 0usize;
+    let mut current = Some(card_id.to_string());
+    while let Some(id) = current {
+        if depth > crate::models::MAX_TASK_DEPTH {
+            return Err("任务层级过深".to_string());
+        }
+        current = conn
+            .query_row(
+                "SELECT parent_card_id FROM cards WHERE id = ?1",
+                [&id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(db_err)?
+            .flatten();
+        depth += 1;
+    }
+    Ok(depth.saturating_sub(1))
+}
+
+/// 主任务移动列表时，把整棵子树的 list_id 一起同步。
+fn sync_subtree_list(conn: &Connection, root_id: &str, list_id: &str) -> DbResult<()> {
+    for id in subtree_ids(conn, root_id)?.iter().skip(1) {
+        conn.execute(
+            "UPDATE cards SET list_id = ?1 WHERE id = ?2",
+            params![list_id, id],
+        )
+        .map_err(db_err)?;
+    }
+    Ok(())
+}
+
 pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card> {
     let tx = conn.transaction().map_err(db_err)?;
-    get_list(&tx, &input.list_id)?;    let position: i64 = tx
-        .query_row(
+    get_list(&tx, &input.list_id)?;
+    let parent_card_id = input.parent_card_id.clone();
+    if let Some(parent_id) = &parent_card_id {
+        let parent = get_card(&tx, parent_id)?;
+        if parent.board_id != input.board_id {
+            return Err("子任务必须与父任务在同一看板".to_string());
+        }
+        if parent.list_id != input.list_id {
+            return Err("子任务必须跟随父任务列表".to_string());
+        }
+        if parent.deleted_at.is_some() {
+            return Err("父任务在回收站中，不能添加子任务".to_string());
+        }
+        if card_depth(&tx, &parent.id)? + 1 > crate::models::MAX_TASK_DEPTH {
+            return Err("任务层级过深".to_string());
+        }
+    }
+    let position: i64 = if let Some(parent_id) = &parent_card_id {
+        tx.query_row(
             "SELECT COALESCE(MAX(position), -1) + 1 FROM cards \
-             WHERE list_id = ?1 AND deleted_at IS NULL",
+             WHERE parent_card_id = ?1 AND deleted_at IS NULL",
+            [parent_id],
+            |row| row.get(0),
+        )
+        .map_err(db_err)?
+    } else {
+        tx.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM cards \
+             WHERE list_id = ?1 AND parent_card_id IS NULL AND deleted_at IS NULL",
             [&input.list_id],
             |row| row.get(0),
         )
-        .map_err(db_err)?;
+        .map_err(db_err)?
+    };
     let now = now_iso();
     let card = Card {
         id: create_id("c"),
         board_id: input.board_id,
         list_id: input.list_id,
+        parent_card_id,
         title: fallback_trimmed(&input.title, "未命名任务"),
         description: trimmed_or_empty(input.description),
         due_date: input.due_date,
@@ -2393,13 +2474,14 @@ pub fn create_card(conn: &mut Connection, input: NewCardInput) -> DbResult<Card>
     let subtasks_json = subtasks_to_json(&card.subtasks)?;
     tx.execute(
         "INSERT INTO cards \
-         (id, board_id, list_id, title, description, due_date, start_date, priority, accent, completed, \
+         (id, board_id, list_id, parent_card_id, title, description, due_date, start_date, priority, accent, completed, \
          labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, estimated_minutes, actual_minutes, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, NULL, NULL, ?14, ?15, ?16, ?17)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NULL, NULL, NULL, ?15, ?16, ?17, ?18)",
         params![
             &card.id,
             &card.board_id,
             &card.list_id,
+            &card.parent_card_id,
             &card.title,
             &card.description,
             &card.due_date,
@@ -2462,6 +2544,11 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
     if let Some(subtasks) = input.patch.subtasks {
         card.subtasks = subtasks;
     }
+    if let Some(next_list_id) = input.patch.list_id.as_ref() {
+        if card.parent_card_id.is_some() && next_list_id != &card.list_id {
+            return Err("子任务不能单独移动列表".to_string());
+        }
+    }
     if let Some(next_list_id) = input.patch.list_id {
         if next_list_id != card.list_id {
             let target = get_list(&tx, &next_list_id)?;
@@ -2476,11 +2563,13 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
                 params![&card.list_id, &card.id],
             )
             .map_err(db_err)?;
+            // 主任务移动列表时，整棵子树一起跟随。
+            sync_subtree_list(&tx, &card.id, &card.list_id)?;
             normalize_card_positions(&tx, &old_list_id)?;
             card.position = tx
                 .query_row(
                     "SELECT COUNT(*) FROM cards WHERE list_id = ?1 AND id != ?2 \
-                     AND deleted_at IS NULL",
+                     AND parent_card_id IS NULL AND deleted_at IS NULL",
                     params![&card.list_id, &card.id],
                     |row| row.get(0),
                 )
@@ -2542,20 +2631,23 @@ pub fn update_card(conn: &mut Connection, input: UpdateCardInput) -> DbResult<Ca
 pub fn delete_card(conn: &mut Connection, input: IdInput) -> DbResult<()> {
     let tx = conn.transaction().map_err(db_err)?;
     let card = get_card(&tx, &input.id)?;
-    // 软删除：放进回收站，物理行保留；重复删除是无操作（对齐 localApi）。
+    // 软删除：整棵子树一起放进回收站，物理行保留；重复删除是无操作（对齐 localApi）。
     if card.deleted_at.is_none() {
         let now = now_iso();
-        tx.execute(
-            "UPDATE cards SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2",
-            params![&now, &card.id],
-        )
-        .map_err(db_err)?;
-        // 删除任务后，指向它的依赖边一并移除，避免其他任务被一个已不存在的任务阻塞。
-        tx.execute(
-            "DELETE FROM card_dependencies WHERE card_id = ?1 OR depends_on_card_id = ?1",
-            [&card.id],
-        )
-        .map_err(db_err)?;
+        let ids = subtree_ids(&tx, &card.id)?;
+        for id in &ids {
+            tx.execute(
+                "UPDATE cards SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2",
+                params![&now, id],
+            )
+            .map_err(db_err)?;
+            // 删除任务后，指向它的依赖边一并移除，避免其他任务被已删除任务阻塞。
+            tx.execute(
+                "DELETE FROM card_dependencies WHERE card_id = ?1 OR depends_on_card_id = ?1",
+                [id],
+            )
+            .map_err(db_err)?;
+        }
         normalize_card_positions(&tx, &card.list_id)?;
         touch_board(&tx, &card.board_id)?;
         record_card_event(&tx, &card.id, "deleted", "")?;
@@ -2590,21 +2682,51 @@ pub fn restore_card(conn: &mut Connection, input: IdInput) -> DbResult<Card> {
     if get_board(&tx, &card.board_id).is_err() || get_list(&tx, &card.list_id).is_err() {
         return Err("原列表已删除，无法恢复".to_string());
     }
+    let now = now_iso();
+    // 恢复仍被删除的祖先链（根 → 父），避免子任务恢复后悬空。
+    let mut ancestors = Vec::new();
+    let mut cursor = card.parent_card_id.clone();
+    while let Some(parent_id) = cursor {
+        let parent = get_card(&tx, &parent_id)?;
+        cursor = parent.parent_card_id.clone();
+        ancestors.push(parent);
+    }
+    ancestors.reverse();
+    for ancestor in ancestors {
+        if ancestor.deleted_at.is_some() {
+            tx.execute(
+                "UPDATE cards SET deleted_at = NULL, updated_at = ?1 WHERE id = ?2",
+                params![&now, &ancestor.id],
+            )
+            .map_err(db_err)?;
+            record_card_event(&tx, &ancestor.id, "restored", "")?;
+            touch_board(&tx, &ancestor.board_id)?;
+        }
+    }
+    // 恢复后追加到同级末尾（父任务不存在时即列表末尾）。
     let position: i64 = tx
         .query_row(
             "SELECT COALESCE(MAX(position), -1) + 1 FROM cards \
-             WHERE list_id = ?1 AND deleted_at IS NULL",
-            [&card.list_id],
+             WHERE list_id = ?1 AND parent_card_id IS ?2 AND deleted_at IS NULL AND id != ?3",
+            params![&card.list_id, &card.parent_card_id, &card.id],
             |row| row.get(0),
         )
         .map_err(db_err)?;
-    let now = now_iso();
+    let ids = subtree_ids(&tx, &card.id)?;
+    for id in &ids {
+        tx.execute(
+            "UPDATE cards SET deleted_at = NULL, updated_at = ?1 \
+             WHERE id = ?2 AND deleted_at IS NOT NULL",
+            params![&now, id],
+        )
+        .map_err(db_err)?;
+    }
     card.deleted_at = None;
     card.position = position;
     card.updated_at = now;
     tx.execute(
-        "UPDATE cards SET deleted_at = NULL, position = ?1, updated_at = ?2 WHERE id = ?3",
-        params![card.position, &card.updated_at, &card.id],
+        "UPDATE cards SET position = ?1 WHERE id = ?2",
+        params![card.position, &card.id],
     )
     .map_err(db_err)?;
     touch_board(&tx, &card.board_id)?;
@@ -2634,16 +2756,20 @@ pub fn empty_trash(conn: &mut Connection) -> DbResult<()> {
 pub fn move_card(conn: &mut Connection, input: MoveCardInput) -> DbResult<Card> {
     let tx = conn.transaction().map_err(db_err)?;
     let mut card = get_card(&tx, &input.card_id)?;
+    if card.parent_card_id.is_some() {
+        return Err("子任务不能单独移动列表".to_string());
+    }
     let target = get_list(&tx, &input.to_list_id)?;
     if target.board_id != card.board_id {
         return Err("不能跨看板移动任务".to_string());
     }
     let old_list_id = card.list_id.clone();
-    // 目标列表内除自身外的**活动**卡片，按 position 升序（回收站卡片不参与排序）。
+    // 目标列表内除自身外的**活动主任务**，按 position 升序（回收站与子任务不参与）。
     let mut ids: Vec<String> = {
         let mut statement = tx
             .prepare(
-                "SELECT id FROM cards WHERE list_id = ?1 AND id != ?2 AND deleted_at IS NULL \
+                "SELECT id FROM cards WHERE list_id = ?1 AND id != ?2 AND parent_card_id IS NULL \
+                 AND deleted_at IS NULL \
                  ORDER BY position ASC, created_at ASC, id ASC",
             )
             .map_err(db_err)?;
@@ -2672,6 +2798,8 @@ pub fn move_card(conn: &mut Connection, input: MoveCardInput) -> DbResult<Card> 
         params![&card.list_id, card.position, &card.updated_at, &card.id],
     )
     .map_err(db_err)?;
+    // 主任务移动列表时，整棵子树一起跟随。
+    sync_subtree_list(&tx, &card.id, &card.list_id)?;
     if old_list_id != card.list_id {
         normalize_card_positions(&tx, &old_list_id)?;
     }
@@ -2753,6 +2881,7 @@ pub fn convert_inbox_item(conn: &mut Connection, input: ConvertInboxInput) -> Db
         id: create_id("c"),
         board_id: input.board_id,
         list_id: target_list_id,
+        parent_card_id: None,
         title,
         description,
         due_date: None,
@@ -5664,6 +5793,152 @@ mod tests {
         )
         .expect("改回已出勤并清理原因");
         assert_eq!(done_record.absence_reason, "");
+    }
+
+    // -----------------------------------------------------------------------
+    // 任务树（V0.14.0）
+    // -----------------------------------------------------------------------
+
+    fn new_subtask(
+        conn: &mut Connection,
+        board_id: &str,
+        list_id: &str,
+        title: &str,
+        parent_id: &str,
+    ) -> Card {
+        create_card(
+            conn,
+            NewCardInput {
+                board_id: board_id.to_string(),
+                list_id: list_id.to_string(),
+                title: title.to_string(),
+                parent_card_id: Some(parent_id.to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("创建子任务失败")
+    }
+
+    #[test]
+    fn subtask_tree_create_move_and_validate() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let list = new_list(&mut conn, &board.id, "待办");
+        let other = new_list(&mut conn, &board.id, "进行中");
+        let parent = new_card(&mut conn, &board.id, &list.id, "父任务");
+        let child = new_subtask(&mut conn, &board.id, &list.id, "子任务", &parent.id);
+        let grand = new_subtask(&mut conn, &board.id, &list.id, "孙任务", &child.id);
+        assert_eq!(child.parent_card_id.as_deref(), Some(parent.id.as_str()));
+
+        move_card(
+            &mut conn,
+            MoveCardInput {
+                card_id: parent.id.clone(),
+                to_list_id: other.id.clone(),
+                to_index: 0,
+            },
+        )
+        .expect("移动父任务");
+
+        let snapshot = get_snapshot(&conn).expect("快照");
+        for id in [&child.id, &grand.id] {
+            let item = snapshot
+                .cards
+                .iter()
+                .find(|card| &card.id == id)
+                .expect("子任务存在");
+            assert_eq!(item.list_id, other.id, "子任务应跟随父任务列表");
+        }
+
+        let child_move = move_card(
+            &mut conn,
+            MoveCardInput {
+                card_id: child.id.clone(),
+                to_list_id: list.id.clone(),
+                to_index: 0,
+            },
+        )
+        .expect_err("子任务不能单独移动列表");
+        assert!(child_move.contains("子任务"), "错误：{child_move}");
+
+        let child_patch = update_card(
+            &mut conn,
+            UpdateCardInput {
+                id: child.id.clone(),
+                patch: CardPatch {
+                    list_id: Some(list.id.clone()),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect_err("子任务不能通过 patch 换列表");
+        assert!(child_patch.contains("子任务"), "错误：{child_patch}");
+
+        let cross_board = new_board(&mut conn, "另一个看板");
+        let cross_list = new_list(&mut conn, &cross_board.id, "待办");
+        let cross = create_card(
+            &mut conn,
+            NewCardInput {
+                board_id: cross_board.id.clone(),
+                list_id: cross_list.id.clone(),
+                title: "跨板子任务".to_string(),
+                parent_card_id: Some(parent.id.clone()),
+                ..Default::default()
+            },
+        )
+        .expect_err("父任务不在同一看板应被拒绝");
+        assert!(cross.contains("看板"), "错误：{cross}");
+
+        let recurrence = crate::automation::create_recurrence(
+            &mut conn,
+            NewRecurrenceInput {
+                card_id: child.id.clone(),
+                frequency: RecurrenceFrequency::Daily,
+                ..Default::default()
+            },
+        )
+        .expect_err("子任务不能设置重复");
+        assert!(recurrence.contains("子任务"), "错误：{recurrence}");
+    }
+
+    #[test]
+    fn deleting_parent_trashes_and_restores_subtree() {
+        let mut conn = memory_db();
+        let board = new_board(&mut conn, "看板");
+        let list = new_list(&mut conn, &board.id, "待办");
+        let parent = new_card(&mut conn, &board.id, &list.id, "父任务");
+        let child = new_subtask(&mut conn, &board.id, &list.id, "子任务", &parent.id);
+        let grand = new_subtask(&mut conn, &board.id, &list.id, "孙任务", &child.id);
+        let ids = [&parent.id, &child.id, &grand.id];
+
+        delete_card(&mut conn, id_input(&parent.id)).expect("删除父任务");
+        let snapshot = get_snapshot(&conn).expect("快照");
+        for id in ids {
+            assert!(
+                !snapshot.cards.iter().any(|card| &card.id == id),
+                "整树应进回收站"
+            );
+        }
+
+        restore_card(&mut conn, id_input(&child.id)).expect("恢复子任务应连带父链与后代");
+        let snapshot = get_snapshot(&conn).expect("快照");
+        for id in ids {
+            assert!(
+                snapshot.cards.iter().any(|card| &card.id == id),
+                "整树应恢复"
+            );
+        }
+
+        delete_card(&mut conn, id_input(&parent.id)).expect("再次删除父任务");
+        purge_card(&mut conn, id_input(&parent.id)).expect("彻底删除父任务");
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM cards WHERE id IN (?1, ?2, ?3)",
+                rusqlite::params![&parent.id, &child.id, &grand.id],
+                |row| row.get(0),
+            )
+            .expect("统计剩余卡片");
+        assert_eq!(remaining, 0, "彻底删除应级联整树");
     }
 
     // -----------------------------------------------------------------------

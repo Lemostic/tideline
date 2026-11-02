@@ -1284,6 +1284,7 @@ mod tests {
             NewCardInput {
                 board_id: board.id.clone(),
                 list_id: list.id.clone(),
+                parent_card_id: None,
                 title: "任务 A".to_string(),
                 description: Some("描述".to_string()),
                 due_date: Some("2026-05-01".to_string()),
@@ -1565,6 +1566,7 @@ mod tests {
                 id: "c_x".to_string(),
                 board_id: "b_x".to_string(),
                 list_id: "l_x".to_string(),
+                parent_card_id: None,
                 title: "x".to_string(),
                 description: String::new(),
                 due_date: None,
