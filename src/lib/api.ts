@@ -434,6 +434,7 @@ function normalizeCard(raw: Card): Card {
     : [];
   return {
     ...raw,
+    parentCardId: typeof raw.parentCardId === 'string' ? raw.parentCardId : null,
     startDate: raw.startDate ?? null,
     estimatedMinutes: raw.estimatedMinutes ?? null,
     actualMinutes: raw.actualMinutes ?? null,
@@ -1550,6 +1551,7 @@ const localApi: TidelineApi = {
       id: createId('c'),
       boardId: input.boardId,
       listId: input.listId,
+      parentCardId: input.parentCardId ?? null,
       title: input.title.trim() || '未命名任务',
       description: input.description?.trim() ?? '',
       dueDate: input.dueDate ?? null,
@@ -1967,6 +1969,7 @@ const localApi: TidelineApi = {
       id: createId('c'),
       boardId,
       listId: targetListId,
+      parentCardId: null,
       title: item.content.split('\n')[0].slice(0, 80) || '未命名任务',
       description: item.content.includes('\n') ? item.content : '',
       dueDate: null,

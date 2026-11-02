@@ -43,6 +43,7 @@ function card(overrides: Partial<Card> = {}): Card {
     completed: false,
     deletedAt: null,
     labels: [],
+    parentCardId: null,
     subtasks: [],
     position: 0,
     createdAt: '2026-01-01T00:00:00.000Z',

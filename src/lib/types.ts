@@ -43,17 +43,22 @@ export interface List {
   createdAt: string;
 }
 
-/** 任务内的子任务（清单项），存在 cards.subtasks 的 JSON 里 */
+/** 任务内的子任务清单项（旧版）。V0.14.0 起子任务为真实卡片，仅旧数据/旧备份解析使用。 */
 export interface Subtask {
   id: string;
   title: string;
   done: boolean;
 }
 
+/** @deprecated V0.14.0：旧子任务清单项的别名，仅用于旧备份/旧本地数据迁移。 */
+export type LegacySubtask = Subtask;
+
 export interface Card {
   id: string;
   boardId: string;
   listId: string;
+  /** V0.14.0：父任务 id；null 表示主任务（任务树的根） */
+  parentCardId: string | null;
   title: string;
   description: string;
   /** YYYY-MM-DD，仅日期，不含时区；null 表示无截止日期 */
@@ -71,7 +76,7 @@ export interface Card {
   deletedAt: string | null;
   /** 自由标签，例如「研发」「高风险」 */
   labels: string[];
-  /** 子任务清单，进度由完成数 / 总数派生 */
+  /** 子任务清单（旧版 JSON）；V0.14.0 起不再写入，仅用于旧数据迁移，Task 8 后删除 */
   subtasks: Subtask[];
   /** 同一列表内的排序序号，从 0 递增 */
   position: number;
@@ -608,6 +613,8 @@ export interface NewCardInput {
   boardId: string;
   listId: string;
   title: string;
+  /** V0.14.0：父任务 id；提供时创建子任务，需与父任务同看板且列表一致 */
+  parentCardId?: string | null;
   description?: string;
   dueDate?: string | null;
   startDate?: string | null;
@@ -616,6 +623,7 @@ export interface NewCardInput {
   priority?: Priority | null;
   accent?: BoardColor | null;
   labels?: string[];
+  /** @deprecated V0.14.0：旧接口字段，新代码改用 parentCardId */
   subtasks?: Subtask[];
 }
 
