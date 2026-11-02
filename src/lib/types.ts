@@ -400,7 +400,8 @@ export type GoalPatch = Partial<
 /** 项目组角色（V0.8 旧枚举，仅兼容旧备份；新 UI 使用项目自定义角色） */
 export type MemberRole = 'dev' | 'test' | 'requirements' | 'design' | 'other';
 export type MemberStatus = 'active' | 'released';
-export type OvertimeStatus = 'planned' | 'done';
+/** V0.13.2：排班 / 已出勤 / 未出勤（未出勤需填写原因） */
+export type OvertimeStatus = 'planned' | 'done' | 'absent';
 export type PerformanceCategory = 'delivery' | 'quality' | 'collaboration' | 'other';
 
 export interface Project {
@@ -481,6 +482,8 @@ export interface OvertimeRecord {
   date: string;
   hours: number;
   status: OvertimeStatus;
+  /** V0.13.2：未出勤原因，仅 status='absent' 时有值（1–200 字） */
+  absenceReason: string;
   note: string;
   createdAt: string;
   updatedAt: string;
@@ -543,11 +546,12 @@ export interface NewOvertimeInput {
   date: string;
   hours: number;
   status?: OvertimeStatus;
+  absenceReason?: string;
   note?: string;
 }
 
 export type OvertimePatch = Partial<
-  Pick<OvertimeRecord, 'memberId' | 'date' | 'hours' | 'status' | 'note'>
+  Pick<OvertimeRecord, 'memberId' | 'date' | 'hours' | 'status' | 'absenceReason' | 'note'>
 >;
 
 export interface NewPerformanceInput {

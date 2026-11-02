@@ -1263,6 +1263,7 @@ fn row_to_overtime(row: &Row<'_>) -> rusqlite::Result<OvertimeRecord> {
         date: row.get("date")?,
         hours: row.get("hours")?,
         status: OvertimeStatus::from_db(row.get::<_, String>("status")?.as_str()),
+        absence_reason: row.get("absence_reason")?,
         note: row.get("note")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
@@ -1705,7 +1706,8 @@ pub fn delete_team_member(conn: &mut Connection, input: IdInput) -> DbResult<()>
 pub fn get_overtime_records(conn: &Connection) -> DbResult<Vec<OvertimeRecord>> {
     collect_rows(
         conn,
-        "SELECT id, project_id, member_id, date, hours, status, note, created_at, updated_at \
+        "SELECT id, project_id, member_id, date, hours, status, absence_reason, note, \
+         created_at, updated_at \
          FROM overtime_records ORDER BY date DESC, created_at DESC",
         row_to_overtime,
     )
@@ -1713,7 +1715,8 @@ pub fn get_overtime_records(conn: &Connection) -> DbResult<Vec<OvertimeRecord>> 
 
 fn get_overtime(conn: &Connection, id: &str) -> DbResult<OvertimeRecord> {
     conn.query_row(
-        "SELECT id, project_id, member_id, date, hours, status, note, created_at, updated_at \
+        "SELECT id, project_id, member_id, date, hours, status, absence_reason, note, \
+         created_at, updated_at \
          FROM overtime_records WHERE id = ?1",
         [id],
         row_to_overtime,
@@ -1721,6 +1724,24 @@ fn get_overtime(conn: &Connection, id: &str) -> DbResult<OvertimeRecord> {
     .optional()
     .map_err(db_err)?
     .ok_or_else(|| format!("加班记录不存在：{id}"))
+}
+
+/// V0.13.2：未出勤原因长度上限，与前端表单保持一致。
+const ABSENCE_REASON_MAX_CHARS: usize = 200;
+
+/// 归一未出勤原因：未出勤必须填写 1–200 字（trim 后），其它状态一律清空。
+fn normalize_absence_reason(status: OvertimeStatus, reason: &str) -> DbResult<String> {
+    if status != OvertimeStatus::Absent {
+        return Ok(String::new());
+    }
+    let text = reason.trim();
+    if text.is_empty() {
+        return Err("请填写未出勤原因".to_string());
+    }
+    if text.chars().count() > ABSENCE_REASON_MAX_CHARS {
+        return Err(format!("未出勤原因最多 {ABSENCE_REASON_MAX_CHARS} 字"));
+    }
+    Ok(text.to_string())
 }
 
 pub fn create_overtime(
@@ -1731,6 +1752,9 @@ pub fn create_overtime(
     if !input.hours.is_finite() || input.hours <= 0.0 {
         return Err("加班时长必须大于 0".to_string());
     }
+    let status = input.status.unwrap_or(OvertimeStatus::Planned);
+    let absence_reason =
+        normalize_absence_reason(status, input.absence_reason.as_deref().unwrap_or(""))?;
     let now = now_iso();
     let record = OvertimeRecord {
         id: create_id("ot"),
@@ -1738,15 +1762,16 @@ pub fn create_overtime(
         member_id: input.member_id,
         date: normalize_date(&input.date),
         hours: (input.hours * 10.0).round() / 10.0,
-        status: input.status.unwrap_or(OvertimeStatus::Planned),
+        status,
+        absence_reason,
         note: input.note.unwrap_or_default(),
         created_at: now.clone(),
         updated_at: now,
     };
     conn.execute(
         "INSERT INTO overtime_records \
-         (id, project_id, member_id, date, hours, status, note, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         (id, project_id, member_id, date, hours, status, absence_reason, note, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             &record.id,
             &record.project_id,
@@ -1754,6 +1779,7 @@ pub fn create_overtime(
             &record.date,
             record.hours,
             record.status.as_str(),
+            &record.absence_reason,
             &record.note,
             &record.created_at,
             &record.updated_at,
@@ -1787,19 +1813,24 @@ pub fn update_overtime(
     if let Some(status) = input.patch.status {
         record.status = status;
     }
+    if let Some(absence_reason) = input.patch.absence_reason {
+        record.absence_reason = absence_reason;
+    }
+    record.absence_reason = normalize_absence_reason(record.status, &record.absence_reason)?;
     if let Some(note) = input.patch.note {
         record.note = note;
     }
     record.updated_at = now_iso();
     conn.execute(
         "UPDATE overtime_records SET project_id = ?1, member_id = ?2, date = ?3, hours = ?4, \
-         status = ?5, note = ?6, updated_at = ?7 WHERE id = ?8",
+         status = ?5, absence_reason = ?6, note = ?7, updated_at = ?8 WHERE id = ?9",
         params![
             &record.project_id,
             &record.member_id,
             &record.date,
             record.hours,
             record.status.as_str(),
+            &record.absence_reason,
             &record.note,
             &record.updated_at,
             &record.id,
@@ -5464,6 +5495,7 @@ mod tests {
                 date: "2026-10-31".to_string(),
                 hours: 8.0,
                 status: Some(OvertimeStatus::Done),
+                absence_reason: None,
                 note: Some("版本上线".to_string()),
             },
         )
@@ -5494,6 +5526,144 @@ mod tests {
         assert!(snapshot.team_members.is_empty());
         assert!(snapshot.overtime_records.is_empty());
         assert!(snapshot.performance_records.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // 周末加班未出勤（V0.13.2）
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overtime_absence_requires_reason_and_clears_on_status_change() {
+        let mut conn = memory_db();
+        let project = create_project(
+            &mut conn,
+            NewProjectInput {
+                name: "项目B".to_string(),
+                description: None,
+                color: None,
+                starred: None,
+            },
+        )
+        .expect("创建项目");
+        let roles = get_project_roles(&conn, &project.id).expect("项目角色");
+        let member = create_team_member(
+            &mut conn,
+            NewTeamMemberInput {
+                project_id: project.id.clone(),
+                role_id: roles[0].id.clone(),
+                name: "李四".to_string(),
+                joined_at: Some("2026-10-01".to_string()),
+                note: None,
+            },
+        )
+        .expect("创建成员");
+
+        // 未出勤没有原因：拒绝。
+        let missing = create_overtime(
+            &mut conn,
+            NewOvertimeInput {
+                member_id: member.id.clone(),
+                date: "2026-10-31".to_string(),
+                hours: 8.0,
+                status: Some(OvertimeStatus::Absent),
+                absence_reason: Some("   ".to_string()),
+                note: None,
+            },
+        )
+        .expect_err("未出勤必须填写原因");
+        assert!(missing.contains("未出勤原因"), "错误：{missing}");
+
+        // 超过 200 字：拒绝。
+        let too_long = create_overtime(
+            &mut conn,
+            NewOvertimeInput {
+                member_id: member.id.clone(),
+                date: "2026-10-31".to_string(),
+                hours: 8.0,
+                status: Some(OvertimeStatus::Absent),
+                absence_reason: Some("x".repeat(201)),
+                note: None,
+            },
+        )
+        .expect_err("未出勤原因不能超过 200 字");
+        assert!(too_long.contains("200"), "错误：{too_long}");
+
+        // 正常写入：原因 trim 后保存。
+        let absent = create_overtime(
+            &mut conn,
+            NewOvertimeInput {
+                member_id: member.id.clone(),
+                date: "2026-10-31".to_string(),
+                hours: 8.0,
+                status: Some(OvertimeStatus::Absent),
+                absence_reason: Some(" 临时发烧请假 ".to_string()),
+                note: None,
+            },
+        )
+        .expect("创建未出勤记录");
+        assert_eq!(absent.status, OvertimeStatus::Absent);
+        assert_eq!(absent.absence_reason, "临时发烧请假");
+        let snapshot = get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.overtime_records[0].absence_reason, "临时发烧请假");
+
+        // 切回已出勤：原因清空。
+        let done = update_overtime(
+            &mut conn,
+            UpdateOvertimeInput {
+                id: absent.id.clone(),
+                patch: OvertimePatch {
+                    status: Some(OvertimeStatus::Done),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("改回已出勤");
+        assert_eq!(done.status, OvertimeStatus::Done);
+        assert_eq!(done.absence_reason, "");
+
+        // 再次标记未出勤但没有新原因：拒绝。
+        let again = update_overtime(
+            &mut conn,
+            UpdateOvertimeInput {
+                id: absent.id.clone(),
+                patch: OvertimePatch {
+                    status: Some(OvertimeStatus::Absent),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect_err("重新标记未出勤必须填写原因");
+        assert!(again.contains("未出勤原因"), "错误：{again}");
+
+        // 带上新原因：写入成功。
+        let absent_again = update_overtime(
+            &mut conn,
+            UpdateOvertimeInput {
+                id: absent.id.clone(),
+                patch: OvertimePatch {
+                    status: Some(OvertimeStatus::Absent),
+                    absence_reason: Some("临时调休".to_string()),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("重新标记未出勤");
+        assert_eq!(absent_again.absence_reason, "临时调休");
+
+        // 已出勤记录带未出勤原因时被清空，不残留脏字段。
+        let done_record = update_overtime(
+            &mut conn,
+            UpdateOvertimeInput {
+                id: absent.id.clone(),
+                patch: OvertimePatch {
+                    status: Some(OvertimeStatus::Done),
+                    absence_reason: Some("残留原因".to_string()),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("改回已出勤并清理原因");
+        assert_eq!(done_record.absence_reason, "");
     }
 
     // -----------------------------------------------------------------------

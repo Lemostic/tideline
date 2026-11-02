@@ -24,6 +24,10 @@ import {
 } from './savedViews';
 import { todayKey } from './date';
 import {
+  normalizeOvertimeAbsenceReason,
+  validateOvertimeAbsenceReason,
+} from './team';
+import {
   applyRuleActions,
   nextRecurrenceDateFor,
   validateRuleActions,
@@ -686,7 +690,8 @@ function normalizeMemberStatus(value: unknown): MemberStatus {
 }
 
 function normalizeOvertimeStatus(value: unknown): OvertimeStatus {
-  return value === 'done' ? 'done' : 'planned';
+  if (value === 'done' || value === 'absent') return value;
+  return 'planned';
 }
 
 function normalizePerformanceCategory(value: unknown): PerformanceCategory {
@@ -835,14 +840,21 @@ function loadLocalDb(): LocalDb {
               (item): item is OvertimeRecord =>
                 Boolean(item) && typeof item.id === 'string' && typeof item.memberId === 'string',
             )
-            .map((item) => ({
-              ...item,
-              projectId: typeof item.projectId === 'string' ? item.projectId : '',
-              date: typeof item.date === 'string' ? item.date : '',
-              hours: typeof item.hours === 'number' ? item.hours : 0,
-              status: normalizeOvertimeStatus(item.status),
-              note: typeof item.note === 'string' ? item.note : '',
-            }))
+            .map((item) => {
+              const status = normalizeOvertimeStatus(item.status);
+              return {
+                ...item,
+                projectId: typeof item.projectId === 'string' ? item.projectId : '',
+                date: typeof item.date === 'string' ? item.date : '',
+                hours: typeof item.hours === 'number' ? item.hours : 0,
+                status,
+                absenceReason: normalizeOvertimeAbsenceReason(
+                  status,
+                  typeof item.absenceReason === 'string' ? item.absenceReason : '',
+                ),
+                note: typeof item.note === 'string' ? item.note : '',
+              };
+            })
         : [],
       performanceRecords: Array.isArray(parsed.performanceRecords)
         ? parsed.performanceRecords
@@ -2285,6 +2297,9 @@ const localApi: TidelineApi = {
     if (!Number.isFinite(input.hours) || input.hours <= 0) {
       throw new Error('加班时长必须大于 0');
     }
+    const status = normalizeOvertimeStatus(input.status);
+    const absenceError = validateOvertimeAbsenceReason(status, input.absenceReason ?? '');
+    if (absenceError) throw new Error(absenceError);
     const now = nowISO();
     const record: OvertimeRecord = {
       id: createId('ot'),
@@ -2292,7 +2307,8 @@ const localApi: TidelineApi = {
       memberId: input.memberId,
       date: input.date || todayLocalDate(),
       hours: Math.round(input.hours * 10) / 10,
-      status: normalizeOvertimeStatus(input.status),
+      status,
+      absenceReason: normalizeOvertimeAbsenceReason(status, input.absenceReason ?? ''),
       note: input.note ?? '',
       createdAt: now,
       updatedAt: now,
@@ -2306,6 +2322,11 @@ const localApi: TidelineApi = {
     const db = loadLocalDb();
     const record = db.overtimeRecords.find((item) => item.id === id);
     if (!record) throw new Error(`加班记录不存在：${id}`);
+    const nextStatus = patch.status !== undefined ? normalizeOvertimeStatus(patch.status) : record.status;
+    const nextReason =
+      patch.absenceReason !== undefined ? patch.absenceReason : record.absenceReason;
+    const absenceError = validateOvertimeAbsenceReason(nextStatus, nextReason);
+    if (absenceError) throw new Error(absenceError);
     if (patch.memberId !== undefined) {
       const member = requireTeamMember(db, patch.memberId);
       record.projectId = member.projectId;
@@ -2318,7 +2339,8 @@ const localApi: TidelineApi = {
       }
       record.hours = Math.round(patch.hours * 10) / 10;
     }
-    if (patch.status !== undefined) record.status = normalizeOvertimeStatus(patch.status);
+    record.status = nextStatus;
+    record.absenceReason = normalizeOvertimeAbsenceReason(nextStatus, nextReason);
     if (patch.note !== undefined) record.note = patch.note;
     record.updatedAt = nowISO();
     saveLocalDb(db);

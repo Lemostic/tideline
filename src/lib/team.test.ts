@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   activeMembers,
   isWeekend,
+  normalizeOvertimeAbsenceReason,
+  OVERTIME_ABSENCE_REASON_MAX,
+  overtimeAbsenceCount,
+  overtimeAbsenceCountInMonth,
+  overtimeDoneHours,
   overtimeHoursInMonth,
+  overtimeStatusLabel,
   performanceByMember,
   projectMembers,
   projectMeta,
@@ -15,9 +21,11 @@ import {
   tenureIsActive,
   tenureOverlapsRange,
   tenureSummaryForProject,
+  validateOvertimeAbsenceReason,
 } from '@/lib/team';
 import type {
   OvertimeRecord,
+  OvertimeStatus,
   PerformanceRecord,
   ProjectMetaField,
   ProjectRole,
@@ -46,6 +54,8 @@ function overtime(
   memberId: string,
   date: string,
   hours: number,
+  status: OvertimeStatus = 'done',
+  absenceReason = '',
 ): OvertimeRecord {
   return {
     id,
@@ -53,7 +63,8 @@ function overtime(
     memberId,
     date,
     hours,
-    status: 'done',
+    status,
+    absenceReason,
     note: '',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -118,6 +129,48 @@ describe('team helpers', () => {
       overtime('3', 'p1', 'a', '2026-09-27', 8),
     ];
     expect(overtimeHoursInMonth(records, '2026-10')).toBe(7.5);
+  });
+
+  it('本月加班只统计已出勤，排班与未出勤不计入', () => {
+    const records = [
+      overtime('1', 'p1', 'a', '2026-10-03', 8, 'done'),
+      overtime('2', 'p1', 'b', '2026-10-04', 8, 'planned'),
+      overtime('3', 'p1', 'c', '2026-10-05', 8, 'absent', '临时发烧请假'),
+      overtime('4', 'p1', 'd', '2026-10-06', 4, 'done'),
+    ];
+    expect(overtimeHoursInMonth(records, '2026-10')).toBe(12);
+    expect(overtimeAbsenceCountInMonth(records, '2026-10')).toBe(1);
+    expect(overtimeAbsenceCountInMonth(records, '2026-09')).toBe(0);
+    expect(overtimeDoneHours(records)).toBe(12);
+    expect(overtimeAbsenceCount(records)).toBe(1);
+  });
+
+  it('未出勤原因必填且最多 200 字，非未出勤状态清空原因', () => {
+    expect(validateOvertimeAbsenceReason('planned', '')).toBeNull();
+    expect(validateOvertimeAbsenceReason('done', '   ')).toBeNull();
+    expect(validateOvertimeAbsenceReason('absent', '   ')).toBe('请填写未出勤原因');
+    expect(validateOvertimeAbsenceReason('absent', '临时发烧请假')).toBeNull();
+    expect(
+      validateOvertimeAbsenceReason('absent', 'x'.repeat(OVERTIME_ABSENCE_REASON_MAX + 1)),
+    ).toBe(`未出勤原因最多 ${OVERTIME_ABSENCE_REASON_MAX} 字`);
+    expect(
+      validateOvertimeAbsenceReason('absent', 'x'.repeat(OVERTIME_ABSENCE_REASON_MAX)),
+    ).toBeNull();
+    // 按 Unicode 码点计数：200 个 emoji 仍算 200 字，与 Rust 侧一致。
+    expect(
+      validateOvertimeAbsenceReason('absent', '🙂'.repeat(OVERTIME_ABSENCE_REASON_MAX)),
+    ).toBeNull();
+    expect(
+      validateOvertimeAbsenceReason('absent', '🙂'.repeat(OVERTIME_ABSENCE_REASON_MAX + 1)),
+    ).toBe(`未出勤原因最多 ${OVERTIME_ABSENCE_REASON_MAX} 字`);
+    expect(normalizeOvertimeAbsenceReason('absent', ' 临时发烧请假 ')).toBe('临时发烧请假');
+    expect(normalizeOvertimeAbsenceReason('done', '历史原因')).toBe('');
+  });
+
+  it('加班状态有统一中文标签', () => {
+    expect(overtimeStatusLabel('planned')).toBe('排班');
+    expect(overtimeStatusLabel('done')).toBe('已出勤');
+    expect(overtimeStatusLabel('absent')).toBe('未出勤');
   });
 
   it('按成员汇总绩效加减分并排序', () => {

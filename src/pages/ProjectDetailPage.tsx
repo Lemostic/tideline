@@ -14,7 +14,10 @@ import {
 import {
   isWeekend,
   monthKey,
+  OVERTIME_ABSENCE_REASON_MAX,
+  overtimeAbsenceCountInMonth,
   overtimeHoursInMonth,
+  overtimeStatusLabel,
   PERFORMANCE_CATEGORY_META,
   performanceByMember,
   performanceCategoryLabel,
@@ -31,9 +34,11 @@ import {
   tenureDays,
   tenureOverlapsRange,
   tenureSummaryForProject,
+  validateOvertimeAbsenceReason,
 } from '@/lib/team';
 import type {
   MemberTenure,
+  OvertimeRecord,
   OvertimeStatus,
   PerformanceCategory,
   Project,
@@ -93,6 +98,8 @@ export function ProjectDetailPage() {
   const [memberModal, setMemberModal] = useState<TeamMember | null | 'new'>(null);
   const [memberOpen, setMemberOpen] = useState(false);
   const [overtimeOpen, setOvertimeOpen] = useState(false);
+  const [overtimeEditing, setOvertimeEditing] = useState<OvertimeRecord | null>(null);
+  const [overtimeAbsence, setOvertimeAbsence] = useState<OvertimeRecord | null>(null);
   const [performanceOpen, setPerformanceOpen] = useState(false);
   const [roleOpen, setRoleOpen] = useState(false);
   const [roleEditing, setRoleEditing] = useState<ProjectRole | null>(null);
@@ -157,13 +164,22 @@ export function ProjectDetailPage() {
                 ? '上周'
                 : '';
         const records = [...group.records].sort((a, b) => a.date.localeCompare(b.date));
+        const doneHours =
+          Math.round(
+            records
+              .filter((record) => record.status === 'done')
+              .reduce((sum, record) => sum + record.hours, 0) * 10,
+          ) / 10;
         return {
           key,
           startKey: group.startKey,
           endKey: group.endKey,
           relative,
           records,
-          totalHours: records.reduce((sum, record) => sum + record.hours, 0),
+          doneCount: records.filter((record) => record.status === 'done').length,
+          absentCount: records.filter((record) => record.status === 'absent').length,
+          plannedCount: records.filter((record) => record.status === 'planned').length,
+          doneHours,
         };
       })
       .sort((a, b) => b.startKey.localeCompare(a.startKey));
@@ -186,6 +202,7 @@ export function ProjectDetailPage() {
   const monthPerformance = performance.filter((record) => record.date.startsWith(month));
   const performanceRows = performanceByMember(performance, month);
   const overtimeTotal = overtimeHoursInMonth(overtime, month);
+  const overtimeAbsenceTotal = overtimeAbsenceCountInMonth(overtime, month);
   const performanceNet = monthPerformance.reduce((sum, record) => sum + record.points, 0);
   const roleCounts = roles.map((role) => ({
     ...role,
@@ -330,7 +347,10 @@ export function ProjectDetailPage() {
           </div>
           <div>
             <strong>{overtimeTotal}h</strong>
-            <span>本月加班</span>
+            <span>
+              本月加班
+              {overtimeAbsenceTotal > 0 ? ` · 未出勤 ${overtimeAbsenceTotal}` : ''}
+            </span>
           </div>
           <div>
             <strong>{performanceNet > 0 ? '+' : ''}{performanceNet}</strong>
@@ -392,7 +412,10 @@ export function ProjectDetailPage() {
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            onClick={() => setOvertimeOpen(true)}
+            onClick={() => {
+              setOvertimeEditing(null);
+              setOvertimeOpen(true);
+            }}
             disabled={members.length === 0}
           >
             <Icon name="plus" size={14} /> 加班记录
@@ -716,7 +739,7 @@ export function ProjectDetailPage() {
               <EmptyState
                 icon={<Icon name="calendar" size={22} />}
                 title="还没有本项目的加班记录"
-                description="排班与已发生记录都按项目隔离，不会和其他项目混在一起。"
+                description="先排班，再按实际出勤标记「已出勤」或「未出勤」；未出勤需要填写原因，未出勤的小时数不计入加班合计。"
               />
             </div>
           ) : (
@@ -735,7 +758,19 @@ export function ProjectDetailPage() {
                       ) : null}
                     </div>
                     <span className="overtime-week-total">
-                      {group.records.length} 条 · {group.totalHours}h
+                      <span className="overtime-week-stat is-done">
+                        已出勤 {group.doneCount} 条 · {group.doneHours}h
+                      </span>
+                      {group.absentCount > 0 ? (
+                        <span className="overtime-week-stat is-absent">
+                          未出勤 {group.absentCount} 条
+                        </span>
+                      ) : null}
+                      {group.plannedCount > 0 ? (
+                        <span className="overtime-week-stat">
+                          排班 {group.plannedCount} 条
+                        </span>
+                      ) : null}
                     </span>
                   </div>
                   <div className="team-records">
@@ -743,7 +778,9 @@ export function ProjectDetailPage() {
                       const member = memberById.get(record.memberId);
                       return (
                         <article
-                          className={`team-record${record.status === 'done' ? ' is-done' : ''}`}
+                          className={`team-record${record.status === 'done' ? ' is-done' : ''}${
+                            record.status === 'absent' ? ' is-absent' : ''
+                          }`}
                           key={record.id}
                         >
                           <div className="team-record-date">
@@ -756,25 +793,72 @@ export function ProjectDetailPage() {
                             <div className="team-record-title">
                               {member?.name ?? '未知成员'}
                               <span className={`team-ot-status status-${record.status}`}>
-                                {record.status === 'planned' ? '排班' : '已发生'}
+                                {overtimeStatusLabel(record.status)}
                               </span>
+                              {record.status === 'absent' ? (
+                                <span className="team-ot-flag">工时未计入</span>
+                              ) : null}
                             </div>
                             <div className="team-record-meta">
-                              <span>{record.hours} 小时</span>
+                              <span>
+                                {record.status === 'done'
+                                  ? `${record.hours} 小时`
+                                  : `排班 ${record.hours} 小时`}
+                              </span>
                               {record.note ? <span>{record.note}</span> : null}
                             </div>
+                            {record.status === 'absent' ? (
+                              <div className="team-record-reason">
+                                <span className="team-record-reason-label">未出勤原因</span>
+                                <span className="team-record-reason-text">
+                                  {record.absenceReason || '未填写原因'}
+                                </span>
+                              </div>
+                            ) : null}
                           </div>
                           <div className="team-record-actions">
+                            {record.status === 'done' ? (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() =>
+                                  void updateOvertime(record.id, {
+                                    status: 'planned',
+                                  }).catch(() => undefined)
+                                }
+                              >
+                                改回排班
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() =>
+                                  void updateOvertime(record.id, {
+                                    status: 'done',
+                                  }).catch(() => undefined)
+                                }
+                              >
+                                标记已出勤
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="btn btn-ghost btn-sm"
-                              onClick={() =>
-                                void updateOvertime(record.id, {
-                                  status: record.status === 'planned' ? 'done' : 'planned',
-                                }).catch(() => undefined)
-                              }
+                              onClick={() => setOvertimeAbsence(record)}
                             >
-                              {record.status === 'planned' ? '标记已发生' : '改回排班'}
+                              {record.status === 'absent' ? '修改原因' : '标记未出勤'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-icon"
+                              aria-label="编辑加班记录"
+                              onClick={() => {
+                                setOvertimeEditing(record);
+                                setOvertimeOpen(true);
+                              }}
+                            >
+                              <Icon name="pencil" size={13} />
                             </button>
                             <button
                               type="button"
@@ -1006,10 +1090,43 @@ export function ProjectDetailPage() {
       <OvertimeModal
         open={overtimeOpen}
         members={members}
-        onClose={() => setOvertimeOpen(false)}
-        onSubmit={async (input) => {
-          await createOvertime(input);
+        record={overtimeEditing}
+        onClose={() => {
           setOvertimeOpen(false);
+          setOvertimeEditing(null);
+        }}
+        onSubmit={async (input) => {
+          if (overtimeEditing) {
+            await updateOvertime(overtimeEditing.id, {
+              memberId: input.memberId,
+              date: input.date,
+              hours: input.hours,
+              status: input.status,
+              absenceReason: input.absenceReason,
+              note: input.note,
+            });
+          } else {
+            await createOvertime(input);
+          }
+          setOvertimeOpen(false);
+          setOvertimeEditing(null);
+        }}
+      />
+      <AbsenceReasonModal
+        record={overtimeAbsence}
+        memberName={
+          overtimeAbsence
+            ? memberById.get(overtimeAbsence.memberId)?.name ?? '未知成员'
+            : ''
+        }
+        onClose={() => setOvertimeAbsence(null)}
+        onSubmit={async (reason) => {
+          if (!overtimeAbsence) return;
+          await updateOvertime(overtimeAbsence.id, {
+            status: 'absent',
+            absenceReason: reason,
+          });
+          setOvertimeAbsence(null);
         }}
       />
       <PerformanceModal
@@ -1214,17 +1331,20 @@ function MemberModal({
 function OvertimeModal({
   open,
   members,
+  record,
   onClose,
   onSubmit,
 }: {
   open: boolean;
   members: TeamMember[];
+  record: OvertimeRecord | null;
   onClose: () => void;
   onSubmit: (input: {
     memberId: string;
     date: string;
     hours: number;
     status: OvertimeStatus;
+    absenceReason: string;
     note: string;
   }) => Promise<void>;
 }) {
@@ -1232,22 +1352,26 @@ function OvertimeModal({
   const [date, setDate] = useState('');
   const [hours, setHours] = useState('8');
   const [status, setStatus] = useState<OvertimeStatus>('planned');
+  const [absenceReason, setAbsenceReason] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setMemberId(members[0]?.id ?? '');
-    setDate('');
-    setHours('8');
-    setStatus('planned');
-    setNote('');
+    setMemberId(record?.memberId ?? members[0]?.id ?? '');
+    setDate(record?.date ?? '');
+    setHours(record ? String(record.hours) : '8');
+    setStatus(record?.status ?? 'planned');
+    setAbsenceReason(record?.absenceReason ?? '');
+    setNote(record?.note ?? '');
     setBusy(false);
     setError(null);
-  }, [open, members]);
+  }, [open, members, record]);
 
   if (!open) return null;
+
+  const reasonCount = Array.from(absenceReason).length;
 
   const submit = async () => {
     if (busy) return;
@@ -1260,9 +1384,21 @@ function OvertimeModal({
       setError('请填写大于 0 的加班时长');
       return;
     }
+    const absenceError = validateOvertimeAbsenceReason(status, absenceReason);
+    if (absenceError) {
+      setError(absenceError);
+      return;
+    }
     setBusy(true);
     try {
-      await onSubmit({ memberId, date, hours: parsed, status, note: note.trim() });
+      await onSubmit({
+        memberId,
+        date,
+        hours: parsed,
+        status,
+        absenceReason: status === 'absent' ? absenceReason.trim() : '',
+        note: note.trim(),
+      });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setBusy(false);
@@ -1271,7 +1407,7 @@ function OvertimeModal({
 
   return (
     <Modal
-      title="添加周末加班"
+      title={record ? '编辑加班记录' : '添加周末加班'}
       onClose={() => (busy ? undefined : onClose())}
       footer={
         <>
@@ -1279,7 +1415,7 @@ function OvertimeModal({
             取消
           </button>
           <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={busy}>
-            {busy ? '保存中…' : '保存加班记录'}
+            {busy ? '保存中…' : record ? '保存修改' : '保存加班记录'}
           </button>
         </>
       }
@@ -1327,8 +1463,9 @@ function OvertimeModal({
               onChange={(event) => setStatus(event.target.value as OvertimeStatus)}
               aria-label="加班状态"
             >
-              <option value="planned">排班（未来）</option>
-              <option value="done">已发生</option>
+              <option value="planned">排班（待出勤）</option>
+              <option value="done">已出勤</option>
+              <option value="absent">未出勤</option>
             </select>
           </label>
         </div>
@@ -1339,6 +1476,22 @@ function OvertimeModal({
               ? '这一天是周末，适合安排加班。'
               : '提示：这一天不是周末，仍可记录调休/工作日加班。'}
         </p>
+        {status === 'absent' ? (
+          <label className="team-form-field">
+            <span>未出勤原因（必填）</span>
+            <textarea
+              className="input team-form-textarea"
+              value={absenceReason}
+              maxLength={OVERTIME_ABSENCE_REASON_MAX}
+              onChange={(event) => setAbsenceReason(event.target.value)}
+              aria-label="未出勤原因"
+              placeholder="例如：临时发烧请假、临时调休、家里有事…"
+            />
+            <span className="team-form-counter">
+              {reasonCount}/{OVERTIME_ABSENCE_REASON_MAX} 字
+            </span>
+          </label>
+        ) : null}
         <label className="team-form-field">
           <span>备注</span>
           <textarea
@@ -1348,6 +1501,89 @@ function OvertimeModal({
             onChange={(event) => setNote(event.target.value)}
             aria-label="加班备注"
           />
+        </label>
+        {error ? <p className="team-form-error">{error}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
+function AbsenceReasonModal({
+  record,
+  memberName,
+  onClose,
+  onSubmit,
+}: {
+  record: OvertimeRecord | null;
+  memberName: string;
+  onClose: () => void;
+  onSubmit: (reason: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!record) return;
+    setReason(record.absenceReason);
+    setBusy(false);
+    setError(null);
+  }, [record]);
+
+  if (!record) return null;
+
+  const reasonCount = Array.from(reason).length;
+
+  const submit = async () => {
+    if (busy) return;
+    const validation = validateOvertimeAbsenceReason('absent', reason);
+    if (validation) {
+      setError(validation);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSubmit(reason.trim());
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={`标记未出勤 · ${memberName}`}
+      onClose={() => (busy ? undefined : onClose())}
+      footer={
+        <>
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
+            取消
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={busy}>
+            {busy ? '保存中…' : '确认未出勤'}
+          </button>
+        </>
+      }
+    >
+      <div className="team-form">
+        <p className="team-absence-hint">
+          排班日期 {formatDate(record.date)} · 排班 {record.hours} 小时。未出勤记录不计入加班工时，
+          原因会保留在这条记录上，便于事后追溯。
+        </p>
+        <label className="team-form-field">
+          <span>未出勤原因（必填）</span>
+          <textarea
+            className="input team-form-textarea"
+            value={reason}
+            maxLength={OVERTIME_ABSENCE_REASON_MAX}
+            onChange={(event) => setReason(event.target.value)}
+            aria-label="未出勤原因"
+            placeholder="例如：临时发烧请假、临时调休、家里有事…"
+            autoFocus
+          />
+          <span className="team-form-counter">
+            {reasonCount}/{OVERTIME_ABSENCE_REASON_MAX} 字
+          </span>
         </label>
         {error ? <p className="team-form-error">{error}</p> : null}
       </div>

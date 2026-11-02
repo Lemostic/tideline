@@ -1,6 +1,7 @@
 import type {
   MemberTenure,
   OvertimeRecord,
+  OvertimeStatus,
   PerformanceCategory,
   PerformanceRecord,
   Project,
@@ -49,11 +50,68 @@ export function formatMonthCN(month: string): string {
 }
 
 export function overtimeHoursInMonth(records: OvertimeRecord[], month: string): number {
-  return Math.round(
-    records
-      .filter((record) => record.date.startsWith(month))
-      .reduce((sum, record) => sum + record.hours, 0) * 10,
-  ) / 10;
+  return (
+    Math.round(
+      records
+        .filter((record) => record.date.startsWith(month) && record.status === 'done')
+        .reduce((sum, record) => sum + record.hours, 0) * 10,
+    ) / 10
+  );
+}
+
+/** V0.13.2：未出勤原因长度上限，前端表单与数据层共用。 */
+export const OVERTIME_ABSENCE_REASON_MAX = 200;
+
+export const OVERTIME_STATUS_META: ReadonlyArray<{ key: OvertimeStatus; label: string }> = [
+  { key: 'planned', label: '排班' },
+  { key: 'done', label: '已出勤' },
+  { key: 'absent', label: '未出勤' },
+];
+
+export function overtimeStatusLabel(status: OvertimeStatus): string {
+  return OVERTIME_STATUS_META.find((item) => item.key === status)?.label ?? '排班';
+}
+
+/**
+ * 校验未出勤原因：未出勤必须填写 1–200 字，其它状态不需要原因。
+ * 返回错误文案，通过校验返回 null。
+ */
+export function validateOvertimeAbsenceReason(
+  status: OvertimeStatus,
+  reason: string,
+): string | null {
+  if (status !== 'absent') return null;
+  const text = reason.trim();
+  if (!text) return '请填写未出勤原因';
+  // 与 Rust 侧 chars().count() 对齐，按 Unicode 码点计数，避免 emoji 边界口径不一致。
+  if (Array.from(text).length > OVERTIME_ABSENCE_REASON_MAX) {
+    return `未出勤原因最多 ${OVERTIME_ABSENCE_REASON_MAX} 字`;
+  }
+  return null;
+}
+
+/** 写库前归一：未出勤保留 trim 后的原因，其它状态一律清空，避免残留脏字段。 */
+export function normalizeOvertimeAbsenceReason(status: OvertimeStatus, reason: string): string {
+  return status === 'absent' ? reason.trim() : '';
+}
+
+/** 全部「已出勤」记录的工时合计（排班与未出勤不计入）。 */
+export function overtimeDoneHours(records: OvertimeRecord[]): number {
+  return records
+    .filter((record) => record.status === 'done')
+    .reduce((sum, record) => sum + record.hours, 0);
+}
+
+/** 未出勤记录条数。 */
+export function overtimeAbsenceCount(records: OvertimeRecord[]): number {
+  return records.filter((record) => record.status === 'absent').length;
+}
+
+/** 指定月份内未出勤记录条数。 */
+export function overtimeAbsenceCountInMonth(records: OvertimeRecord[], month: string): number {
+  return records.filter(
+    (record) => record.status === 'absent' && record.date.startsWith(month),
+  ).length;
 }
 
 export interface MemberPerformance {
@@ -135,8 +193,13 @@ export function roleColor(roles: ProjectRole[], roleId: string): string {
 
 export function projectOvertimeHours(records: OvertimeRecord[], projectId: string, month?: string) {
   return (month
-    ? records.filter((record) => record.projectId === projectId && record.date.startsWith(month))
-    : records.filter((record) => record.projectId === projectId)
+    ? records.filter(
+        (record) =>
+          record.projectId === projectId &&
+          record.status === 'done' &&
+          record.date.startsWith(month),
+      )
+    : records.filter((record) => record.projectId === projectId && record.status === 'done')
   ).reduce((sum, record) => sum + record.hours, 0);
 }
 

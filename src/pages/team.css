@@ -252,6 +252,20 @@
   color: var(--primary-strong);
 }
 
+.team-ot-status.status-absent {
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+}
+
+.team-ot-flag {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+  font-size: 9px;
+  font-weight: 600;
+}
+
 .team-member-meta {
   display: flex;
   flex-wrap: wrap;
@@ -293,6 +307,14 @@
 
 .team-record.is-done {
   background: rgba(15, 118, 110, 0.025);
+}
+
+.team-record.is-absent {
+  background: rgba(217, 83, 74, 0.04);
+}
+
+.team-record.is-absent:hover {
+  background: rgba(217, 83, 74, 0.07);
 }
 
 .team-record-date {
@@ -346,8 +368,34 @@
 .team-record-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 3px;
   flex: 0 0 auto;
+}
+
+.team-record-reason {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 5px;
+  padding: 3px 8px;
+  border-left: 2px solid var(--danger-line);
+  border-radius: 0 5px 5px 0;
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.team-record-reason-label {
+  flex: 0 0 auto;
+  font-weight: 650;
+}
+
+.team-record-reason-text {
+  overflow-wrap: anywhere;
 }
 
 .team-points {
@@ -481,6 +529,22 @@
   margin: 0;
   color: var(--danger);
   font-size: 11px;
+}
+
+.team-form-counter {
+  align-self: flex-end;
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.team-absence-hint {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.6;
 }
 
 .team-weekend-note {
@@ -1377,9 +1441,22 @@
 }
 
 .overtime-week-total {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   color: var(--faint);
   font-size: 9.5px;
   font-variant-numeric: tabular-nums;
+}
+
+.overtime-week-stat.is-done {
+  color: var(--primary-strong);
+}
+
+.overtime-week-stat.is-absent {
+  color: var(--danger-ink);
+  font-weight: 600;
 }
 
 .overtime-week .team-records {

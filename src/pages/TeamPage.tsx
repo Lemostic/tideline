@@ -3,7 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { EmptyState, Modal } from '@/components/Modal';
 import { PageHeadBand } from '@/components/PageHeadBand';
-import { PROJECT_COLORS, projectMeta, projectMembers, projectOvertime } from '@/lib/team';
+import {
+  overtimeAbsenceCount,
+  overtimeDoneHours,
+  PROJECT_COLORS,
+  projectMeta,
+  projectMembers,
+  projectOvertime,
+} from '@/lib/team';
 import type { Project } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useUiStore } from '@/store/uiStore';
@@ -31,6 +38,11 @@ export function TeamPage() {
   const totalActiveMembers = snapshot.teamMembers.filter(
     (member) => member.status === 'active',
   ).length;
+  const overtimeDoneTotal = Math.round(overtimeDoneHours(snapshot.overtimeRecords) * 10) / 10;
+  const overtimeDoneCount = snapshot.overtimeRecords.filter(
+    (record) => record.status === 'done',
+  ).length;
+  const overtimeAbsenceTotal = overtimeAbsenceCount(snapshot.overtimeRecords);
 
   const projectStats = useMemo(
     () =>
@@ -38,10 +50,7 @@ export function TeamPage() {
         members: projectMembers(snapshot.teamMembers, project.id).filter(
           (member) => member.status === 'active',
         ).length,
-        overtime: projectOvertime(snapshot.overtimeRecords, project.id).reduce(
-          (sum, record) => sum + record.hours,
-          0,
-        ),
+        overtime: overtimeDoneHours(projectOvertime(snapshot.overtimeRecords, project.id)),
         meta: projectMeta(snapshot.projectMetaFields, project.id),
       })),
     [projects, snapshot],
@@ -96,12 +105,13 @@ export function TeamPage() {
         <div className="team-stat">
           <span>累计加班</span>
           <strong>
-            {Math.round(
-              snapshot.overtimeRecords.reduce((sum, record) => sum + record.hours, 0) * 10,
-            ) / 10}
+            {overtimeDoneTotal}
             <em>h</em>
           </strong>
-          <div className="team-stat-hint">{snapshot.overtimeRecords.length} 条记录</div>
+          <div className="team-stat-hint">
+            {overtimeDoneCount} 条已出勤
+            {overtimeAbsenceTotal > 0 ? ` · ${overtimeAbsenceTotal} 次未出勤` : ''}
+          </div>
         </div>
         <div className="team-stat">
           <span>绩效净分</span>

@@ -572,6 +572,22 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         if !record.hours.is_finite() || record.hours <= 0.0 {
             return Err("备份中的加班时长无效".to_string());
         }
+        // V0.13.2：未出勤必须有原因；其它状态不应带未出勤原因。
+        match record.status {
+            OvertimeStatus::Absent => {
+                let reason = record.absence_reason.trim();
+                if reason.is_empty() {
+                    return Err("备份中的未出勤记录缺少原因".to_string());
+                }
+                if reason.chars().count() > 200 {
+                    return Err("备份中的未出勤原因超过 200 字".to_string());
+                }
+            }
+            _ if !record.absence_reason.trim().is_empty() => {
+                return Err("备份中的非未出勤记录不应包含未出勤原因".to_string());
+            }
+            _ => {}
+        }
     }
 
     let mut performance_ids = HashSet::new();
@@ -1155,8 +1171,8 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
     for record in &backup.overtime_records {
         tx.execute(
             "INSERT INTO overtime_records \
-             (id, project_id, member_id, date, hours, status, note, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (id, project_id, member_id, date, hours, status, absence_reason, note, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 &record.id,
                 &record.project_id,
@@ -1164,6 +1180,7 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
                 &record.date,
                 record.hours,
                 record.status.as_str(),
+                &record.absence_reason,
                 &record.note,
                 &record.created_at,
                 &record.updated_at,
@@ -1681,6 +1698,7 @@ mod tests {
                 date: "2026-10-31".to_string(),
                 hours: 8.0,
                 status: Some(OvertimeStatus::Done),
+                absence_reason: None,
                 note: None,
             },
         )
@@ -1712,6 +1730,78 @@ mod tests {
         assert_eq!(snapshot.member_tenures[0].ended_at, None);
         assert_eq!(snapshot.overtime_records[0].member_id, member.id);
         assert_eq!(snapshot.performance_records[0].member_id, member.id);
+    }
+
+    #[test]
+    fn overtime_absence_round_trips_and_rejects_dirty_backup() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        let project = repo::create_project(
+            &mut conn,
+            NewProjectInput {
+                name: "项目C".to_string(),
+                description: None,
+                color: None,
+                starred: None,
+            },
+        )
+        .expect("创建项目");
+        let roles = repo::get_project_roles(&conn, &project.id).expect("项目角色");
+        let member = repo::create_team_member(
+            &mut conn,
+            NewTeamMemberInput {
+                project_id: project.id.clone(),
+                role_id: roles[0].id.clone(),
+                name: "王五".to_string(),
+                joined_at: Some("2026-10-01".to_string()),
+                note: None,
+            },
+        )
+        .expect("创建成员");
+        repo::create_overtime(
+            &mut conn,
+            NewOvertimeInput {
+                member_id: member.id.clone(),
+                date: "2026-10-31".to_string(),
+                hours: 8.0,
+                status: Some(OvertimeStatus::Absent),
+                absence_reason: Some("临时发烧请假".to_string()),
+                note: None,
+            },
+        )
+        .expect("创建未出勤记录");
+
+        let backup = build(&conn).expect("构建备份");
+        let json = serde_json::to_string(&backup).expect("序列化备份");
+        assert!(json.contains("\"absenceReason\":\"临时发烧请假\""));
+
+        let mut target = db::open_in_memory().expect("目标内存库");
+        let restored = restore(&mut target, &backup).expect("恢复备份");
+        assert_eq!(restored.overtime_records, 1);
+        let snapshot = repo::get_snapshot(&target).expect("快照");
+        assert_eq!(snapshot.overtime_records[0].status, OvertimeStatus::Absent);
+        assert_eq!(snapshot.overtime_records[0].absence_reason, "临时发烧请假");
+
+        // 旧备份没有 absenceReason 字段：按空串兼容。
+        let mut value: serde_json::Value = serde_json::from_str(&json).expect("解析 JSON");
+        value["overtimeRecords"][0]
+            .as_object_mut()
+            .expect("加班记录对象")
+            .remove("absenceReason");
+        let legacy: BackupFile = serde_json::from_value(value).expect("旧备份反序列化");
+        assert_eq!(legacy.overtime_records[0].absence_reason, "");
+        assert_eq!(legacy.overtime_records[0].status, OvertimeStatus::Absent);
+
+        // 未出勤缺少原因：拒绝。
+        let mut missing = backup.clone();
+        missing.overtime_records[0].absence_reason = String::new();
+        let error = validate(&missing).expect_err("未出勤缺少原因应被拒绝");
+        assert!(error.contains("未出勤记录缺少原因"), "错误：{error}");
+
+        // 非未出勤却带原因：拒绝。
+        let mut dirty = backup.clone();
+        dirty.overtime_records[0].status = OvertimeStatus::Done;
+        let error = validate(&dirty).expect_err("非未出勤不应带原因");
+        assert!(error.contains("不应包含未出勤原因"), "错误：{error}");
     }
 
     #[test]

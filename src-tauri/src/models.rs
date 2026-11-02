@@ -475,6 +475,8 @@ impl MemberStatus {
 pub enum OvertimeStatus {
     Planned,
     Done,
+    /// V0.13.2：排了班但未出勤，必须填写 `absence_reason`。
+    Absent,
 }
 
 impl OvertimeStatus {
@@ -482,12 +484,14 @@ impl OvertimeStatus {
         match self {
             Self::Planned => "planned",
             Self::Done => "done",
+            Self::Absent => "absent",
         }
     }
 
     pub fn from_db(raw: &str) -> Self {
         match raw {
             "done" => Self::Done,
+            "absent" => Self::Absent,
             _ => Self::Planned,
         }
     }
@@ -623,7 +627,7 @@ pub struct MemberTenure {
     pub updated_at: String,
 }
 
-/// 周末加班记录：planned=排班，done=已发生。
+/// 周末加班记录：planned=排班，done=已出勤，absent=未出勤（带原因）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OvertimeRecord {
@@ -635,6 +639,9 @@ pub struct OvertimeRecord {
     pub date: String,
     pub hours: f64,
     pub status: OvertimeStatus,
+    /// V0.13.2：未出勤原因；仅 status=absent 时非空，旧备份缺省为空串。
+    #[serde(default)]
+    pub absence_reason: String,
     pub note: String,
     pub created_at: String,
     pub updated_at: String,
@@ -1402,6 +1409,8 @@ pub struct NewOvertimeInput {
     #[serde(default)]
     pub status: Option<OvertimeStatus>,
     #[serde(default)]
+    pub absence_reason: Option<String>,
+    #[serde(default)]
     pub note: Option<String>,
 }
 
@@ -1416,6 +1425,8 @@ pub struct OvertimePatch {
     pub hours: Option<f64>,
     #[serde(default)]
     pub status: Option<OvertimeStatus>,
+    #[serde(default)]
+    pub absence_reason: Option<String>,
     #[serde(default)]
     pub note: Option<String>,
 }

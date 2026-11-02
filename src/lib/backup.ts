@@ -6,6 +6,10 @@
  * cards 包含回收站任务（deletedAt 非空），恢复时整体替换。
  */
 import { normalizeSavedViewFilters, normalizeSavedViewSort } from './savedViews';
+import {
+  normalizeOvertimeAbsenceReason,
+  validateOvertimeAbsenceReason,
+} from './team';
 import type {
   AutomationRule,
   BackupFile,
@@ -24,6 +28,7 @@ import type {
   InboxItem,
   List,
   OvertimeRecord,
+  OvertimeStatus,
   PerformanceRecord,
   Project,
   ProjectMetaField,
@@ -627,13 +632,22 @@ export function parseBackup(text: string): BackupFile {
     if (!projectIds.has(projectId)) throw new Error('加班记录引用了不存在的项目');
     const hours = typeof item.hours === 'number' ? item.hours : 0;
     if (!Number.isFinite(hours) || hours <= 0) throw new Error('备份中的加班时长无效');
+    const status: OvertimeStatus =
+      item.status === 'done' || item.status === 'absent' ? item.status : 'planned';
+    const absenceReason = typeof item.absenceReason === 'string' ? item.absenceReason : '';
+    const absenceError = validateOvertimeAbsenceReason(status, absenceReason);
+    if (absenceError) throw new Error(`备份中的未出勤记录不完整：${absenceError}`);
+    if (status !== 'absent' && absenceReason.trim()) {
+      throw new Error('备份中的非未出勤记录不应包含未出勤原因');
+    }
     overtimeRecords.push({
       id,
       projectId,
       memberId,
       date: requireString(item.date, 'overtimeRecords[].date'),
       hours,
-      status: item.status === 'done' ? 'done' : 'planned',
+      status,
+      absenceReason: normalizeOvertimeAbsenceReason(status, absenceReason),
       note: typeof item.note === 'string' ? item.note : '',
       createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
       updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),

@@ -331,4 +331,90 @@ describe('backup helpers', () => {
 
     expect(() => parseBackup(JSON.stringify(base))).toThrow('不存在的自定义字段');
   });
+
+  it('备份往返保留未出勤原因，并拒绝脏的未出勤记录', () => {
+    const stamp = '2026-01-01T00:00:00.000Z';
+    const withProject = () => {
+      const backup = validBackup();
+      backup.projects = [
+        {
+          id: 'p_1',
+          name: '项目',
+          description: '',
+          color: '#0f766e',
+          status: 'active',
+          starred: false,
+          createdAt: stamp,
+          updatedAt: stamp,
+        },
+      ];
+      backup.projectRoles = [
+        {
+          id: 'pr_1',
+          projectId: 'p_1',
+          name: '开发',
+          color: '#2f6fd0',
+          position: 0,
+          createdAt: stamp,
+          updatedAt: stamp,
+        },
+      ];
+      backup.teamMembers = [
+        {
+          id: 'm_1',
+          projectId: 'p_1',
+          roleId: 'pr_1',
+          name: '张三',
+          role: 'dev',
+          status: 'active',
+          joinedAt: '2026-01-01',
+          releasedAt: null,
+          note: '',
+          createdAt: stamp,
+          updatedAt: stamp,
+        },
+      ];
+      backup.overtimeRecords = [
+        {
+          id: 'ot_1',
+          projectId: 'p_1',
+          memberId: 'm_1',
+          date: '2026-10-31',
+          hours: 8,
+          status: 'absent',
+          absenceReason: '临时发烧请假',
+          note: '',
+          createdAt: stamp,
+          updatedAt: stamp,
+        },
+      ];
+      return backup;
+    };
+
+    const parsed = parseBackup(JSON.stringify(withProject()));
+    expect(parsed.overtimeRecords[0]).toMatchObject({
+      status: 'absent',
+      absenceReason: '临时发烧请假',
+    });
+    expect(summarizeBackup(parsed).overtimeRecords).toBe(1);
+
+    const legacy = withProject();
+    legacy.overtimeRecords[0] = {
+      ...legacy.overtimeRecords[0],
+      status: 'done',
+    };
+    delete (legacy.overtimeRecords[0] as { absenceReason?: string }).absenceReason;
+    expect(parseBackup(JSON.stringify(legacy)).overtimeRecords[0].absenceReason).toBe('');
+
+    const missingReason = withProject();
+    missingReason.overtimeRecords[0] = {
+      ...missingReason.overtimeRecords[0],
+      absenceReason: '   ',
+    };
+    expect(() => parseBackup(JSON.stringify(missingReason))).toThrow('未出勤原因');
+
+    const dirty = withProject();
+    dirty.overtimeRecords[0] = { ...dirty.overtimeRecords[0], status: 'done' };
+    expect(() => parseBackup(JSON.stringify(dirty))).toThrow('不应包含未出勤原因');
+  });
 });

@@ -6,7 +6,10 @@
 //! V0.2 起任务表新增 `start_date / labels / subtasks` 三列，V0.3 再新增 `deleted_at`
 //! 软删除列：新库直接按最新结构建表，旧库（V0.1 / V0.2 已有用户数据）在启动时按列存在性
 //! 做幂等 `ALTER TABLE` 迁移，不重建表。V0.4 新增 `card_dependencies` 依赖表。
-//! 迁移完成后写入 `PRAGMA user_version = 17`。
+//! 迁移完成后写入 `PRAGMA user_version = 18`。
+//!
+//! V0.13.2 为 `overtime_records` 增加 `absence_reason` 列（未出勤原因），
+//! 旧库按列存在性幂等补齐；`status` 新增 `absent` 取值，无需改表约束。
 //!
 //! V0.12 起 `card_dependencies` 增加 `relation_type` 列（任务关系类型），
 //! 旧库按「前置阻塞」补齐，不丢已有依赖。
@@ -243,6 +246,7 @@ CREATE TABLE IF NOT EXISTS overtime_records (
     date       TEXT NOT NULL,
     hours      REAL NOT NULL DEFAULT 0,
     status     TEXT NOT NULL DEFAULT 'planned',
+    absence_reason TEXT NOT NULL DEFAULT '',
     note       TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -454,7 +458,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 17;
+const SCHEMA_VERSION: i64 = 18;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -545,6 +549,12 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
             "overtime_records",
             "project_id",
             "ALTER TABLE overtime_records ADD COLUMN project_id TEXT",
+        ),
+        // V0.13.2：未出勤原因，旧库按列存在性补齐，已有记录默认空串。
+        (
+            "overtime_records",
+            "absence_reason",
+            "ALTER TABLE overtime_records ADD COLUMN absence_reason TEXT NOT NULL DEFAULT ''",
         ),
         (
             "performance_records",
@@ -1084,6 +1094,53 @@ mod tests {
             )
             .expect("统计内置视图");
         assert_eq!(builtin_count, 3, "既有看板应补齐三个内置视图");
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user_version");
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    /// V0.13.2：旧库（v17）的 `overtime_records` 没有 `absence_reason` 列时，
+    /// 启动流程幂等补列、保留已有加班记录，并把 `user_version` 升到 18。
+    #[test]
+    fn v17_database_gains_absence_reason_column() {
+        let connection = Connection::open_in_memory().expect("memory database");
+        // 模拟 v17 旧库：从建表语句中剔除 V0.13.2 新增的列。
+        let v17_schema = SCHEMA.replace("    absence_reason TEXT NOT NULL DEFAULT '',\n", "");
+        assert!(!v17_schema.contains("absence_reason"));
+        connection.execute_batch(&v17_schema).expect("create v17 schema");
+        connection
+            .execute_batch(
+                "INSERT INTO projects (id, name, created_at, updated_at) \
+                     VALUES ('p1', '项目', 'now', 'now');
+                 INSERT INTO team_members \
+                     (id, project_id, name, joined_at, created_at, updated_at) \
+                     VALUES ('m1', 'p1', '张三', '2026-01-01', 'now', 'now');
+                 INSERT INTO overtime_records \
+                     (id, project_id, member_id, date, hours, status, note, created_at, updated_at) \
+                 VALUES ('ot1', 'p1', 'm1', '2026-10-31', 8, 'done', '', 'now', 'now');
+                 PRAGMA user_version = 17;",
+            )
+            .expect("seed v17 overtime record");
+
+        let columns = table_columns(&connection, "overtime_records").expect("read columns");
+        assert!(!columns.iter().any(|name| name == "absence_reason"));
+
+        // 走两次真实启动流程，验证补列与幂等。
+        init(&connection).expect("启动流程应补齐 absence_reason 列");
+        init(&connection).expect("重复启动应保持幂等");
+
+        let columns = table_columns(&connection, "overtime_records").expect("read columns");
+        assert!(columns.iter().any(|name| name == "absence_reason"));
+        let (status, reason): (String, String) = connection
+            .query_row(
+                "SELECT status, absence_reason FROM overtime_records WHERE id = 'ot1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read migrated overtime record");
+        assert_eq!(status, "done");
+        assert_eq!(reason, "");
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("read user_version");
