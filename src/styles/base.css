@@ -650,10 +650,11 @@ ol {
 }
 
 /* ---------- 遮罩 / 弹窗 ---------- */
+/* 确认框、普通弹窗的遮罩必须高于任务详情（z-index 120/121）与抽屉，否则会被盖住。 */
 .overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 130;
   display: grid;
   place-items: center;
   padding: 24px;

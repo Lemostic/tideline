@@ -87,7 +87,7 @@
 从 [GitHub Releases](https://github.com/Lemostic/tideline/releases/latest) 下载最新的 Windows 安装包：
 
 ```
-tideline-0.14.0-win64-setup.exe
+tideline-0.14.1-win64-setup.exe
 ```
 
 - 系统级安装，默认目录 **`C:\Program Files\Tideline`**，安装/卸载需要管理员权限。
@@ -131,7 +131,7 @@ src-tauri/        Tauri 配置、Rust 命令、SQLite 迁移、NSIS 安装器
 docs/             开发计划 / 版本规划 / 发布说明 / 更新记录
 ```
 
-测试：Vitest 235 项、Rust `cargo test` 161 项、Playwright E2E（本地运行）。完整数据模型与验收标准见 [`docs/开发计划.md`](docs/开发计划.md)。
+测试：Vitest 235 项、Rust `cargo test` 162 项、Playwright E2E（本地运行）。完整数据模型与验收标准见 [`docs/开发计划.md`](docs/开发计划.md)。
 
 ## 已知限制
 
@@ -149,6 +149,7 @@ docs/             开发计划 / 版本规划 / 发布说明 / 更新记录
 
 | 版本 | 变更 |
 | --- | --- |
+| **V0.14.1** | 修复任务详情弹窗内确认框被遮挡、无法点击的层级问题 |
 | **V0.14.0** | 子任务升级为真实任务：任意层级、与主任务一致的字段与任务详情、面包屑导航；旧子任务自动迁移，schema v19 |
 | **V0.13.2** | 周末加班支持「未出勤」标记与自定义原因：未出勤不计入加班工时，周分组汇总已出勤 / 未出勤 / 排班条数，记录可编辑；schema v18 |
 | **V0.11.1** | 统一页面读数条与交互反馈；仪表盘增加吞吐、周期对比、任务年龄、效率指标与结构维度交叉筛选 |
