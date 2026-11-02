@@ -418,4 +418,42 @@ describe('backup helpers', () => {
     dirty.overtimeRecords[0] = { ...dirty.overtimeRecords[0], status: 'done' };
     expect(() => parseBackup(JSON.stringify(dirty))).toThrow('不应包含未出勤原因');
   });
+
+  it('旧备份的子任务清单展开为真实子卡片', () => {
+    const backup = validBackup();
+    backup.dependencies = [];
+    backup.cards = [
+      {
+        ...card(),
+        id: 'c_legacy',
+        subtasks: [
+          { id: 's1', title: '子1', done: false },
+          { id: 's2', title: '子2', done: true },
+        ],
+      },
+    ];
+    const parsed = parseBackup(JSON.stringify(backup));
+    const children = parsed.cards.filter((item) => item.parentCardId === 'c_legacy');
+    expect(children.map((item) => item.title)).toEqual(['子1', '子2']);
+    expect(children[1].completed).toBe(true);
+    expect(parsed.cards.find((item) => item.id === 'c_legacy')?.subtasks).toEqual([]);
+  });
+
+  it('拒绝父任务缺失或成环的备份任务树', () => {
+    const missing = validBackup();
+    missing.dependencies = [];
+    missing.cards = [
+      { ...card(), id: 'p1' },
+      { ...card(), id: 'ch1', parentCardId: 'missing' },
+    ];
+    expect(() => parseBackup(JSON.stringify(missing))).toThrow('父任务不存在');
+
+    const cyclic = validBackup();
+    cyclic.dependencies = [];
+    cyclic.cards = [
+      { ...card(), id: 'p1', parentCardId: 'ch1' },
+      { ...card(), id: 'ch1', parentCardId: 'p1' },
+    ];
+    expect(() => parseBackup(JSON.stringify(cyclic))).toThrow('循环');
+  });
 });

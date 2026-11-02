@@ -12,6 +12,7 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   backupFilename,
   createBackup,
+  expandLegacySubtaskCards,
   parseBackup,
   serializeBackup,
   summarizeBackup,
@@ -23,6 +24,7 @@ import {
   normalizeSavedViewSort,
 } from './savedViews';
 import { todayKey } from './date';
+import { MAX_TASK_DEPTH } from './taskTree';
 import {
   normalizeOvertimeAbsenceReason,
   validateOvertimeAbsenceReason,
@@ -1012,6 +1014,7 @@ function loadLocalDb(): LocalDb {
         : [],
     };
     // 旧数据没有保存视图：给每个看板补齐内置视图（与 Rust 侧迁移同一套语义）
+    db.cards = expandLegacySubtaskCards(db.cards);
     for (const board of db.boards) ensureLocalBuiltinSavedViews(db, board.id);
     return db;
   } catch {
@@ -1053,11 +1056,56 @@ function touchBoard(db: LocalDb, boardId: string): void {
 // 回收站里的任务不参与顺序归一化
 function normalizePositions(db: LocalDb, listId: string): void {
   db.cards
-    .filter((c) => c.listId === listId && !c.deletedAt)
+    .filter((c) => c.listId === listId && c.parentCardId === null && !c.deletedAt)
     .sort((a, b) => a.position - b.position)
     .forEach((card, index) => {
       card.position = index;
     });
+}
+
+/** V0.14.0：递归子树 id（含自身）。 */
+function cardSubtreeIds(db: LocalDb, rootId: string): string[] {
+  const children = new Map<string, Card[]>();
+  for (const card of db.cards) {
+    if (!card.parentCardId) continue;
+    const bucket = children.get(card.parentCardId) ?? [];
+    bucket.push(card);
+    children.set(card.parentCardId, bucket);
+  }
+  const ids = [rootId];
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const id = queue.shift() as string;
+    for (const child of children.get(id) ?? []) {
+      ids.push(child.id);
+      queue.push(child.id);
+    }
+  }
+  return ids;
+}
+
+/** V0.14.0：主任务移动列表时同步整棵子树。 */
+function syncLocalSubtreeList(db: LocalDb, rootId: string, listId: string): void {
+  for (const id of cardSubtreeIds(db, rootId)) {
+    const card = db.cards.find((item) => item.id === id);
+    if (card) card.listId = listId;
+  }
+}
+
+/** V0.14.0：沿父链计算深度（主任务为 0），并拒绝断链/成环。 */
+function localCardDepth(db: LocalDb, cardId: string): number {
+  let depth = 0;
+  const seen = new Set<string>();
+  let current = db.cards.find((item) => item.id === cardId);
+  while (current?.parentCardId) {
+    if (seen.has(current.parentCardId)) throw new Error('父任务存在循环');
+    seen.add(current.parentCardId);
+    depth += 1;
+    if (depth > MAX_TASK_DEPTH) throw new Error('任务层级过深');
+    current = db.cards.find((item) => item.id === current?.parentCardId);
+    if (!current) throw new Error('父任务不存在');
+  }
+  return depth;
 }
 
 function normalizeListPositions(db: LocalDb, boardId: string): void {
@@ -1545,13 +1593,31 @@ const localApi: TidelineApi = {
     validateCardMinutes(input);
     const db = loadLocalDb();
     requireList(db, input.listId);
-    const siblings = db.cards.filter((c) => c.listId === input.listId && !c.deletedAt);
+    const parentCardId = input.parentCardId ?? null;
+    if (parentCardId) {
+      const parent = requireCard(db, parentCardId);
+      if (parent.boardId !== input.boardId) {
+        throw new Error('子任务必须与父任务在同一看板');
+      }
+      if (parent.listId !== input.listId) {
+        throw new Error('子任务必须跟随父任务列表');
+      }
+      if (parent.deletedAt) {
+        throw new Error('父任务在回收站中，不能添加子任务');
+      }
+      if (localCardDepth(db, parentCardId) + 1 > MAX_TASK_DEPTH) {
+        throw new Error('任务层级过深');
+      }
+    }
+    const siblings = db.cards.filter(
+      (c) => c.listId === input.listId && !c.deletedAt && c.parentCardId === parentCardId,
+    );
     const now = nowISO();
     const card: Card = {
       id: createId('c'),
       boardId: input.boardId,
       listId: input.listId,
-      parentCardId: input.parentCardId ?? null,
+      parentCardId,
       title: input.title.trim() || '未命名任务',
       description: input.description?.trim() ?? '',
       dueDate: input.dueDate ?? null,
@@ -1593,14 +1659,23 @@ const localApi: TidelineApi = {
     if (patch.completed !== undefined) card.completed = patch.completed;
     if (patch.labels !== undefined) card.labels = [...patch.labels];
     if (patch.subtasks !== undefined) card.subtasks = patch.subtasks.map((item) => ({ ...item }));
+    if (card.parentCardId && patch.listId !== undefined && patch.listId !== card.listId) {
+      throw new Error('子任务不能单独移动列表');
+    }
     if (patch.listId !== undefined && patch.listId !== card.listId) {
       const targetList = requireList(db, patch.listId);
       if (targetList.boardId !== card.boardId) throw new Error('不能跨看板移动任务');
       const oldListId = card.listId;
       card.listId = patch.listId;
+      // 主任务移动列表时，整棵子树一起跟随。
+      syncLocalSubtreeList(db, card.id, card.listId);
       normalizePositions(db, oldListId);
       card.position = db.cards.filter(
-        (c) => c.listId === card.listId && c.id !== card.id && !c.deletedAt,
+        (c) =>
+          c.listId === card.listId &&
+          c.id !== card.id &&
+          c.parentCardId === null &&
+          !c.deletedAt,
       ).length;
     }
     card.updatedAt = nowISO();
@@ -1625,11 +1700,17 @@ const localApi: TidelineApi = {
     const db = loadLocalDb();
     const card = requireCard(db, id);
     if (card.deletedAt) return;
-    card.deletedAt = nowISO();
-    card.updatedAt = card.deletedAt;
+    const now = nowISO();
+    const ids = cardSubtreeIds(db, card.id);
+    for (const subtreeId of ids) {
+      const item = requireCard(db, subtreeId);
+      if (item.deletedAt) continue;
+      item.deletedAt = now;
+      item.updatedAt = now;
+    }
     pushActivity(db, { cardId: card.id, eventType: 'deleted' });
-    pruneDependencies(db, new Set([card.id]));
-    pruneCardFieldValues(db, new Set([card.id]));
+    pruneDependencies(db, new Set(ids));
+    pruneCardFieldValues(db, new Set(ids));
     normalizePositions(db, card.listId);
     touchBoard(db, card.boardId);
     saveLocalDb(db);
@@ -1648,14 +1729,40 @@ const localApi: TidelineApi = {
     if (!card.deletedAt) return card;
     requireBoard(db, card.boardId);
     requireList(db, card.listId);
-    card.deletedAt = null;
-    const activeSiblings = db.cards.filter(
-      (c) => c.listId === card.listId && c.id !== card.id && !c.deletedAt,
+    const now = nowISO();
+    // 先恢复仍被删除的祖先链（根 → 父），避免子任务悬空。
+    const ancestors: Card[] = [];
+    let cursor = card.parentCardId;
+    while (cursor) {
+      const parent = db.cards.find((item) => item.id === cursor);
+      if (!parent) throw new Error('父任务不存在');
+      ancestors.unshift(parent);
+      cursor = parent.parentCardId;
+    }
+    for (const ancestor of ancestors) {
+      if (!ancestor.deletedAt) continue;
+      ancestor.deletedAt = null;
+      ancestor.updatedAt = now;
+      pushActivity(db, { cardId: ancestor.id, eventType: 'restored' });
+      touchBoard(db, ancestor.boardId);
+    }
+    const siblings = db.cards.filter(
+      (item) =>
+        item.listId === card.listId &&
+        item.id !== card.id &&
+        item.parentCardId === card.parentCardId &&
+        !item.deletedAt,
     );
-    card.position = activeSiblings.length
-      ? Math.max(...activeSiblings.map((c) => c.position)) + 1
+    card.position = siblings.length
+      ? Math.max(...siblings.map((item) => item.position)) + 1
       : 0;
-    card.updatedAt = nowISO();
+    for (const subtreeId of cardSubtreeIds(db, card.id)) {
+      const item = requireCard(db, subtreeId);
+      if (!item.deletedAt) continue;
+      item.deletedAt = null;
+      item.updatedAt = now;
+    }
+    card.updatedAt = now;
     pushActivity(db, { cardId: card.id, eventType: 'restored' });
     touchBoard(db, card.boardId);
     saveLocalDb(db);
@@ -1664,10 +1771,11 @@ const localApi: TidelineApi = {
 
   async purgeCard({ id }) {
     const db = loadLocalDb();
-    db.cards = db.cards.filter((card) => card.id !== id);
-    pruneDependencies(db, new Set([id]));
-    pruneCardFieldValues(db, new Set([id]));
-    pruneGoalCards(db, new Set([id]));
+    const ids = new Set(cardSubtreeIds(db, id));
+    db.cards = db.cards.filter((card) => !ids.has(card.id));
+    pruneDependencies(db, ids);
+    pruneCardFieldValues(db, ids);
+    pruneGoalCards(db, ids);
     saveLocalDb(db);
   },
 
@@ -1683,11 +1791,18 @@ const localApi: TidelineApi = {
   async moveCard({ cardId, toListId, toIndex }) {
     const db = loadLocalDb();
     const card = requireCard(db, cardId);
+    if (card.parentCardId) throw new Error('子任务不能单独移动列表');
     const targetList = requireList(db, toListId);
     if (targetList.boardId !== card.boardId) throw new Error('不能跨看板移动任务');
     const oldListId = card.listId;
     const targetCards = db.cards
-      .filter((c) => c.listId === toListId && c.id !== cardId && !c.deletedAt)
+      .filter(
+        (c) =>
+          c.listId === toListId &&
+          c.id !== cardId &&
+          c.parentCardId === null &&
+          !c.deletedAt,
+      )
       .sort((a, b) => a.position - b.position);
     const index = Math.max(0, Math.min(toIndex, targetCards.length));
     targetCards.splice(index, 0, card);
@@ -1695,6 +1810,7 @@ const localApi: TidelineApi = {
     targetCards.forEach((c, i) => {
       c.position = i;
     });
+    syncLocalSubtreeList(db, card.id, toListId);
     if (oldListId !== toListId) {
       normalizePositions(db, oldListId);
       pushActivity(db, { cardId: card.id, eventType: 'moved' });

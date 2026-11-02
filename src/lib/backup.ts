@@ -6,6 +6,7 @@
  * cards 包含回收站任务（deletedAt 非空），恢复时整体替换。
  */
 import { normalizeSavedViewFilters, normalizeSavedViewSort } from './savedViews';
+import { MAX_TASK_DEPTH } from './taskTree';
 import {
   normalizeOvertimeAbsenceReason,
   validateOvertimeAbsenceReason,
@@ -106,9 +107,60 @@ export function summarizeBackup(
   };
 }
 
+/**
+ * V0.14.0：把旧 `cards[].subtasks` 清单展开为真实子卡片。
+ *
+ * 与桌面端迁移等价：保留标题、完成状态与顺序；子卡片继承父任务的看板/列表/
+ * 删除状态；id 冲突时追加序号后缀；父任务 `subtasks` 清空。
+ */
+export function expandLegacySubtaskCards(cards: Card[]): Card[] {
+  const existing = new Set(cards.map((card) => card.id));
+  const result: Card[] = [];
+  for (const card of cards) {
+    const legacy = Array.isArray(card.subtasks) ? card.subtasks : [];
+    const parent: Card = {
+      ...card,
+      parentCardId: typeof card.parentCardId === 'string' ? card.parentCardId : null,
+      subtasks: [],
+    };
+    result.push(parent);
+    legacy.forEach((subtask, index) => {
+      let id = `sub_${card.id}_${index}`;
+      let suffix = 1;
+      while (existing.has(id)) {
+        id = `sub_${card.id}_${index}_${suffix}`;
+        suffix += 1;
+      }
+      existing.add(id);
+      result.push({
+        ...parent,
+        id,
+        parentCardId: card.id,
+        title: String(subtask?.title ?? ''),
+        completed: Boolean(subtask?.done),
+        description: '',
+        dueDate: null,
+        startDate: null,
+        estimatedMinutes: null,
+        actualMinutes: null,
+        priority: null,
+        accent: null,
+        deletedAt: parent.deletedAt,
+        labels: [],
+        subtasks: [],
+        position: index,
+        recurrenceId: null,
+        generatedFromId: null,
+        createdAt: parent.updatedAt,
+        updatedAt: parent.updatedAt,
+      });
+    });
+  }
+  return result;
+}
+
 /** 用当前全量数据（含回收站、依赖、看板集与目标）生成备份对象。 */
-export function createBackup(data: BackupData): BackupFile {
-  return {
+export function createBackup(data: BackupData): BackupFile {  return {
     app: BACKUP_APP,
     formatVersion: BACKUP_FORMAT_VERSION,
     exportedAt: new Date().toISOString(),
@@ -213,12 +265,16 @@ export function parseBackup(text: string): BackupFile {
     color: list.color ?? 'slate',
     wipLimit: typeof list.wipLimit === 'number' ? list.wipLimit : null,
   }));
-  const cards = (requireArray(raw.cards, 'cards') as Card[]).map((card) => ({
+  const parsedCards = (requireArray(raw.cards, 'cards') as Card[]).map((card) => ({
     ...card,
+    parentCardId:
+      typeof card.parentCardId === 'string' ? card.parentCardId : null,
     accent: card.accent ?? null,
     estimatedMinutes: card.estimatedMinutes ?? null,
     actualMinutes: card.actualMinutes ?? null,
   }));
+  // V0.14.0：旧备份的 subtasks JSON 展开为真实子卡片。
+  const cards = expandLegacySubtaskCards(parsedCards);
   const inbox = requireArray(raw.inbox, 'inbox') as InboxItem[];
 
   const boardIds = new Set<string>();
@@ -263,6 +319,39 @@ export function parseBackup(text: string): BackupFile {
       if (minutes !== null && (!Number.isSafeInteger(minutes) || minutes < 0)) {
         throw new Error(`备份中的 ${field} 必须是非负整数或 null`);
       }
+    }
+  }
+
+  // V0.14.0：任务树父链校验（存在、同看板、无自指/环、深度上限）。
+  const cardById = new Map(cards.map((card) => [card.id, card]));
+  for (const card of cards) {
+    if (!card.parentCardId) continue;
+    const parent = cardById.get(card.parentCardId);
+    if (!parent) {
+      throw new Error(`任务「${card.title}」的父任务不存在：${card.parentCardId}`);
+    }
+    if (parent.id === card.id) {
+      throw new Error('备份中存在任务把自己当作父任务的脏数据');
+    }
+    if (parent.boardId !== card.boardId) {
+      throw new Error(`子任务「${card.title}」与父任务不在同一看板`);
+    }
+    if (parent.listId !== card.listId) {
+      throw new Error(`子任务「${card.title}」必须跟随父任务的列表`);
+    }
+    let depth = 0;
+    let current: Card | undefined = card;
+    const seen = new Set<string>();
+    while (current?.parentCardId) {
+      if (seen.has(current.id)) {
+        throw new Error(`任务「${card.title}」的父任务存在循环`);
+      }
+      seen.add(current.id);
+      depth += 1;
+      if (depth > MAX_TASK_DEPTH) {
+        throw new Error(`任务「${card.title}」的层级过深`);
+      }
+      current = cardById.get(current.parentCardId);
     }
   }
 
