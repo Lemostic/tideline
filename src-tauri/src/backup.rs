@@ -111,7 +111,71 @@ fn dependency_graph_has_cycle(edges: &HashMap<String, Vec<String>>) -> bool {
 
 /// 兼容 V0.8 旧备份：旧备份只有团队人员/加班/绩效，没有项目、角色与项目归属。
 /// 恢复前先补一个默认项目与默认角色，并把旧记录归入默认项目。
+/// V0.14.0：把旧备份里的 `cards[].subtasks` JSON 展开为真实子卡片。
+///
+/// 与数据库迁移等价：保留标题、完成状态与顺序，清空旧 JSON；id 冲突时追加
+/// 序号后缀。展开在备份副本上进行，不修改调用方数据。
+fn expand_legacy_subtasks(backup: &mut BackupFile) {
+    let mut existing: HashSet<String> = backup.cards.iter().map(|card| card.id.clone()).collect();
+    let mut children: Vec<Card> = Vec::new();
+    for card in backup.cards.iter_mut() {
+        if card.subtasks.is_empty() {
+            continue;
+        }
+        let subtasks = std::mem::take(&mut card.subtasks);
+        let base = card.clone();
+        let parent_id = card.id.clone();
+        for (index, subtask) in subtasks.into_iter().enumerate() {
+            let mut id = format!("sub_{parent_id}_{index}");
+            let mut suffix = 1usize;
+            while existing.contains(&id) {
+                id = format!("sub_{parent_id}_{index}_{suffix}");
+                suffix += 1;
+            }
+            existing.insert(id.clone());
+            children.push(Card {
+                id,
+                board_id: base.board_id.clone(),
+                list_id: base.list_id.clone(),
+                parent_card_id: Some(parent_id.clone()),
+                title: subtask.title,
+                description: String::new(),
+                due_date: None,
+                start_date: None,
+                estimated_minutes: None,
+                actual_minutes: None,
+                priority: None,
+                accent: None,
+                completed: subtask.done,
+                deleted_at: base.deleted_at.clone(),
+                labels: Vec::new(),
+                subtasks: Vec::new(),
+                position: index as i64,
+                recurrence_id: None,
+                generated_from_id: None,
+                created_at: base.updated_at.clone(),
+                updated_at: base.updated_at.clone(),
+            });
+        }
+    }
+    backup.cards.extend(children);
+}
+
 fn normalize_legacy_backup(backup: &mut BackupFile) {
+    // V0.14.0：旧子任务 JSON 展开为真实卡片；子任务列表跟随父任务（兼容旧备份）。
+    expand_legacy_subtasks(backup);
+    let list_for_parent: HashMap<String, String> = backup
+        .cards
+        .iter()
+        .map(|card| (card.id.clone(), card.list_id.clone()))
+        .collect();
+    for card in &mut backup.cards {
+        if let Some(parent_id) = card.parent_card_id.as_ref() {
+            if let Some(parent_list) = list_for_parent.get(parent_id) {
+                card.list_id = parent_list.clone();
+            }
+        }
+    }
     let has_legacy_team = !backup.team_members.is_empty()
         || !backup.overtime_records.is_empty()
         || !backup.performance_records.is_empty();
@@ -313,6 +377,45 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
             return Err(format!("任务「{}」的工时分钟数不能为负数", card.title));
         }
         card_board.insert(card.id.as_str(), card.board_id.as_str());
+    }
+
+    // V0.14.0：任务树父链校验（存在、同看板、同列表、无自指/环、深度上限）。
+    let card_by_id: HashMap<&str, &Card> = backup
+        .cards
+        .iter()
+        .map(|card| (card.id.as_str(), card))
+        .collect();
+    for card in &backup.cards {
+        let Some(parent_id) = card.parent_card_id.as_deref() else {
+            continue;
+        };
+        let Some(parent) = card_by_id.get(parent_id) else {
+            return Err(format!("任务「{}」的父任务不存在：{parent_id}", card.title));
+        };
+        if parent.id == card.id {
+            return Err("备份中存在任务把自己当作父任务的脏数据".to_string());
+        }
+        if parent.board_id != card.board_id {
+            return Err(format!("子任务「{}」与父任务不在同一看板", card.title));
+        }
+        if parent.list_id != card.list_id {
+            return Err(format!("子任务「{}」必须跟随父任务的列表", card.title));
+        }
+        let mut depth = 0usize;
+        let mut seen = HashSet::new();
+        let mut cursor = Some(card.id.as_str());
+        while let Some(id) = cursor {
+            if !seen.insert(id) {
+                return Err(format!("任务「{}」的父任务存在循环", card.title));
+            }
+            if depth > crate::models::MAX_TASK_DEPTH {
+                return Err(format!("任务「{}」的层级过深", card.title));
+            }
+            cursor = card_by_id
+                .get(id)
+                .and_then(|item| item.parent_card_id.as_deref());
+            depth += 1;
+        }
     }
 
     // V0.11：重复配置与规则引用的任务、列表必须存在。
@@ -962,14 +1065,15 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
             .map_err(|error| format!("子任务序列化失败：{error}"))?;
         tx.execute(
             "INSERT INTO cards \
-             (id, board_id, list_id, title, description, due_date, start_date, priority, accent, \
+             (id, board_id, list_id, parent_card_id, title, description, due_date, start_date, priority, accent, \
               completed, labels, subtasks, position, deleted_at, recurrence_id, generated_from_id, \
               estimated_minutes, actual_minutes, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             params![
                 &card.id,
                 &card.board_id,
                 &card.list_id,
+                &card.parent_card_id,
                 &card.title,
                 &card.description,
                 &card.due_date,
@@ -1336,17 +1440,25 @@ mod tests {
         assert!(repo::delete_board(&mut conn, IdInput { id: extra.id }).is_ok());
 
         let restored = restore(&mut conn, &backup).expect("恢复备份");
-        assert_eq!(restored, backup.summary());
+        let expected = backup.summary();
+        assert_eq!(restored.cards, expected.cards + 1, "旧子任务应展开为真实卡片");
+        assert_eq!(restored.trashed, expected.trashed + 1);
         let snapshot = repo::get_snapshot(&conn).expect("快照");
         assert_eq!(snapshot.boards.len(), 1);
         assert_eq!(snapshot.boards[0].title, "备份测试");
         assert!(snapshot.cards.is_empty(), "活动任务在备份里已删除");
         let trash = repo::get_trash(&conn).expect("回收站");
-        assert_eq!(trash.len(), 1);
-        assert_eq!(trash[0].title, "任务 A");
-        assert_eq!(trash[0].labels, vec!["研发".to_string()]);
-        assert_eq!(trash[0].priority, Some(Priority::High));
-        assert_eq!(trash[0].subtasks.len(), 1);
+        assert_eq!(trash.len(), 2, "父任务与展开后的子任务都在回收站");
+        let parent = trash.iter().find(|item| item.title == "任务 A").expect("父任务");
+        assert_eq!(parent.labels, vec!["研发".to_string()]);
+        assert_eq!(parent.priority, Some(Priority::High));
+        assert!(parent.subtasks.is_empty(), "旧 JSON 已清空");
+        let child = trash
+            .iter()
+            .find(|item| item.parent_card_id.as_deref() == Some(parent.id.as_str()))
+            .expect("子任务");
+        assert_eq!(child.title, "步骤");
+        assert!(child.deleted_at.is_some(), "子任务随父任务的删除状态");
     }
 
     #[test]
@@ -1804,6 +1916,92 @@ mod tests {
         dirty.overtime_records[0].status = OvertimeStatus::Done;
         let error = validate(&dirty).expect_err("非未出勤不应带原因");
         assert!(error.contains("不应包含未出勤原因"), "错误：{error}");
+    }
+
+    #[test]
+    fn backup_expands_legacy_subtasks_and_validates_parent_chain() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        let card = seed(&mut conn);
+        let mut backup = build(&conn).expect("构建备份");
+        let mut parent = backup.cards[0].clone();
+        parent.id = "p1".to_string();
+        parent.parent_card_id = None;
+        parent.subtasks = vec![
+            Subtask {
+                id: "s1".to_string(),
+                title: "子1".to_string(),
+                done: false,
+            },
+            Subtask {
+                id: "s2".to_string(),
+                title: "子2".to_string(),
+                done: true,
+            },
+        ];
+        backup.cards = vec![parent];
+        backup.card_activity.clear();
+        backup.dependencies.clear();
+        assert_eq!(card.id.is_empty(), false);
+
+        // 旧备份恢复：subtasks 展开为真实子卡片。
+        let mut restored = db::open_in_memory().expect("目标内存库");
+        restore(&mut restored, &backup).expect("恢复旧备份");
+        let snapshot = repo::get_snapshot(&restored).expect("快照");
+        assert_eq!(snapshot.cards.len(), 3);
+        let children: Vec<_> = snapshot
+            .cards
+            .iter()
+            .filter(|item| item.parent_card_id.as_deref() == Some("p1"))
+            .collect();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].title, "子1");
+        assert!(!children[0].completed);
+        assert_eq!(children[1].title, "子2");
+        assert!(children[1].completed);
+        let parent_row = snapshot
+            .cards
+            .iter()
+            .find(|item| item.id == "p1")
+            .expect("父任务");
+        assert!(parent_row.subtasks.is_empty(), "旧 JSON 应被清空");
+
+        // 缺失父任务。
+        let mut missing = backup.clone();
+        normalize_legacy_backup(&mut missing);
+        missing.cards[1].parent_card_id = Some("missing".to_string());
+        let error = validate(&missing).expect_err("缺父应被拒绝");
+        assert!(error.contains("父任务"), "错误：{error}");
+
+        // 跨看板父任务。
+        let mut cross = backup.clone();
+        normalize_legacy_backup(&mut cross);
+        let parent_board = cross.cards[0].board_id.clone();
+        cross.cards[1].board_id = format!("{parent_board}_other");
+        let error = validate(&cross).expect_err("跨看板应被拒绝");
+        assert!(error.contains("看板"), "错误：{error}");
+
+        // 成环。
+        let mut cyclic = backup.clone();
+        normalize_legacy_backup(&mut cyclic);
+        let child_id = cyclic.cards[1].id.clone();
+        cyclic.cards[0].parent_card_id = Some(child_id);
+        let error = validate(&cyclic).expect_err("成环应被拒绝");
+        assert!(error.contains("循环"), "错误：{error}");
+
+        // 深度 101。
+        let mut deep = backup.clone();
+        normalize_legacy_backup(&mut deep);
+        let mut previous = deep.cards[0].id.clone();
+        for index in 0..101 {
+            let mut card = deep.cards[0].clone();
+            card.id = format!("deep_{index}");
+            card.parent_card_id = Some(previous.clone());
+            card.subtasks.clear();
+            previous = card.id.clone();
+            deep.cards.push(card);
+        }
+        let error = validate(&deep).expect_err("层级过深应被拒绝");
+        assert!(error.contains("层级过深"), "错误：{error}");
     }
 
     #[test]

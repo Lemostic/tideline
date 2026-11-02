@@ -657,10 +657,10 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
 /// 幂等：子卡片 id 使用 `sub_<父任务id>_<序号>`，重复执行时 `INSERT OR IGNORE`
 /// 不会重复插入，父任务 JSON 清空后不再命中。整个展开在一个事务中完成。
 fn expand_legacy_subtasks(connection: &Connection) -> Result<(), String> {
-    let rows: Vec<(String, String, String, String, String)> = {
+    let rows: Vec<(String, String, String, String, String, Option<String>)> = {
         let mut statement = connection
             .prepare(
-                "SELECT id, board_id, list_id, subtasks, updated_at FROM cards \
+                "SELECT id, board_id, list_id, subtasks, updated_at, deleted_at FROM cards \
                  WHERE parent_card_id IS NULL AND subtasks != '[]'",
             )
             .map_err(|error| format!("读取旧子任务失败：{error}"))?;
@@ -672,6 +672,7 @@ fn expand_legacy_subtasks(connection: &Connection) -> Result<(), String> {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             })
             .map_err(|error| format!("读取旧子任务失败：{error}"))?;
@@ -688,7 +689,7 @@ fn expand_legacy_subtasks(connection: &Connection) -> Result<(), String> {
         .execute_batch("BEGIN IMMEDIATE")
         .map_err(|error| format!("迁移 cards.subtasks 失败：{error}"))?;
     let migrate = || -> Result<(), String> {
-        for (parent_id, board_id, list_id, subtasks_json, updated_at) in &rows {
+        for (parent_id, board_id, list_id, subtasks_json, updated_at, deleted_at) in &rows {
             let subtasks: Vec<crate::models::Subtask> = serde_json::from_str(subtasks_json)
                 .map_err(|error| format!("迁移 cards.subtasks 失败：{parent_id} 的清单不是有效 JSON（{error}）"))?;
             for (index, subtask) in subtasks.iter().enumerate() {
@@ -697,8 +698,8 @@ fn expand_legacy_subtasks(connection: &Connection) -> Result<(), String> {
                     .execute(
                         "INSERT OR IGNORE INTO cards \
                          (id, board_id, list_id, parent_card_id, title, description, completed, \
-                          labels, subtasks, position, created_at, updated_at) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, '', ?6, '[]', '[]', ?7, ?8, ?8)",
+                          labels, subtasks, position, deleted_at, created_at, updated_at) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, '', ?6, '[]', '[]', ?7, ?8, ?9, ?9)",
                         rusqlite::params![
                             child_id,
                             board_id,
@@ -707,6 +708,7 @@ fn expand_legacy_subtasks(connection: &Connection) -> Result<(), String> {
                             subtask.title,
                             i64::from(subtask.done),
                             index as i64,
+                            deleted_at,
                             updated_at,
                         ],
                     )
