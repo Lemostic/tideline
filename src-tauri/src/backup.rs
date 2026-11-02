@@ -898,6 +898,10 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
     let backup = &normalized;
     validate(backup)?;
     let tx = conn.transaction().map_err(|error| format!("恢复失败：{error}"))?;
+    // V0.14.0：任务树是自引用外键，导出顺序按 position 排序时子任务可能排在父任务前；
+    // 把外键检查推迟到提交时，保证整份备份写完后仍然满足所有约束。
+    tx.execute_batch("PRAGMA defer_foreign_keys = ON;")
+        .map_err(|error| format!("恢复失败：{error}"))?;
     tx.execute("DELETE FROM card_field_values", [])
         .and_then(|_| tx.execute("DELETE FROM custom_fields", []))
         .and_then(|_| tx.execute("DELETE FROM saved_views", []))
@@ -2002,6 +2006,80 @@ mod tests {
         }
         let error = validate(&deep).expect_err("层级过深应被拒绝");
         assert!(error.contains("层级过深"), "错误：{error}");
+    }
+
+    #[test]
+    fn backup_restores_real_task_tree_with_child_sorted_before_parent() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        let board = repo::create_board(
+            &mut conn,
+            NewBoardInput {
+                title: "任务树".to_string(),
+                description: None,
+                color: None,
+            },
+        )
+        .expect("创建看板");
+        let list = repo::create_list(
+            &mut conn,
+            NewListInput {
+                board_id: board.id.clone(),
+                title: "待办".to_string(),
+                color: None,
+                wip_limit: None,
+            },
+        )
+        .expect("创建列表");
+        // 主任务 A 在 position 0，B 在 position 1；B 的子任务 position 从 0 开始，
+        // 导出排序后子任务会排在父任务之前，用来锁住自引用外键的插入顺序问题。
+        repo::create_card(
+            &mut conn,
+            NewCardInput {
+                board_id: board.id.clone(),
+                list_id: list.id.clone(),
+                title: "A".to_string(),
+                ..Default::default()
+            },
+        )
+        .expect("创建任务 A");
+        let parent_b = repo::create_card(
+            &mut conn,
+            NewCardInput {
+                board_id: board.id.clone(),
+                list_id: list.id.clone(),
+                title: "B".to_string(),
+                ..Default::default()
+            },
+        )
+        .expect("创建任务 B");
+        let child = repo::create_card(
+            &mut conn,
+            NewCardInput {
+                board_id: board.id.clone(),
+                list_id: list.id.clone(),
+                parent_card_id: Some(parent_b.id.clone()),
+                title: "B 的子任务".to_string(),
+                ..Default::default()
+            },
+        )
+        .expect("创建子任务");
+
+        let backup = build(&conn).expect("构建备份");
+        let order: Vec<&str> = backup.cards.iter().map(|card| card.id.as_str()).collect();
+        let parent_index = order.iter().position(|id| *id == parent_b.id).expect("父任务");
+        let child_index = order.iter().position(|id| *id == child.id).expect("子任务");
+        assert!(child_index < parent_index, "回归前置条件：子任务应排在父任务之前");
+
+        let mut target = db::open_in_memory().expect("目标内存库");
+        restore(&mut target, &backup).expect("真实任务树备份应能恢复");
+        let snapshot = repo::get_snapshot(&target).expect("快照");
+        assert_eq!(snapshot.cards.len(), 3);
+        let restored = snapshot
+            .cards
+            .iter()
+            .find(|card| card.id == child.id)
+            .expect("恢复后的子任务");
+        assert_eq!(restored.parent_card_id.as_deref(), Some(parent_b.id.as_str()));
     }
 
     #[test]

@@ -5,7 +5,7 @@ import { DatePicker } from '@/components/DatePicker';
 import { Icon } from '@/components/Icon';
 import { ActivitySection, RecurrenceSection } from '@/components/RecurrenceSection';
 import { formatDateCN, formatRelativeTime, todayKey } from '@/lib/date';
-import { breadcrumbOf, childrenOf, subtaskProgress } from '@/lib/taskTree';
+import { breadcrumbOf, childrenOf, MAX_TASK_DEPTH, subtaskProgress } from '@/lib/taskTree';
 import {
   blockersFor,
   crossBoardRelationCandidates,
@@ -194,8 +194,9 @@ export function TaskDrawer() {
   const breadcrumb = breadcrumbOf(snapshot.cards, card.id);
 
   /** 递归渲染任务树（任意层级，超过 6 层后缩进固定）。 */
-  const renderTreeRows = (parentId: string, depth: number): ReactNode =>
-    childrenOf(snapshot.cards, parentId).map((child) => {
+  const renderTreeRows = (parentId: string, depth: number): ReactNode => {
+    if (depth > MAX_TASK_DEPTH) return null;
+    return childrenOf(snapshot.cards, parentId).map((child) => {
       const priority = PRIORITY_META.find((meta) => meta.key === child.priority);
       return (
         <Fragment key={child.id}>
@@ -246,6 +247,8 @@ export function TaskDrawer() {
         </Fragment>
       );
     });
+  };
+
   const labelLimitReached = card.labels.length >= MAX_LABELS;
   const blockers = blockersFor(card.id, snapshot.dependencies, snapshot.cards);
   const unfinishedBlockers = blockers.filter((blocker) => !blocker.completed);

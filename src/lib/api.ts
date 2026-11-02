@@ -620,6 +620,9 @@ function runLocalRules(
 
 /** V0.14.0：规则「追加子任务」创建真实子任务卡片（同名未删除子任务跳过）。 */
 function appendLocalSubtaskCard(db: LocalDb, parent: Card, title: string): void {
+  if (localCardDepth(db, parent.id) + 1 > MAX_TASK_DEPTH) {
+    throw new Error('任务层级过深');
+  }
   if (
     db.cards.some(
       (card) =>

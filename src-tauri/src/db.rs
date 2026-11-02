@@ -34,6 +34,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
+use rusqlite::OptionalExtension;
 
 /// 由 Tauri 以 `State` 形式托管的数据库句柄。
 ///
@@ -690,13 +691,31 @@ fn expand_legacy_subtasks(connection: &Connection) -> Result<(), String> {
         .map_err(|error| format!("迁移 cards.subtasks 失败：{error}"))?;
     let migrate = || -> Result<(), String> {
         for (parent_id, board_id, list_id, subtasks_json, updated_at, deleted_at) in &rows {
-            let subtasks: Vec<crate::models::Subtask> = serde_json::from_str(subtasks_json)
-                .map_err(|error| format!("迁移 cards.subtasks 失败：{parent_id} 的清单不是有效 JSON（{error}）"))?;
+            let subtasks: Vec<crate::models::Subtask> = match serde_json::from_str(subtasks_json) {
+                Ok(value) => value,
+                Err(error) => {
+                    // 脏 JSON 不阻塞启动：保留原字段，等待用户手动处理或后续版本修复。
+                    eprintln!(
+                        "[tideline] 跳过无法解析的 cards.subtasks（{parent_id}）：{error}"
+                    );
+                    continue;
+                }
+            };
             for (index, subtask) in subtasks.iter().enumerate() {
-                let child_id = format!("sub_{parent_id}_{index}");
+                let mut child_id = format!("sub_{parent_id}_{index}");
+                let mut suffix = 1usize;
+                while connection
+                    .query_row("SELECT 1 FROM cards WHERE id = ?1", [&child_id], |_| Ok(()))
+                    .optional()
+                    .map_err(|error| format!("迁移 cards.subtasks 失败：检查子任务 id 出错（{error}）"))?
+                    .is_some()
+                {
+                    child_id = format!("sub_{parent_id}_{index}_{suffix}");
+                    suffix += 1;
+                }
                 connection
                     .execute(
-                        "INSERT OR IGNORE INTO cards \
+                        "INSERT INTO cards \
                          (id, board_id, list_id, parent_card_id, title, description, completed, \
                           labels, subtasks, position, deleted_at, created_at, updated_at) \
                          VALUES (?1, ?2, ?3, ?4, ?5, '', ?6, '[]', '[]', ?7, ?8, ?9, ?9)",

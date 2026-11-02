@@ -23,7 +23,7 @@ import {
 import { useAppStore } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
-import { childrenOf, descendantsOf, subtaskProgress } from '@/lib/taskTree';
+import { childrenOf, descendantsOf, MAX_TASK_DEPTH, subtaskProgress } from '@/lib/taskTree';
 import { InlineEdit } from './InlineEdit';
 import './table.css';
 
@@ -163,8 +163,9 @@ export function TableView({
   };
 
   /** V0.14.0：递归渲染子任务行（任意层级，超过 6 层后缩进固定）。 */
-  const renderChildren = (parentId: string, depth: number): ReactNode =>
-    childrenOf(allCards, parentId).map((child) => (
+  const renderChildren = (parentId: string, depth: number): ReactNode => {
+    if (depth > MAX_TASK_DEPTH) return null;
+    return childrenOf(allCards, parentId).map((child) => (
       <Fragment key={child.id}>
         <TaskTreeRow
           card={child}
@@ -175,6 +176,7 @@ export function TableView({
         {renderChildren(child.id, depth + 1)}
       </Fragment>
     ));
+  };
 
   const toggleCollapse = (id: string) => {
     setCollapsedIds((prev) => {

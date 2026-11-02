@@ -2637,7 +2637,8 @@ pub fn delete_card(conn: &mut Connection, input: IdInput) -> DbResult<()> {
         let ids = subtree_ids(&tx, &card.id)?;
         for id in &ids {
             tx.execute(
-                "UPDATE cards SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2",
+                "UPDATE cards SET deleted_at = ?1, updated_at = ?1 \
+                 WHERE id = ?2 AND deleted_at IS NULL",
                 params![&now, id],
             )
             .map_err(db_err)?;
@@ -2713,7 +2714,22 @@ pub fn restore_card(conn: &mut Connection, input: IdInput) -> DbResult<Card> {
         )
         .map_err(db_err)?;
     let ids = subtree_ids(&tx, &card.id)?;
+    // 只恢复与本次删除同批（同一 deleted_at）的后代；此前单独删除的后代保持不动。
+    let batch_stamp = card.deleted_at.clone();
     for id in &ids {
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT deleted_at FROM cards WHERE id = ?1",
+                [id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(db_err)?
+            .flatten();
+        let same_batch = existing == batch_stamp || id == &card.id;
+        if !same_batch {
+            continue;
+        }
         tx.execute(
             "UPDATE cards SET deleted_at = NULL, updated_at = ?1 \
              WHERE id = ?2 AND deleted_at IS NOT NULL",

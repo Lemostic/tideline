@@ -6,6 +6,7 @@ import { PageHeadBand } from '@/components/PageHeadBand';
 import { BoardSetFormModal } from '@/components/BoardSetFormModal';
 import { formatRelativeTime } from '@/lib/date';
 import { boardColorValue, type BoardSet } from '@/lib/types';
+import { rootCards } from '@/lib/taskTree';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import './board-sets.css';
 
@@ -18,7 +19,10 @@ interface SetStats {
 
 function statsForSet(set: BoardSet, snapshot: ReturnType<typeof useSnapshot>): SetStats {
   const boardIds = new Set(set.boardIds);
-  const cards = snapshot.cards.filter((card) => boardIds.has(card.boardId));
+  // V0.14.0：与详情页一致，只统计主任务。
+  const cards = rootCards(
+    snapshot.cards.filter((card) => boardIds.has(card.boardId)),
+  );
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${`${today.getMonth() + 1}`.padStart(2, '0')}-${`${today.getDate()}`.padStart(2, '0')}`;
   return {

@@ -3,7 +3,7 @@
 //! 这里不碰数据库连接，只做可测试的日期与字段计算；
 //! 前端 `src/lib/automation.ts` 保持同一套语义，两边都用单元测试锁定。
 
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::models::{
     AutomationRule, AutomationRulePatch, Card, CardActivity, NewAutomationRuleInput,
@@ -894,6 +894,24 @@ fn create_rule_subtasks(
     card: &Card,
     titles: &[String],
 ) -> Result<(), String> {
+    // 与 create_card 保持同一深度上限：规则不能把任务树推出上限。
+    let mut depth = 0usize;
+    let mut cursor = Some(card.id.clone());
+    while let Some(id) = cursor {
+        depth += 1;
+        if depth > crate::models::MAX_TASK_DEPTH {
+            return Err("任务层级过深".to_string());
+        }
+        cursor = conn
+            .query_row(
+                "SELECT parent_card_id FROM cards WHERE id = ?1",
+                [&id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?
+            .flatten();
+    }
     let mut existing_titles: Vec<String> = {
         let mut statement = conn
             .prepare(

@@ -827,15 +827,8 @@ export const useAppStore = create<AppState>((set, get) => {
     deleteCard: async (id) => {
       try {
         await api.deleteCard({ id });
-        set((state) => ({
-          snapshot: {
-            ...state.snapshot,
-            cards: state.snapshot.cards.filter((c) => c.id !== id),
-            dependencies: state.snapshot.dependencies.filter(
-              (d) => d.cardId !== id && d.dependsOnCardId !== id,
-            ),
-          },
-        }));
+        // V0.14.0：删除主任务会连带整棵子树，重新拉取快照避免残留幽灵子任务。
+        await get().reloadSnapshot();
       } catch (error) {
         fail(error);
       }
@@ -853,16 +846,10 @@ export const useAppStore = create<AppState>((set, get) => {
 
     restoreCard: async (id) => {
       try {
-        const card = await api.restoreCard({ id });
-        set((state) => ({
-          snapshot: {
-            ...state.snapshot,
-            cards: state.snapshot.cards.some((item) => item.id === id)
-              ? state.snapshot.cards
-              : [...state.snapshot.cards, card],
-          },
-          trash: state.trash.filter((item) => item.id !== id),
-        }));
+        await api.restoreCard({ id });
+        // V0.14.0：恢复会连带祖先链与后代，重新拉取快照与回收站保持一致。
+        await get().reloadSnapshot();
+        await get().loadTrash();
       } catch (error) {
         fail(error);
       }
@@ -871,7 +858,8 @@ export const useAppStore = create<AppState>((set, get) => {
     purgeCard: async (id) => {
       try {
         await api.purgeCard({ id });
-        set((state) => ({ trash: state.trash.filter((item) => item.id !== id) }));
+        await get().reloadSnapshot();
+        await get().loadTrash();
       } catch (error) {
         fail(error);
       }
@@ -880,7 +868,8 @@ export const useAppStore = create<AppState>((set, get) => {
     emptyTrash: async () => {
       try {
         await api.emptyTrash();
-        set({ trash: [] });
+        await get().reloadSnapshot();
+        await get().loadTrash();
       } catch (error) {
         fail(error);
       }
