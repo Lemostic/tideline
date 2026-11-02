@@ -4,6 +4,7 @@ import { dueBucket, formatDueLabel, formatMonthDay } from '@/lib/date';
 import { blockersFor } from '@/lib/dependencies';
 import { labelStyle } from '@/lib/labelColors';
 import { PRIORITY_META, boardColorValue, type Card } from '@/lib/types';
+import { subtaskProgress } from '@/lib/taskTree';
 import { useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 
@@ -53,9 +54,10 @@ export function TaskCard({
   const board = snapshot.boards.find((item) => item.id === card.boardId);
   const visibleLabels = labels.slice(0, 3);
   const hiddenLabels = labels.length - visibleLabels.length;
-  const subtaskDone = card.subtasks.filter((subtask) => subtask.done).length;
-  const subtaskTotal = card.subtasks.length;
-  const progress = subtaskTotal > 0 ? Math.round((subtaskDone / subtaskTotal) * 100) : 0;
+  const subtask = subtaskProgress(snapshot.cards, card.id);
+  const subtaskDone = subtask.done;
+  const subtaskTotal = subtask.total;
+  const progress = subtask.percent;
 
   const handleDragStart = (event: DragEvent<HTMLElement>) => {
     draggedRef.current = true;

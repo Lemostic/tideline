@@ -5,6 +5,7 @@ import { EmptyState } from '@/components/Modal';
 import { PRIORITY_META, boardColorValue, type BoardSortKey, type BoardView, type Card, type SavedView } from '@/lib/types';
 import { isBlocked } from '@/lib/dependencies';
 import { normalizeSortKey } from '@/lib/savedViews';
+import { rootCards } from '@/lib/taskTree';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
@@ -71,6 +72,8 @@ export function BoardPage() {
     () => (boardId ? snapshot.cards.filter((card) => card.boardId === boardId) : []),
     [snapshot.cards, boardId],
   );
+  // V0.14.0：子任务折叠在父任务下，看板/表格/甘特/日历只渲染主任务。
+  const rootBoardCards = useMemo(() => rootCards(boardCards), [boardCards]);
 
   // 本看板的自定义字段（V0.13.1）：字段筛选面板的数据源
   const boardFields = useMemo(
@@ -86,11 +89,11 @@ export function BoardPage() {
   // 被前置任务卡住的任务：只认阻塞型关系，且前置必须还没完成
   const blockedCardIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const card of boardCards) {
+    for (const card of rootBoardCards) {
       if (isBlocked(card.id, snapshot.dependencies, boardCards)) ids.add(card.id);
     }
     return ids;
-  }, [boardCards, snapshot.dependencies]);
+  }, [rootBoardCards, boardCards, snapshot.dependencies]);
 
   // 本看板保存的视图（V0.13.1）
   const savedViews = useMemo(
@@ -101,21 +104,21 @@ export function BoardPage() {
   // 筛选跨视图生效：看板列、表格、甘特、日历都只看过滤后的任务
   const visibleCards = useMemo(
     () =>
-      filterCards(boardCards, filters, {
+      filterCards(rootBoardCards, filters, {
         cardFieldValues: snapshot.cardFieldValues,
         blockedCardIds,
       }),
-    [boardCards, filters, snapshot.cardFieldValues, blockedCardIds],
+    [rootBoardCards, filters, snapshot.cardFieldValues, blockedCardIds],
   );
 
   const hasBoardDependencies = useMemo(() => {
     if (!showDependencyLines || !boardId) return false;
-    const ids = new Set(boardCards.map((card) => card.id));
+    const ids = new Set(rootBoardCards.map((card) => card.id));
     return snapshot.dependencies.some(
       (dependency) =>
         ids.has(dependency.cardId) && ids.has(dependency.dependsOnCardId),
     );
-  }, [boardCards, boardId, showDependencyLines, snapshot.dependencies]);
+  }, [rootBoardCards, boardId, showDependencyLines, snapshot.dependencies]);
 
   // 按列表分组并按 position 升序；排序后的数组只在这里派生一次
   const cardsByList = useMemo(() => {
@@ -133,11 +136,11 @@ export function BoardPage() {
 
   const stats = useMemo(() => {
     let completed = 0;
-    for (const card of boardCards) {
+    for (const card of rootBoardCards) {
       if (card.completed) completed += 1;
     }
-    return { total: boardCards.length, completed };
-  }, [boardCards]);
+    return { total: rootBoardCards.length, completed };
+  }, [rootBoardCards]);
 
   const selectedCardIds = useMemo(() => [...selectedIds], [selectedIds]);
   const busySelection = selectedCardIds.length === 0;
@@ -286,11 +289,11 @@ export function BoardPage() {
       <BoardFilterBar
         filters={filters}
         onChange={setFilters}
-        cards={boardCards}
+        cards={rootBoardCards}
         fields={boardFields}
         blockedCount={blockedCardIds.size}
         visibleCount={visibleCards.length}
-        totalCount={boardCards.length}
+        totalCount={rootBoardCards.length}
       />
       {view === 'board' ? (
         lists.length === 0 ? (
@@ -311,6 +314,7 @@ export function BoardPage() {
           board={board}
           lists={lists}
           cards={visibleCards}
+          allCards={boardCards}
           sort={tableSort}
           onSortChange={setTableSort}
         />

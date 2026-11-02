@@ -4,6 +4,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from 'react';
 import { Icon } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
@@ -22,6 +23,7 @@ import {
 import { useAppStore } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
+import { childrenOf, descendantsOf, subtaskProgress } from '@/lib/taskTree';
 import { InlineEdit } from './InlineEdit';
 import './table.css';
 
@@ -29,6 +31,8 @@ export interface BoardViewProps {
   board: Board;
   lists: List[];
   cards: Card[];
+  /** V0.14.0：本看板全部任务（含子任务），表格用它递归渲染任务树；缺省时退化为仅主任务 */
+  allCards?: Card[];
   /** 受控排序键：保存视图会指定排序方式；不传时用组件内部状态 */
   sort?: BoardSortKey;
   onSortChange?: (key: BoardSortKey) => void;
@@ -76,6 +80,7 @@ export function TableView({
   board,
   lists,
   cards,
+  allCards = cards,
   sort: controlledSort,
   onSortChange,
 }: BoardViewProps) {
@@ -105,13 +110,16 @@ export function TableView({
 
   const visibleCards = useMemo(() => {
     const keyword = query.trim().toLowerCase();
+    const matches = (card: Card) =>
+      card.title.toLowerCase().includes(keyword) ||
+      card.labels.some((label) => label.toLowerCase().includes(keyword));
     const filtered = cards.filter((card) => {
       if (!showCompleted && card.completed) return false;
       if (!keyword) return true;
+      // V0.14.0：搜索命中子任务时，保留其父任务行，子任务在树中展示。
       return (
-        card.title.toLowerCase().includes(keyword) ||
-        card.labels.some((label) => label.toLowerCase().includes(keyword)) ||
-        card.subtasks.some((subtask) => subtask.title.toLowerCase().includes(keyword))
+        matches(card) ||
+        descendantsOf(allCards, card.id).some((child) => matches(child))
       );
     });
 
@@ -150,13 +158,23 @@ export function TableView({
     void updateCard(id, patch).catch(() => undefined);
   };
 
-  const toggleSubtask = (card: Card, subtaskId: string) => {
-    patchCard(card.id, {
-      subtasks: card.subtasks.map((subtask) =>
-        subtask.id === subtaskId ? { ...subtask, done: !subtask.done } : subtask,
-      ),
-    });
+  const toggleDone = (card: Card) => {
+    patchCard(card.id, { completed: !card.completed });
   };
+
+  /** V0.14.0：递归渲染子任务行（任意层级，超过 6 层后缩进固定）。 */
+  const renderChildren = (parentId: string, depth: number): ReactNode =>
+    childrenOf(allCards, parentId).map((child) => (
+      <Fragment key={child.id}>
+        <TaskTreeRow
+          card={child}
+          depth={depth}
+          onToggle={() => toggleDone(child)}
+          onOpen={() => openCard(child.id)}
+        />
+        {renderChildren(child.id, depth + 1)}
+      </Fragment>
+    ));
 
   const toggleCollapse = (id: string) => {
     setCollapsedIds((prev) => {
@@ -305,11 +323,13 @@ export function TableView({
                     </tr>
 
                     {group.cards.map((card) => {
-                      const expanded = card.subtasks.length > 0 && !collapsedIds.has(card.id);
+                      const childCount = childrenOf(allCards, card.id).length;
+                      const expanded = childCount > 0 && !collapsedIds.has(card.id);
                       return (
                         <Fragment key={card.id}>
                           <TableRow
                             card={card}
+                            allCards={allCards}
                             today={today}
                             editing={editingId === card.id}
                             expanded={expanded}
@@ -320,16 +340,7 @@ export function TableView({
                             onPatch={patchCard}
                             onOpen={openCard}
                           />
-                          {expanded
-                            ? card.subtasks.map((subtask) => (
-                                <SubtaskRow
-                                  key={subtask.id}
-                                  subtask={subtask}
-                                  onToggle={() => toggleSubtask(card, subtask.id)}
-                                  onOpen={() => openCard(card.id)}
-                                />
-                              ))
-                            : null}
+                          {expanded ? renderChildren(card.id, 0) : null}
                         </Fragment>
                       );
                     })}
@@ -346,6 +357,8 @@ export function TableView({
 
 interface TableRowProps {
   card: Card;
+  /** V0.14.0：全部任务，用于递归统计子任务进度 */
+  allCards: Card[];
   today: string;
   editing: boolean;
   expanded: boolean;
@@ -357,6 +370,7 @@ interface TableRowProps {
 
 function TableRow({
   card,
+  allCards,
   today,
   editing,
   expanded,
@@ -367,9 +381,10 @@ function TableRow({
 }: TableRowProps) {
   const priority = PRIORITY_META.find((item) => item.key === card.priority);
   const overdue = card.dueDate !== null && !card.completed && card.dueDate < today;
-  const subtaskTotal = card.subtasks.length;
-  const subtaskDone = card.subtasks.reduce((total, item) => (item.done ? total + 1 : total), 0);
-  const subtaskPercent = subtaskTotal > 0 ? Math.round((subtaskDone / subtaskTotal) * 100) : 0;
+  const progress = subtaskProgress(allCards, card.id);
+  const subtaskTotal = progress.total;
+  const subtaskDone = progress.done;
+  const subtaskPercent = progress.percent;
 
   const handleRowKeyDown = (event: ReactKeyboardEvent<HTMLTableRowElement>) => {
     if (event.target !== event.currentTarget) return;
@@ -540,32 +555,36 @@ function TableRow({
   );
 }
 
-interface SubtaskRowProps {
-  subtask: Card['subtasks'][number];
+interface TaskTreeRowProps {
+  card: Card;
+  depth: number;
   onToggle: () => void;
   onOpen: () => void;
 }
 
-/** 子任务子行：第三层缩进，可直接勾选；点击行打开父任务抽屉 */
-function SubtaskRow({ subtask, onToggle, onOpen }: SubtaskRowProps) {
+/** 子任务行：按层级缩进，可直接勾选；点击行打开该子任务详情。 */
+function TaskTreeRow({ card, depth, onToggle, onOpen }: TaskTreeRowProps) {
   return (
     <tr
-      className={`tbl-subtask-row${subtask.done ? ' is-done' : ''}`}
+      className={`tbl-subtask-row${card.completed ? ' is-done' : ''}`}
       onClick={onOpen}
     >
       <td colSpan={COLUMN_COUNT}>
-        <div className="tbl-subtask-inner">
+        <div
+          className="tbl-subtask-inner"
+          style={{ paddingLeft: `${12 + Math.min(depth, 6) * 16}px` }}
+        >
           <span className="tbl-tree" aria-hidden="true" />
           <input
             type="checkbox"
             className="tbl-check tbl-subtask-check"
-            checked={subtask.done}
-            aria-label={`子任务「${subtask.title}」${subtask.done ? '已完成，点击取消' : '未完成，点击完成'}`}
+            checked={card.completed}
+            aria-label={`子任务「${card.title}」${card.completed ? '已完成，点击取消' : '未完成，点击完成'}`}
             onClick={stopRowClick}
             onChange={onToggle}
           />
-          <span className="tbl-subtask-title">{subtask.title}</span>
-          <span className="tbl-subtask-tag">子任务</span>
+          <span className="tbl-subtask-title">{card.title}</span>
+          <span className="tbl-subtask-tag">{depth === 0 ? '子任务' : `第 ${depth + 1} 层`}</span>
         </div>
       </td>
     </tr>

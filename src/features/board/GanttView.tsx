@@ -31,6 +31,7 @@ import {
   type RelationType,
 } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
+import { subtaskProgress } from '@/lib/taskTree';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
 import type { BoardViewProps } from './TableView';
@@ -76,11 +77,9 @@ interface DependencyPath {
   relationType: RelationType;
 }
 
-function cardProgress(card: Card): number {
+function cardProgress(card: Card, allCards: Card[]): number {
   if (card.completed) return 100;
-  if (card.subtasks.length === 0) return 0;
-  const done = card.subtasks.filter((subtask) => subtask.done).length;
-  return Math.round((done / card.subtasks.length) * 100);
+  return subtaskProgress(allCards, card.id).percent;
 }
 
 function spanMeta(bar: BarInfo): string {
@@ -643,7 +642,7 @@ export function GanttView({ board, lists, cards }: BoardViewProps) {
                 const left =
                   startIndex * dayWidth + 2 + (dragging && drag ? drag.deltaDays * dayWidth : 0);
                 const showTitle = width >= (zoom === 'day' ? 74 : 62);
-                const progress = cardProgress(card);
+                const progress = cardProgress(card, snapshot.cards);
                 const isOverdue = !card.completed && bar.endKey < today;
                 return (
                   <div className="gantt-row gantt-task-row" key={card.id}>
