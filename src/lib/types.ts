@@ -599,6 +599,26 @@ export interface NewBoardInput {
   color?: BoardColor;
 }
 
+/** V0.15.0：导入 Excel 时一次性创建看板与它的看板列 */
+export interface NewBoardWithListsInput {
+  title: string;
+  description?: string;
+  color?: BoardColor;
+  /** 看板列标题，按顺序创建 */
+  listTitles: string[];
+}
+
+/** V0.15.0：建看板列的结果，同时带回新建的看板与全部看板列 */
+export interface CreatedBoardWithLists {
+  board: Board;
+  lists: List[];
+}
+
+/** V0.15.0：保存二进制文件的结果；桌面端为绝对路径，浏览器端为文件名 */
+export interface SavedBinaryFile {
+  path: string;
+}
+
 export interface NewListInput {
   boardId: string;
   title: string;

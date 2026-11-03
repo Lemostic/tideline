@@ -23,6 +23,7 @@ import type {
   BoardSetPatch,
   Card,
   CardPatch,
+  CreatedBoardWithLists,
   CustomField,
   CustomFieldPatch,
   Goal,
@@ -33,6 +34,7 @@ import type {
   MemberTenure,
   NewBoardInput,
   NewBoardSetInput,
+  NewBoardWithListsInput,
   NewCardInput,
   NewCustomFieldInput,
   NewGoalInput,
@@ -113,6 +115,8 @@ export interface AppState {
   clearError: () => void;
 
   createBoard: (input: NewBoardInput) => Promise<Board>;
+  /** V0.15.0：一次性创建看板与它的看板列（Excel 导入用） */
+  createBoardWithLists: (input: NewBoardWithListsInput) => Promise<CreatedBoardWithLists>;
   updateBoard: (id: string, patch: BoardPatch) => Promise<void>;
   deleteBoard: (id: string) => Promise<void>;
   toggleStar: (id: string) => Promise<void>;
@@ -282,6 +286,18 @@ export const useAppStore = create<AppState>((set, get) => {
         const snapshot = await api.getSnapshot();
         set({ snapshot });
         return board;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    // V0.15.0：导入 Excel 时建看板 + 看板列，一步到位
+    createBoardWithLists: async (input) => {
+      try {
+        const created = await api.createBoardWithLists(input);
+        const snapshot = await api.getSnapshot();
+        set({ snapshot });
+        return created;
       } catch (error) {
         return fail(error);
       }

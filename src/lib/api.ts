@@ -51,6 +51,7 @@ import type {
   CardDependency,
   CardFieldValue,
   CardPatch,
+  CreatedBoardWithLists,
   RelationType,
   Goal,
   GoalPatch,
@@ -72,6 +73,7 @@ import type {
   NewAutomationRuleInput,
   NewBoardInput,
   NewBoardSetInput,
+  NewBoardWithListsInput,
   NewCardInput,
   NewCustomFieldInput,
   NewGoalInput,
@@ -105,6 +107,7 @@ import type {
   SavedViewFilters,
   SavedViewPatch,
   SavedViewSort,
+  SavedBinaryFile,
   SetCardFieldValuesInput,
   Snapshot,
   StorageInfo,
@@ -123,6 +126,10 @@ import type {
 export interface TidelineApi {
   getSnapshot(): Promise<Snapshot>;
   createBoard(input: NewBoardInput): Promise<Board>;
+  /** V0.15.0：一次性创建看板与它的看板列（Excel 导入用） */
+  createBoardWithLists(input: NewBoardWithListsInput): Promise<CreatedBoardWithLists>;
+  /** V0.15.0：保存二进制文件（导入模板）；桌面端弹出保存框，浏览器端触发下载 */
+  saveBinaryFile(input: { fileName: string; base64: string }): Promise<SavedBinaryFile>;
   updateBoard(input: { id: string; patch: BoardPatch }): Promise<Board>;
   deleteBoard(input: IdInput): Promise<void>;
   createList(input: NewListInput): Promise<List>;
@@ -267,6 +274,9 @@ export function isTauri(): boolean {
 const tauriApi: TidelineApi = {
   getSnapshot: () => invoke<Snapshot>('get_snapshot'),
   createBoard: (input) => invoke<Board>('create_board', { input }),
+  createBoardWithLists: (input) =>
+    invoke<CreatedBoardWithLists>('create_board_with_lists', { input }),
+  saveBinaryFile: (input) => invoke<SavedBinaryFile>('save_binary_file', { input }),
   updateBoard: (input) => invoke<Board>('update_board', { input }),
   deleteBoard: (input) => invoke<void>('delete_board', { input }),
   createList: (input) => invoke<List>('create_list', { input }),
@@ -1544,6 +1554,72 @@ const localApi: TidelineApi = {
     ensureLocalBuiltinSavedViews(db, board.id);
     saveLocalDb(db);
     return board;
+  },
+
+  // V0.15.0：一次性创建看板与看板列（Excel 导入用）
+  async createBoardWithLists(input) {
+    const db = loadLocalDb();
+    const now = nowISO();
+    const board: Board = {
+      id: createId('b'),
+      title: input.title.trim() || '未命名看板',
+      description: input.description?.trim() ?? '',
+      color: input.color ?? 'blue',
+      starred: false,
+      labelColors: {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.boards.push(board);
+    ensureLocalBuiltinSavedViews(db, board.id);
+
+    // 看板列：去空、去重、保序；一条都没有时补一条「待办」
+    const titles: string[] = [];
+    for (const title of input.listTitles) {
+      const trimmed = title.trim();
+      if (!trimmed || titles.includes(trimmed)) continue;
+      titles.push(trimmed);
+    }
+    if (titles.length === 0) titles.push('待办');
+
+    const lists: List[] = titles.map((title, index) => {
+      const list: List = {
+        id: createId('l'),
+        boardId: board.id,
+        title,
+        color: 'slate',
+        wipLimit: null,
+        position: index,
+        createdAt: now,
+      };
+      db.lists.push(list);
+      return list;
+    });
+
+    saveLocalDb(db);
+    return { board, lists };
+  },
+
+  // V0.15.0：浏览器模式没有原生保存框，直接触发下载
+  async saveBinaryFile(input) {
+    const binary = atob(input.base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    const blob = new Blob([bytes], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = input.fileName;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return { path: input.fileName };
   },
 
   async updateBoard({ id, patch }) {
