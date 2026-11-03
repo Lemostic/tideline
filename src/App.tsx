@@ -15,6 +15,7 @@ import { DashboardPage } from '@/pages/DashboardPage';
 import { GoalDetailPage } from '@/pages/GoalDetailPage';
 import { GoalsPage } from '@/pages/GoalsPage';
 import { InboxPage } from '@/pages/InboxPage';
+import { ImportPage } from '@/pages/ImportPage';
 import { MyTasksPage } from '@/pages/MyTasksPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TeamPage } from '@/pages/TeamPage';
@@ -99,6 +100,7 @@ export default function App() {
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/requirements" element={<RequirementPage />} />
+              <Route path="/import" element={<ImportPage />} />
               <Route path="/trash" element={<TrashPage />} />
               <Route path="/data" element={<Navigate to="/settings?tab=data" replace />} />
               <Route path="/settings" element={<SettingsPage />} />

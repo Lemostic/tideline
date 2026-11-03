@@ -200,6 +200,10 @@ export function WorkbenchPage() {
                   <Icon name="sparkles" size={14} />
                   浏览模板
                 </button>
+                <button className="btn btn-ghost" onClick={() => navigate('/import')}>
+                  <Icon name="download" size={14} />
+                  导入 Excel
+                </button>
               </div>
             }
           />
@@ -275,6 +279,14 @@ export function WorkbenchPage() {
             <button type="button" className="btn btn-primary btn-sm" onClick={openNewBoard}>
               <Icon name="plus" size={14} />
               新建看板
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => navigate('/import')}
+            >
+              <Icon name="download" size={14} />
+              导入 Excel
             </button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={openSearch}>
               <Icon name="search" size={14} />
