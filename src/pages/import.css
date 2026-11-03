@@ -1,0 +1,317 @@
+/* 导入看板：步骤条、信息面板、拖拽区、预览表格 */
+
+.imp-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 24px;
+  min-height: 100%;
+}
+
+/* ---------- 步骤条 ---------- */
+.imp-steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.imp-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.imp-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-muted);
+  color: var(--faint);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.imp-step.is-active {
+  border-color: var(--primary);
+  color: var(--ink);
+  background: var(--primary-soft);
+}
+
+.imp-step.is-active .imp-step-index {
+  background: var(--primary);
+  color: #fff;
+}
+
+.imp-step.is-done {
+  color: var(--ink-2);
+}
+
+.imp-step.is-done .imp-step-index {
+  background: var(--success-soft);
+  color: var(--success-ink);
+}
+
+/* ---------- 提示条 ---------- */
+.imp-flash {
+  border: 1px solid var(--success-line);
+  background: var(--success-wash);
+  color: var(--success-ink);
+  border-radius: var(--radius-md);
+  padding: 9px 13px;
+  font-size: 12.5px;
+}
+
+.imp-flash.is-error {
+  border-color: var(--danger-line);
+  background: var(--danger-wash);
+  color: var(--danger-ink);
+}
+
+/* ---------- 面板 ---------- */
+.imp-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.imp-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.imp-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.imp-panel-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.imp-sub-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 7px;
+}
+
+.imp-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- 拖拽选择区 ---------- */
+.imp-drop {
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+  padding: 34px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--muted);
+  transition:
+    border-color 140ms var(--ease),
+    background 140ms var(--ease);
+}
+
+.imp-drop.is-dragging {
+  border-color: var(--primary);
+  background: var(--primary-wash);
+}
+
+.imp-drop-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.imp-drop-desc {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- 看板列标签 ---------- */
+.imp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.imp-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ---------- 备注与错误 ---------- */
+.imp-notes {
+  margin: 0;
+  padding: 10px 12px;
+  list-style: none;
+  border-radius: var(--radius-md);
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.imp-notes li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.imp-errors {
+  border: 1px solid var(--danger-line);
+  background: var(--danger-wash);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  color: var(--danger-ink);
+  font-size: 12.5px;
+}
+
+.imp-errors ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* ---------- 预览表格 ---------- */
+.imp-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  max-height: 420px;
+}
+
+.imp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.imp-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-muted);
+  color: var(--ink-2);
+  font-weight: 600;
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.imp-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.imp-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.imp-cell-title {
+  color: var(--ink) !important;
+  font-weight: 500;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imp-cell-warn {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--warn);
+  vertical-align: middle;
+}
+
+/* ---------- 操作区 ---------- */
+.imp-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---------- 完成态 ---------- */
+.imp-panel-done {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.imp-done-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--success-soft);
+  color: var(--success-ink);
+}
+
+.imp-done-text {
+  flex: 1;
+  min-width: 220px;
+}
+
+.imp-done-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.imp-done-desc {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
