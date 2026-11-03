@@ -5,6 +5,8 @@
 
 use tauri::{AppHandle, State};
 
+use base64::Engine as _;
+
 use crate::autostart::{
     get_autostart as read_autostart, set_autostart as write_autostart, AutoStartInfo,
 };
@@ -574,6 +576,45 @@ pub fn pick_requirement_file() -> CmdResult<Option<PickedTextFile>> {
         .unwrap_or_else(|| "需求文档".to_string());
 
     Ok(Some(PickedTextFile { name, content }))
+}
+
+// ---------------------------------------------------------------------------
+// Excel 导入（V0.15.0）
+// ---------------------------------------------------------------------------
+
+/// 一次性创建看板与它的看板列（导入 Excel 用）；整件事在一个事务里完成。
+#[tauri::command]
+pub fn create_board_with_lists(
+    db: State<'_, Db>,
+    input: NewBoardWithListsInput,
+) -> CmdResult<CreatedBoardWithLists> {
+    let mut conn = db.lock()?;
+    repo::create_board_with_lists(&mut conn, input)
+}
+
+/// 保存二进制文件（导入模板）；用户取消保存时返回空路径。
+#[tauri::command]
+pub fn save_binary_file(input: SaveBinaryFileInput) -> CmdResult<SavedBinaryFile> {
+    let file_name = input.file_name.trim();
+    if file_name.is_empty() {
+        return Err("文件名不能为空".to_string());
+    }
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("保存导入模板")
+        .set_file_name(file_name)
+        .save_file()
+    else {
+        return Ok(SavedBinaryFile { path: String::new() });
+    };
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(input.base64.as_bytes())
+        .map_err(|error| format!("模板数据解码失败：{error}"))?;
+    std::fs::write(&path, &bytes).map_err(|error| format!("写入文件失败：{error}"))?;
+
+    Ok(SavedBinaryFile {
+        path: path.to_string_lossy().into_owned(),
+    })
 }
 
 // ---------------------------------------------------------------------------

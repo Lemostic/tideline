@@ -2125,6 +2125,87 @@ pub fn create_board(conn: &mut Connection, input: NewBoardInput) -> DbResult<Boa
     Ok(board)
 }
 
+/// V0.15.0：一次性创建看板与它的看板列（Excel 导入用）。
+///
+/// 与 `create_board` + 多次 `create_list` 的区别：整件事在一个事务里完成，
+/// 不会出现「看板已经建好、看板列还没建完」的中间态，导入失败也不会留半成品。
+pub fn create_board_with_lists(
+    conn: &mut Connection,
+    input: NewBoardWithListsInput,
+) -> DbResult<CreatedBoardWithLists> {
+    let tx = conn.transaction().map_err(db_err)?;
+    let now = now_iso();
+    let board = Board {
+        id: create_id("b"),
+        title: fallback_trimmed(&input.title, "未命名看板"),
+        description: trimmed_or_empty(input.description),
+        color: input.color.unwrap_or(BoardColor::Blue),
+        starred: false,
+        label_colors: HashMap::new(),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    };
+    tx.execute(
+        "INSERT INTO boards (id, title, description, color, starred, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            &board.id,
+            &board.title,
+            &board.description,
+            board.color.as_str(),
+            board.starred as i64,
+            &board.created_at,
+            &board.updated_at,
+        ],
+    )
+    .map_err(db_err)?;
+    ensure_builtin_saved_views(&tx, &board.id)?;
+
+    // 看板列：去空、去重、保序；一条都没有时补一条「待办」
+    let mut titles: Vec<String> = Vec::new();
+    for title in &input.list_titles {
+        let trimmed = title.trim();
+        if trimmed.is_empty() || titles.iter().any(|item| item == trimmed) {
+            continue;
+        }
+        titles.push(trimmed.to_string());
+    }
+    if titles.is_empty() {
+        titles.push("待办".to_string());
+    }
+
+    let mut lists: Vec<List> = Vec::with_capacity(titles.len());
+    for (index, title) in titles.iter().enumerate() {
+        let list = List {
+            id: create_id("l"),
+            board_id: board.id.clone(),
+            title: title.clone(),
+            color: BoardColor::Slate,
+            wip_limit: None,
+            position: index as i64,
+            created_at: now.clone(),
+        };
+        tx.execute(
+            "INSERT INTO lists (id, board_id, title, color, wip_limit, position, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                &list.id,
+                &list.board_id,
+                &list.title,
+                list.color.as_str(),
+                list.wip_limit,
+                list.position,
+                &list.created_at
+            ],
+        )
+        .map_err(db_err)?;
+        lists.push(list);
+    }
+
+    tx.commit().map_err(db_err)?;
+    Ok(CreatedBoardWithLists { board, lists })
+}
+
 pub fn update_board(conn: &mut Connection, input: UpdateBoardInput) -> DbResult<Board> {
     let tx = conn.transaction().map_err(db_err)?;
     let mut board = get_board(&tx, &input.id)?;

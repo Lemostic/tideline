@@ -1030,6 +1030,43 @@ pub struct NewListInput {
     pub wip_limit: Option<i64>,
 }
 
+/// V0.15.0：导入 Excel 时一次性建好看板与它的看板列。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewBoardWithListsInput {
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub color: Option<BoardColor>,
+    /// 看板列标题，按顺序创建；为空时补一条「待办」
+    #[serde(default)]
+    pub list_titles: Vec<String>,
+}
+
+/// V0.15.0：建看板列的返回值，同时带回新建的看板与全部看板列。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedBoardWithLists {
+    pub board: Board,
+    pub lists: Vec<List>,
+}
+
+/// V0.15.0：保存二进制文件（导入模板）的入参，内容用 base64 传输。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveBinaryFileInput {
+    pub file_name: String,
+    pub base64: String,
+}
+
+/// V0.15.0：保存结果；桌面端为绝对路径，浏览器端为文件名。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedBinaryFile {
+    pub path: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListPatch {
