@@ -536,6 +536,75 @@ impl PerformanceCategory {
     }
 }
 
+/// 请假类型（V0.16.0）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LeaveType {
+    Annual,
+    Sick,
+    Personal,
+    Compensatory,
+    Marriage,
+    Maternity,
+    Bereavement,
+    Other,
+}
+
+impl LeaveType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Annual => "annual",
+            Self::Sick => "sick",
+            Self::Personal => "personal",
+            Self::Compensatory => "compensatory",
+            Self::Marriage => "marriage",
+            Self::Maternity => "maternity",
+            Self::Bereavement => "bereavement",
+            Self::Other => "other",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "annual" => Self::Annual,
+            "sick" => Self::Sick,
+            "personal" => Self::Personal,
+            "compensatory" => Self::Compensatory,
+            "marriage" => Self::Marriage,
+            "maternity" => Self::Maternity,
+            "bereavement" => Self::Bereavement,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// 请假审批状态（V0.16.0）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LeaveStatus {
+    Pending,
+    Approved,
+    Rejected,
+}
+
+impl LeaveStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "approved" => Self::Approved,
+            "rejected" => Self::Rejected,
+            _ => Self::Pending,
+        }
+    }
+}
+
 /// 项目状态（V0.9）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -672,6 +741,36 @@ pub struct PerformanceRecord {
     pub category: PerformanceCategory,
     pub note: String,
     pub created_at: String,
+}
+
+/// 请假记录（V0.16.0）：起止日期均含当天，`days` 为自然日天数。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeaveRecord {
+    pub id: String,
+    /// 按项目隔离统计；旧备份可能缺省，按空串处理。
+    #[serde(default)]
+    pub project_id: String,
+    pub member_id: String,
+    /// 开始日期 YYYY-MM-DD
+    pub start_date: String,
+    /// 结束日期 YYYY-MM-DD（含当天）
+    pub end_date: String,
+    /// 请假天数（自然日，含首尾）；旧备份可能缺省，按 1 处理。
+    #[serde(default = "default_leave_days")]
+    pub days: i64,
+    pub leave_type: LeaveType,
+    pub status: LeaveStatus,
+    /// 请假事由（1–200 字）
+    pub reason: String,
+    pub note: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 旧备份缺少 `days` 时的兜底值：至少 1 天。
+fn default_leave_days() -> i64 {
+    1
 }
 
 // ---------------------------------------------------------------------------
@@ -840,6 +939,9 @@ pub struct Snapshot {
     /// 绩效加减分（V0.8 / V0.9）。
     #[serde(default)]
     pub performance_records: Vec<PerformanceRecord>,
+    /// 请假记录（V0.16.0）。
+    #[serde(default)]
+    pub leave_records: Vec<LeaveRecord>,
     /// 成员投入时间段（V0.8.3）。
     #[serde(default)]
     pub member_tenures: Vec<MemberTenure>,
@@ -899,6 +1001,9 @@ pub struct BackupFile {
     pub overtime_records: Vec<OvertimeRecord>,
     #[serde(default)]
     pub performance_records: Vec<PerformanceRecord>,
+    /// V0.16.0 新增；旧备份没有该字段时按空请假记录处理。
+    #[serde(default)]
+    pub leave_records: Vec<LeaveRecord>,
     /// V0.8.3 新增。
     #[serde(default)]
     pub member_tenures: Vec<MemberTenure>,
@@ -949,6 +1054,9 @@ pub struct BackupSummary {
     pub overtime_records: usize,
     #[serde(default)]
     pub performance_records: usize,
+    /// V0.16.0 新增。
+    #[serde(default)]
+    pub leave_records: usize,
     #[serde(default)]
     pub member_tenures: usize,
     #[serde(default)]
@@ -1523,6 +1631,53 @@ pub struct PerformancePatch {
 pub struct UpdatePerformanceInput {
     pub id: String,
     pub patch: PerformancePatch,
+}
+
+/// 新建请假记录的入参（V0.16.0）。
+///
+/// `project_id` 不由前端传入：服务端按成员的所属项目推导，与加班 / 绩效一致。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewLeaveInput {
+    pub member_id: String,
+    pub start_date: String,
+    pub end_date: String,
+    #[serde(default)]
+    pub leave_type: Option<LeaveType>,
+    #[serde(default)]
+    pub status: Option<LeaveStatus>,
+    /// 请假事由必填；缺省时按空串处理并由校验拦下。
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// 请假记录的局部修改（V0.16.0）。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeavePatch {
+    #[serde(default)]
+    pub member_id: Option<String>,
+    #[serde(default)]
+    pub start_date: Option<String>,
+    #[serde(default)]
+    pub end_date: Option<String>,
+    #[serde(default)]
+    pub leave_type: Option<LeaveType>,
+    #[serde(default)]
+    pub status: Option<LeaveStatus>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateLeaveInput {
+    pub id: String,
+    pub patch: LeavePatch,
 }
 
 /// 新建自定义字段的入参（V0.13.0）。

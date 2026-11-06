@@ -6,7 +6,10 @@
 //! V0.2 起任务表新增 `start_date / labels / subtasks` 三列，V0.3 再新增 `deleted_at`
 //! 软删除列：新库直接按最新结构建表，旧库（V0.1 / V0.2 已有用户数据）在启动时按列存在性
 //! 做幂等 `ALTER TABLE` 迁移，不重建表。V0.4 新增 `card_dependencies` 依赖表。
-//! 迁移完成后写入 `PRAGMA user_version = 19`。
+//! 迁移完成后写入 `PRAGMA user_version = 20`。
+//!
+//! V0.16.0 新增 `leave_records`（请假记录）表：同样靠 `CREATE TABLE IF NOT EXISTS`
+//! 在每次开库时补齐，旧库无需列迁移；`days` 由起止日期在服务端推导。
 //!
 //! V0.14.0：`cards` 增加 `parent_card_id`（自引用，NULL = 主任务），子任务成为
 //! 真实卡片；旧库的 `cards.subtasks` JSON 在迁移时展开为子卡片并清空。
@@ -280,6 +283,22 @@ CREATE TABLE IF NOT EXISTS performance_records (
     created_at TEXT NOT NULL
 );
 
+-- V0.16.0 请假记录：自然日（含首尾）跨 start_date ~ end_date，days 由服务端推导
+CREATE TABLE IF NOT EXISTS leave_records (
+    id          TEXT PRIMARY KEY NOT NULL,
+    project_id  TEXT REFERENCES projects (id) ON DELETE CASCADE,
+    member_id   TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
+    start_date  TEXT NOT NULL,
+    end_date    TEXT NOT NULL,
+    days        INTEGER NOT NULL DEFAULT 1,
+    leave_type  TEXT NOT NULL DEFAULT 'other',
+    status      TEXT NOT NULL DEFAULT 'approved',
+    reason      TEXT NOT NULL,
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
 -- V0.10 桌面软件使用统计：应用清单（app_key 为 exe 文件名去 .exe 后的小写形式）
 CREATE TABLE IF NOT EXISTS usage_apps (
     app_key    TEXT PRIMARY KEY NOT NULL,
@@ -423,6 +442,7 @@ CREATE INDEX IF NOT EXISTS idx_member_tenures_member ON member_tenures (member_i
 CREATE INDEX IF NOT EXISTS idx_member_tenures_project ON member_tenures (project_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_overtime_member_date ON overtime_records (member_id, date);
 CREATE INDEX IF NOT EXISTS idx_performance_member_date ON performance_records (member_id, date);
+CREATE INDEX IF NOT EXISTS idx_leave_member_date ON leave_records (member_id, start_date);
 CREATE INDEX IF NOT EXISTS idx_usage_daily_day ON usage_daily (day);
 CREATE INDEX IF NOT EXISTS idx_recurrences_card ON recurrences (card_id);
 CREATE INDEX IF NOT EXISTS idx_automation_rules_trigger ON automation_rules (trigger, enabled);
@@ -463,7 +483,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 19;
+const SCHEMA_VERSION: i64 = 20;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -629,6 +649,7 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
              CREATE INDEX IF NOT EXISTS idx_member_tenures_project ON member_tenures (project_id, started_at);
              CREATE INDEX IF NOT EXISTS idx_overtime_project_date ON overtime_records (project_id, date);
              CREATE INDEX IF NOT EXISTS idx_performance_project_date ON performance_records (project_id, date);
+             CREATE INDEX IF NOT EXISTS idx_leave_project_date ON leave_records (project_id, start_date);
              CREATE INDEX IF NOT EXISTS idx_cards_deleted_at ON cards (deleted_at);
              CREATE INDEX IF NOT EXISTS idx_card_dependencies_depends_on ON card_dependencies (depends_on_card_id);
              CREATE INDEX IF NOT EXISTS idx_board_set_boards_board ON board_set_boards (board_id);

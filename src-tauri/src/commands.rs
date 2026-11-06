@@ -458,6 +458,24 @@ pub fn delete_performance(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
     repo::delete_performance(&mut conn, input)
 }
 
+#[tauri::command]
+pub fn create_leave(db: State<'_, Db>, input: NewLeaveInput) -> CmdResult<LeaveRecord> {
+    let mut conn = db.lock()?;
+    repo::create_leave(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn update_leave(db: State<'_, Db>, input: UpdateLeaveInput) -> CmdResult<LeaveRecord> {
+    let mut conn = db.lock()?;
+    repo::update_leave(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn delete_leave(db: State<'_, Db>, input: IdInput) -> CmdResult<()> {
+    let mut conn = db.lock()?;
+    repo::delete_leave(&mut conn, input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_allowed_release_url;
