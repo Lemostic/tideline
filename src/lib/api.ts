@@ -27,7 +27,10 @@ import {
 import { todayKey } from './date';
 import { MAX_TASK_DEPTH } from './taskTree';
 import {
+  LEAVE_TYPE_KEYS,
+  leaveDayCount,
   normalizeOvertimeAbsenceReason,
+  validateLeaveInput,
   validateOvertimeAbsenceReason,
 } from './team';
 import {
@@ -64,6 +67,10 @@ import type {
   CustomFieldType,
   IdInput,
   InboxItem,
+  LeavePatch,
+  LeaveRecord,
+  LeaveStatus,
+  LeaveType,
   List,
   ListPatch,
   MemberRole,
@@ -77,6 +84,7 @@ import type {
   NewCardInput,
   NewCustomFieldInput,
   NewGoalInput,
+  NewLeaveInput,
   NewListInput,
   NewOvertimeInput,
   NewPerformanceInput,
@@ -213,6 +221,10 @@ export interface TidelineApi {
   createPerformance(input: NewPerformanceInput): Promise<PerformanceRecord>;
   updatePerformance(input: { id: string; patch: PerformancePatch }): Promise<PerformanceRecord>;
   deletePerformance(input: IdInput): Promise<void>;
+  /** 请假记录（V0.16.0） */
+  createLeave(input: NewLeaveInput): Promise<LeaveRecord>;
+  updateLeave(input: { id: string; patch: LeavePatch }): Promise<LeaveRecord>;
+  deleteLeave(input: IdInput): Promise<void>;
   /** 项目（V0.9） */
   createProject(input: NewProjectInput): Promise<Project>;
   updateProject(input: { id: string; patch: ProjectPatch }): Promise<Project>;
@@ -331,6 +343,9 @@ const tauriApi: TidelineApi = {
   createPerformance: (input) => invoke<PerformanceRecord>('create_performance', { input }),
   updatePerformance: (input) => invoke<PerformanceRecord>('update_performance', { input }),
   deletePerformance: (input) => invoke<void>('delete_performance', { input }),
+  createLeave: (input) => invoke<LeaveRecord>('create_leave', { input }),
+  updateLeave: (input) => invoke<LeaveRecord>('update_leave', { input }),
+  deleteLeave: (input) => invoke<void>('delete_leave', { input }),
   createProject: (input) => invoke<Project>('create_project', { input }),
   updateProject: (input) => invoke<Project>('update_project', { input }),
   deleteProject: (input) => invoke<void>('delete_project', { input }),
@@ -752,6 +767,17 @@ function normalizePerformanceCategory(value: unknown): PerformanceCategory {
     : 'other';
 }
 
+const LEAVE_TYPES: readonly string[] = LEAVE_TYPE_KEYS;
+
+function normalizeLeaveType(value: unknown): LeaveType {
+  return typeof value === 'string' && LEAVE_TYPES.includes(value) ? (value as LeaveType) : 'other';
+}
+
+function normalizeLeaveStatus(value: unknown): LeaveStatus {
+  if (value === 'approved' || value === 'rejected') return value;
+  return 'pending';
+}
+
 function loadLocalDb(): LocalDb {
   if (typeof localStorage === 'undefined') {
     return {
@@ -765,6 +791,7 @@ function loadLocalDb(): LocalDb {
       teamMembers: [],
       overtimeRecords: [],
       performanceRecords: [],
+      leaveRecords: [],
       memberTenures: [],
       projects: [],
       projectMetaFields: [],
@@ -791,6 +818,7 @@ function loadLocalDb(): LocalDb {
         teamMembers: [],
         overtimeRecords: [],
         performanceRecords: [],
+        leaveRecords: [],
         memberTenures: [],
         projects: [],
         projectMetaFields: [],
@@ -923,6 +951,32 @@ function loadLocalDb(): LocalDb {
               category: normalizePerformanceCategory(item.category),
               note: typeof item.note === 'string' ? item.note : '',
             }))
+        : [],
+      leaveRecords: Array.isArray(parsed.leaveRecords)
+        ? parsed.leaveRecords
+            .filter(
+              (item): item is LeaveRecord =>
+                Boolean(item) && typeof item.id === 'string' && typeof item.memberId === 'string',
+            )
+            .map((item) => {
+              const startDate = typeof item.startDate === 'string' ? item.startDate : '';
+              const endDate = typeof item.endDate === 'string' ? item.endDate : '';
+              return {
+                ...item,
+                projectId: typeof item.projectId === 'string' ? item.projectId : '',
+                startDate,
+                endDate,
+                // 旧数据没有 days 字段时按起止日期补齐。
+                days:
+                  typeof item.days === 'number' && item.days > 0
+                    ? item.days
+                    : leaveDayCount(startDate, endDate),
+                leaveType: normalizeLeaveType(item.leaveType),
+                status: normalizeLeaveStatus(item.status),
+                reason: typeof item.reason === 'string' ? item.reason : '',
+                note: typeof item.note === 'string' ? item.note : '',
+              };
+            })
         : [],
       memberTenures: Array.isArray(parsed.memberTenures)
         ? parsed.memberTenures
@@ -1078,6 +1132,7 @@ function loadLocalDb(): LocalDb {
       teamMembers: [],
       overtimeRecords: [],
       performanceRecords: [],
+      leaveRecords: [],
       memberTenures: [],
       projects: [],
       projectMetaFields: [],
@@ -1494,6 +1549,9 @@ const localApi: TidelineApi = {
       overtimeRecords: [...db.overtimeRecords].sort((a, b) => b.date.localeCompare(a.date)),
       performanceRecords: [...db.performanceRecords].sort((a, b) =>
         b.date.localeCompare(a.date),
+      ),
+      leaveRecords: [...db.leaveRecords].sort(
+        (a, b) => b.startDate.localeCompare(a.startDate) || b.createdAt.localeCompare(a.createdAt),
       ),
       memberTenures: [...db.memberTenures].sort(
         (a, b) => a.projectId.localeCompare(b.projectId) || a.startedAt.localeCompare(b.startedAt),
@@ -2254,6 +2312,7 @@ const localApi: TidelineApi = {
       teamMembers: backup.teamMembers,
       overtimeRecords: backup.overtimeRecords,
       performanceRecords: backup.performanceRecords,
+      leaveRecords: backup.leaveRecords,
       memberTenures: backup.memberTenures,
       projects: backup.projects,
       projectMetaFields: backup.projectMetaFields,
@@ -2473,6 +2532,7 @@ const localApi: TidelineApi = {
     db.memberTenures = db.memberTenures.filter((tenure) => tenure.memberId !== id);
     db.overtimeRecords = db.overtimeRecords.filter((record) => record.memberId !== id);
     db.performanceRecords = db.performanceRecords.filter((record) => record.memberId !== id);
+    db.leaveRecords = db.leaveRecords.filter((record) => record.memberId !== id);
     saveLocalDb(db);
   },
 
@@ -2635,6 +2695,66 @@ const localApi: TidelineApi = {
     saveLocalDb(db);
   },
 
+  async createLeave(input) {
+    const db = loadLocalDb();
+    const member = requireTeamMember(db, input.memberId);
+    const startDate = input.startDate.trim();
+    const endDate = input.endDate.trim();
+    const reason = input.reason?.trim() ?? '';
+    const error = validateLeaveInput(startDate, endDate, reason);
+    if (error) throw new Error(error);
+    const now = nowISO();
+    const record: LeaveRecord = {
+      id: createId('lv'),
+      projectId: member.projectId,
+      memberId: input.memberId,
+      startDate,
+      endDate,
+      days: leaveDayCount(startDate, endDate),
+      leaveType: normalizeLeaveType(input.leaveType),
+      status: input.status === undefined ? 'approved' : normalizeLeaveStatus(input.status),
+      reason,
+      note: input.note ?? '',
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.leaveRecords.push(record);
+    saveLocalDb(db);
+    return record;
+  },
+
+  async updateLeave({ id, patch }) {
+    const db = loadLocalDb();
+    const record = db.leaveRecords.find((item) => item.id === id);
+    if (!record) throw new Error(`请假记录不存在：${id}`);
+    if (patch.memberId !== undefined) {
+      const member = requireTeamMember(db, patch.memberId);
+      record.projectId = member.projectId;
+      record.memberId = patch.memberId;
+    }
+    const startDate = patch.startDate !== undefined ? patch.startDate.trim() : record.startDate;
+    const endDate = patch.endDate !== undefined ? patch.endDate.trim() : record.endDate;
+    const reason = patch.reason !== undefined ? patch.reason.trim() : record.reason;
+    const error = validateLeaveInput(startDate, endDate, reason);
+    if (error) throw new Error(error);
+    record.startDate = startDate;
+    record.endDate = endDate;
+    record.days = leaveDayCount(startDate, endDate);
+    if (patch.leaveType !== undefined) record.leaveType = normalizeLeaveType(patch.leaveType);
+    if (patch.status !== undefined) record.status = normalizeLeaveStatus(patch.status);
+    record.reason = reason;
+    if (patch.note !== undefined) record.note = patch.note;
+    record.updatedAt = nowISO();
+    saveLocalDb(db);
+    return record;
+  },
+
+  async deleteLeave({ id }) {
+    const db = loadLocalDb();
+    db.leaveRecords = db.leaveRecords.filter((record) => record.id !== id);
+    saveLocalDb(db);
+  },
+
   async createProject(input) {
     const db = loadLocalDb();
     const now = nowISO();
@@ -2685,6 +2805,7 @@ const localApi: TidelineApi = {
     db.teamMembers = db.teamMembers.filter((member) => member.projectId !== id);
     db.overtimeRecords = db.overtimeRecords.filter((record) => record.projectId !== id);
     db.performanceRecords = db.performanceRecords.filter((record) => record.projectId !== id);
+    db.leaveRecords = db.leaveRecords.filter((record) => record.projectId !== id);
     saveLocalDb(db);
   },
 

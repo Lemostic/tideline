@@ -85,7 +85,7 @@ function snapshot(): Snapshot {
     { cardId: 'c3', dependsOnCardId: 'c1' },
     { cardId: 'c4', dependsOnCardId: 'c2' },
   ];
-  return { boards, lists, cards, inbox: [], dependencies, boardSets: [], goals: [], teamMembers: [], overtimeRecords: [], performanceRecords: [], memberTenures: [], projects: [], projectMetaFields: [], projectRoles: [], recurrences: [], automationRules: [], customFields: [], cardFieldValues: [], savedViews: [] };
+  return { boards, lists, cards, inbox: [], dependencies, boardSets: [], goals: [], teamMembers: [], overtimeRecords: [], performanceRecords: [], leaveRecords: [], memberTenures: [], projects: [], projectMetaFields: [], projectRoles: [], recurrences: [], automationRules: [], customFields: [], cardFieldValues: [], savedViews: [] };
 }
 
 const filters: DashboardFilters = {

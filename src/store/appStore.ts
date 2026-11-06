@@ -29,6 +29,8 @@ import type {
   Goal,
   GoalPatch,
   InboxItem,
+  LeavePatch,
+  LeaveRecord,
   List,
   ListPatch,
   MemberTenure,
@@ -38,6 +40,7 @@ import type {
   NewCardInput,
   NewCustomFieldInput,
   NewGoalInput,
+  NewLeaveInput,
   NewOvertimeInput,
   NewPerformanceInput,
   NewProjectInput,
@@ -85,6 +88,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   teamMembers: [],
   overtimeRecords: [],
   performanceRecords: [],
+  leaveRecords: [],
   memberTenures: [],
   projects: [],
   projectMetaFields: [],
@@ -141,6 +145,10 @@ export interface AppState {
   createPerformance: (input: NewPerformanceInput) => Promise<PerformanceRecord>;
   updatePerformance: (id: string, patch: PerformancePatch) => Promise<void>;
   deletePerformance: (id: string) => Promise<void>;
+  /** 请假记录（V0.16.0） */
+  createLeave: (input: NewLeaveInput) => Promise<LeaveRecord>;
+  updateLeave: (id: string, patch: LeavePatch) => Promise<void>;
+  deleteLeave: (id: string) => Promise<void>;
 
   createProject: (input: NewProjectInput) => Promise<Project>;
   updateProject: (id: string, patch: ProjectPatch) => Promise<void>;
@@ -350,6 +358,7 @@ export const useAppStore = create<AppState>((set, get) => {
               teamMembers: state.snapshot.teamMembers,
               overtimeRecords: state.snapshot.overtimeRecords,
               performanceRecords: state.snapshot.performanceRecords,
+              leaveRecords: state.snapshot.leaveRecords,
               memberTenures: state.snapshot.memberTenures,
               projects: state.snapshot.projects,
               projectMetaFields: state.snapshot.projectMetaFields,
@@ -490,6 +499,9 @@ export const useAppStore = create<AppState>((set, get) => {
             performanceRecords: state.snapshot.performanceRecords.filter(
               (item) => item.memberId !== id,
             ),
+            leaveRecords: state.snapshot.leaveRecords.filter(
+              (item) => item.memberId !== id,
+            ),
           },
         }));
       } catch (error) {
@@ -617,6 +629,51 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
+    createLeave: async (input) => {
+      try {
+        const record = await api.createLeave(input);
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            leaveRecords: [record, ...state.snapshot.leaveRecords],
+          },
+        }));
+        return record;
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    updateLeave: async (id, patch) => {
+      try {
+        const record = await api.updateLeave({ id, patch });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            leaveRecords: state.snapshot.leaveRecords.map((item) =>
+              item.id === id ? record : item,
+            ),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    deleteLeave: async (id) => {
+      try {
+        await api.deleteLeave({ id });
+        set((state) => ({
+          snapshot: {
+            ...state.snapshot,
+            leaveRecords: state.snapshot.leaveRecords.filter((item) => item.id !== id),
+          },
+        }));
+      } catch (error) {
+        fail(error);
+      }
+    },
+
     createProject: async (input) => {
       try {
         const project = await api.createProject(input);
@@ -660,6 +717,9 @@ export const useAppStore = create<AppState>((set, get) => {
               (record) => record.projectId !== id,
             ),
             performanceRecords: state.snapshot.performanceRecords.filter(
+              (record) => record.projectId !== id,
+            ),
+            leaveRecords: state.snapshot.leaveRecords.filter(
               (record) => record.projectId !== id,
             ),
           },

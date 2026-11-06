@@ -8,7 +8,10 @@
 import { normalizeSavedViewFilters, normalizeSavedViewSort } from './savedViews';
 import { MAX_TASK_DEPTH } from './taskTree';
 import {
+  LEAVE_TYPE_KEYS,
+  leaveDayCount,
   normalizeOvertimeAbsenceReason,
+  validateLeaveInput,
   validateOvertimeAbsenceReason,
 } from './team';
 import type {
@@ -27,6 +30,8 @@ import type {
   CustomFieldType,
   Goal,
   InboxItem,
+  LeaveRecord,
+  LeaveType,
   List,
   OvertimeRecord,
   OvertimeStatus,
@@ -60,6 +65,8 @@ export interface BackupData {
   teamMembers: TeamMember[];
   overtimeRecords: OvertimeRecord[];
   performanceRecords: PerformanceRecord[];
+  /** V0.16.0 新增 */
+  leaveRecords: LeaveRecord[];
   memberTenures: MemberTenure[];
   projects: Project[];
   projectMetaFields: ProjectMetaField[];
@@ -78,7 +85,8 @@ export function summarizeBackup(
   backup: Pick<
     BackupFile,
     'boards' | 'lists' | 'cards' | 'inbox' | 'dependencies' | 'boardSets' | 'goals' |
-      'teamMembers' | 'overtimeRecords' | 'performanceRecords' | 'memberTenures' | 'projects' |
+      'teamMembers' | 'overtimeRecords' | 'performanceRecords' | 'leaveRecords' |
+      'memberTenures' | 'projects' |
       'projectMetaFields' | 'projectRoles' | 'recurrences' | 'automationRules' | 'cardActivity' |
       'customFields' | 'cardFieldValues' | 'savedViews'
   >,
@@ -95,6 +103,7 @@ export function summarizeBackup(
     teamMembers: backup.teamMembers.length,
     overtimeRecords: backup.overtimeRecords.length,
     performanceRecords: backup.performanceRecords.length,
+    leaveRecords: backup.leaveRecords.length,
     memberTenures: backup.memberTenures.length,
     projects: backup.projects.length,
     projectMetaFields: backup.projectMetaFields.length,
@@ -179,6 +188,7 @@ export function createBackup(data: BackupData): BackupFile {  return {
     teamMembers: data.teamMembers,
     overtimeRecords: data.overtimeRecords,
     performanceRecords: data.performanceRecords,
+    leaveRecords: data.leaveRecords,
     memberTenures: data.memberTenures,
     projects: data.projects,
     projectMetaFields: data.projectMetaFields,
@@ -784,6 +794,50 @@ export function parseBackup(text: string): BackupFile {
     });
   }
 
+  // V0.16.0 新增：请假记录，旧备份没有该字段时按空数组处理。
+  const rawLeave =
+    raw.leaveRecords === undefined ? [] : requireArray(raw.leaveRecords, 'leaveRecords');
+  const leaveRecords: LeaveRecord[] = [];
+  const leaveIds = new Set<string>();
+  for (const item of rawLeave) {
+    if (!isRecord(item)) throw new Error('备份中的请假记录格式不正确');
+    const id = requireString(item.id, 'leaveRecords[].id');
+    if (leaveIds.has(id)) throw new Error(`备份中存在重复的请假记录 id：${id}`);
+    leaveIds.add(id);
+    const memberId = requireString(item.memberId, 'leaveRecords[].memberId');
+    if (!memberIds.has(memberId)) throw new Error('请假记录引用了不存在的项目成员');
+    const projectId =
+      typeof item.projectId === 'string' && projectIds.has(item.projectId)
+        ? item.projectId
+        : (memberProjectById.get(memberId) ?? fallbackProjectId);
+    if (!projectIds.has(projectId)) throw new Error('请假记录引用了不存在的项目');
+    const startDate = requireString(item.startDate, 'leaveRecords[].startDate');
+    const endDate = requireString(item.endDate, 'leaveRecords[].endDate');
+    const reason = requireString(item.reason, 'leaveRecords[].reason');
+    const leaveError = validateLeaveInput(startDate, endDate, reason);
+    if (leaveError) throw new Error(`备份中的请假记录不完整：${leaveError}`);
+    const days = leaveDayCount(startDate, endDate);
+    leaveRecords.push({
+      id,
+      projectId,
+      memberId,
+      startDate,
+      endDate,
+      days,
+      leaveType:
+        typeof item.leaveType === 'string' &&
+        (LEAVE_TYPE_KEYS as readonly string[]).includes(item.leaveType)
+          ? (item.leaveType as LeaveType)
+          : 'other',
+      status:
+        item.status === 'approved' || item.status === 'rejected' ? item.status : 'pending',
+      reason: reason.trim(),
+      note: typeof item.note === 'string' ? item.note : '',
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+  }
+
   // V0.11 新增的三组数据，旧备份没有这些字段时按空数组处理。
   const rawRecurrences = raw.recurrences === undefined ? [] : requireArray(raw.recurrences, 'recurrences');
   const recurrences: Recurrence[] = [];
@@ -1033,6 +1087,7 @@ export function parseBackup(text: string): BackupFile {
     teamMembers,
     overtimeRecords,
     performanceRecords,
+    leaveRecords,
     memberTenures,
     projects,
     projectMetaFields,

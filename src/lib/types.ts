@@ -108,6 +108,8 @@ export interface Snapshot {
   teamMembers: TeamMember[];
   overtimeRecords: OvertimeRecord[];
   performanceRecords: PerformanceRecord[];
+  /** 请假记录（V0.16.0） */
+  leaveRecords: LeaveRecord[];
   /** 成员投入时间段（V0.8.3） */
   memberTenures: MemberTenure[];
   /** 项目（V0.9） */
@@ -505,6 +507,40 @@ export interface PerformanceRecord {
   createdAt: string;
 }
 
+/** V0.16.0：请假类型 */
+export type LeaveType =
+  | 'annual'
+  | 'sick'
+  | 'personal'
+  | 'compensatory'
+  | 'marriage'
+  | 'maternity'
+  | 'bereavement'
+  | 'other';
+
+/** V0.16.0：请假审批状态 */
+export type LeaveStatus = 'pending' | 'approved' | 'rejected';
+
+/** V0.16.0：请假记录（按项目隔离统计） */
+export interface LeaveRecord {
+  id: string;
+  projectId: string;
+  memberId: string;
+  /** 开始日期 YYYY-MM-DD */
+  startDate: string;
+  /** 结束日期 YYYY-MM-DD（含当天） */
+  endDate: string;
+  /** 请假天数（自然日，含首尾），由起止日期推导 */
+  days: number;
+  leaveType: LeaveType;
+  status: LeaveStatus;
+  /** 请假事由 */
+  reason: string;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface NewTeamMemberInput {
   projectId: string;
   roleId: string;
@@ -568,6 +604,20 @@ export interface NewPerformanceInput {
 
 export type PerformancePatch = Partial<
   Pick<PerformanceRecord, 'memberId' | 'date' | 'points' | 'reason' | 'category' | 'note'>
+>;
+
+export interface NewLeaveInput {
+  memberId: string;
+  startDate: string;
+  endDate: string;
+  leaveType?: LeaveType;
+  status?: LeaveStatus;
+  reason?: string;
+  note?: string;
+}
+
+export type LeavePatch = Partial<
+  Pick<LeaveRecord, 'memberId' | 'startDate' | 'endDate' | 'leaveType' | 'status' | 'reason' | 'note'>
 >;
 
 export type BoardPatch = Partial<
@@ -720,6 +770,8 @@ export interface BackupFile {
   teamMembers: TeamMember[];
   overtimeRecords: OvertimeRecord[];
   performanceRecords: PerformanceRecord[];
+  /** V0.16.0 新增；旧备份没有该字段时按空请假记录处理 */
+  leaveRecords: LeaveRecord[];
   memberTenures: MemberTenure[];
   /** V0.9 新增；旧备份没有该字段时按空项目处理，恢复时兼容迁移 */
   projects: Project[];
@@ -751,6 +803,7 @@ export interface BackupSummary {
   teamMembers: number;
   overtimeRecords: number;
   performanceRecords: number;
+  leaveRecords: number;
   memberTenures: number;
   projects: number;
   projectMetaFields: number;
