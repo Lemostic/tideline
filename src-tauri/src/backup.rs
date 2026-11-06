@@ -35,6 +35,7 @@ pub fn build(conn: &Connection) -> Result<BackupFile, String> {
         team_members: repo::get_team_members(conn)?,
         overtime_records: repo::get_overtime_records(conn)?,
         performance_records: repo::get_performance_records(conn)?,
+        leave_records: repo::get_leave_records(conn)?,
         member_tenures: repo::get_member_tenures(conn)?,
         projects: repo::get_projects(conn)?,
         project_meta_fields: repo::get_all_project_meta(conn)?,
@@ -62,6 +63,7 @@ impl BackupFile {
             team_members: self.team_members.len(),
             overtime_records: self.overtime_records.len(),
             performance_records: self.performance_records.len(),
+            leave_records: self.leave_records.len(),
             member_tenures: self.member_tenures.len(),
             projects: self.projects.len(),
             project_meta_fields: self.project_meta_fields.len(),
@@ -178,7 +180,8 @@ fn normalize_legacy_backup(backup: &mut BackupFile) {
     }
     let has_legacy_team = !backup.team_members.is_empty()
         || !backup.overtime_records.is_empty()
-        || !backup.performance_records.is_empty();
+        || !backup.performance_records.is_empty()
+        || !backup.leave_records.is_empty();
     if backup.projects.is_empty() && has_legacy_team {
         let default_project_id = "p_default".to_string();
         backup.projects.push(Project {
@@ -312,6 +315,19 @@ fn normalize_legacy_backup(backup: &mut BackupFile) {
                 .get(&record.member_id)
                 .cloned()
                 .unwrap_or_else(|| fallback_project_id.clone());
+        }
+    }
+    for record in &mut backup.leave_records {
+        if record.project_id.trim().is_empty() {
+            record.project_id = member_projects
+                .get(&record.member_id)
+                .cloned()
+                .unwrap_or_else(|| fallback_project_id.clone());
+        }
+        // 旧备份可能没有 `days` 字段（反序列化后为 0），按起止日期重新推导。
+        if record.days <= 0 {
+            record.days = repo::inclusive_days_between(&record.start_date, &record.end_date)
+                .unwrap_or(1);
         }
     }
 }
@@ -712,6 +728,36 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         }
     }
 
+    let mut leave_ids = HashSet::new();
+    for record in &backup.leave_records {
+        if record.id.trim().is_empty() {
+            return Err("备份中存在空的请假记录 id".to_string());
+        }
+        if !leave_ids.insert(record.id.as_str()) {
+            return Err(format!("备份中存在重复的请假记录 id：{}", record.id));
+        }
+        if !member_ids.contains(record.member_id.as_str()) {
+            return Err("请假记录引用了不存在的项目成员".to_string());
+        }
+        if !project_ids.contains(record.project_id.as_str()) {
+            return Err("请假记录引用了不存在的项目".to_string());
+        }
+        if record.days < 1 {
+            return Err("备份中的请假天数无效".to_string());
+        }
+        // ISO 日期可以直接按字符串比较先后。
+        if record.end_date < record.start_date {
+            return Err("备份中的请假日期无效".to_string());
+        }
+        let reason = record.reason.trim();
+        if reason.is_empty() {
+            return Err("备份中的请假事由为空".to_string());
+        }
+        if reason.chars().count() > 200 {
+            return Err("备份中的请假事由过长".to_string());
+        }
+    }
+
     // V0.13.0：自定义字段与任务字段取值。
     let mut custom_field_ids = HashSet::new();
     let mut custom_field_types: HashMap<&str, CustomFieldType> = HashMap::new();
@@ -913,6 +959,7 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
         .and_then(|_| tx.execute("DELETE FROM goals", []))
         .and_then(|_| tx.execute("DELETE FROM performance_records", []))
         .and_then(|_| tx.execute("DELETE FROM overtime_records", []))
+        .and_then(|_| tx.execute("DELETE FROM leave_records", []))
         .and_then(|_| tx.execute("DELETE FROM member_tenures", []))
         .and_then(|_| tx.execute("DELETE FROM team_members", []))
         .and_then(|_| tx.execute("DELETE FROM project_meta_fields", []))
@@ -1317,6 +1364,30 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
         .map_err(|error| format!("写入绩效记录失败：{error}"))?;
     }
 
+    for record in &backup.leave_records {
+        tx.execute(
+            "INSERT INTO leave_records \
+             (id, project_id, member_id, start_date, end_date, days, leave_type, status, reason, note, \
+              created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                &record.id,
+                &record.project_id,
+                &record.member_id,
+                &record.start_date,
+                &record.end_date,
+                record.days,
+                record.leave_type.as_str(),
+                record.status.as_str(),
+                &record.reason,
+                &record.note,
+                &record.created_at,
+                &record.updated_at,
+            ],
+        )
+        .map_err(|error| format!("写入请假记录失败：{error}"))?;
+    }
+
     for item in &backup.inbox {
         tx.execute(
             "INSERT INTO inbox_items (id, content, created_at) VALUES (?1, ?2, ?3)",
@@ -1553,6 +1624,7 @@ mod tests {
             team_members: Vec::new(),
             overtime_records: Vec::new(),
             performance_records: Vec::new(),
+            leave_records: Vec::new(),
             member_tenures: Vec::new(),
             projects: Vec::new(),
             project_meta_fields: Vec::new(),
@@ -1848,6 +1920,107 @@ mod tests {
         assert_eq!(snapshot.member_tenures[0].ended_at, None);
         assert_eq!(snapshot.overtime_records[0].member_id, member.id);
         assert_eq!(snapshot.performance_records[0].member_id, member.id);
+    }
+
+    // -----------------------------------------------------------------------
+    // 请假记录（V0.16.0）
+    // -----------------------------------------------------------------------
+
+    /// 建项目 + 成员 + 一条请假记录，供请假备份用例复用。
+    fn seed_leave(conn: &mut Connection) -> (Project, TeamMember, LeaveRecord) {
+        let project = repo::create_project(
+            conn,
+            NewProjectInput {
+                name: "请假项目".to_string(),
+                description: None,
+                color: None,
+                starred: None,
+            },
+        )
+        .expect("创建项目");
+        let roles = repo::get_project_roles(conn, &project.id).expect("项目角色");
+        let member = repo::create_team_member(
+            conn,
+            NewTeamMemberInput {
+                project_id: project.id.clone(),
+                role_id: roles[0].id.clone(),
+                name: "张三".to_string(),
+                joined_at: Some("2026-10-01".to_string()),
+                note: None,
+            },
+        )
+        .expect("创建成员");
+        let leave = repo::create_leave(
+            conn,
+            NewLeaveInput {
+                member_id: member.id.clone(),
+                start_date: "2026-10-01".to_string(),
+                end_date: "2026-10-03".to_string(),
+                leave_type: Some(LeaveType::Annual),
+                status: Some(LeaveStatus::Approved),
+                reason: "家中有事".to_string(),
+                note: Some("已同步".to_string()),
+            },
+        )
+        .expect("创建请假");
+        (project, member, leave)
+    }
+
+    #[test]
+    fn leave_records_round_trip_through_backup() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        let (project, member, leave) = seed_leave(&mut conn);
+
+        let backup = build(&conn).expect("构建备份");
+        assert_eq!(backup.summary().leave_records, 1);
+
+        let restored = restore(&mut conn, &backup).expect("恢复备份");
+        assert_eq!(restored.leave_records, 1);
+
+        let snapshot = repo::get_snapshot(&conn).expect("快照");
+        assert_eq!(snapshot.leave_records.len(), 1);
+        let record = &snapshot.leave_records[0];
+        assert_eq!(record.id, leave.id);
+        assert_eq!(record.project_id, project.id);
+        assert_eq!(record.member_id, member.id);
+        assert_eq!(record.start_date, "2026-10-01");
+        assert_eq!(record.end_date, "2026-10-03");
+        assert_eq!(record.days, 3);
+        assert_eq!(record.leave_type, LeaveType::Annual);
+        assert_eq!(record.status, LeaveStatus::Approved);
+        assert_eq!(record.reason, "家中有事");
+        assert_eq!(record.note, "已同步");
+    }
+
+    #[test]
+    fn leave_records_reject_dirty_backup() {
+        let mut conn = db::open_in_memory().expect("内存库");
+        seed_leave(&mut conn);
+        let mut backup = build(&conn).expect("构建备份");
+
+        // 事由为空：校验必须拦下。
+        backup.leave_records[0].reason = "   ".to_string();
+        let error = validate(&backup).expect_err("应拒绝空事由");
+        assert_eq!(error, "备份中的请假事由为空");
+        assert!(restore(&mut conn, &backup).is_err(), "恢复也应拒绝脏备份");
+
+        // 天数非法：校验必须拦下。
+        let mut backup = build(&conn).expect("构建备份");
+        backup.leave_records[0].days = 0;
+        let error = validate(&backup).expect_err("应拒绝非法天数");
+        assert_eq!(error, "备份中的请假天数无效");
+
+        // 日期区间倒置：校验必须拦下。
+        let mut backup = build(&conn).expect("构建备份");
+        backup.leave_records[0].end_date = "2026-09-01".to_string();
+        let error = validate(&backup).expect_err("应拒绝倒置区间");
+        assert_eq!(error, "备份中的请假日期无效");
+
+        // 引用不存在的成员：校验必须拦下。
+        let mut backup = build(&conn).expect("构建备份");
+        backup.leave_records[0].member_id = "tm_unknown".to_string();
+        let error = validate(&backup).expect_err("应拒绝无效成员引用");
+        assert_eq!(error, "请假记录引用了不存在的项目成员");
     }
 
     #[test]
