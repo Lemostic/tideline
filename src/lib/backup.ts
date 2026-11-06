@@ -9,8 +9,9 @@ import { normalizeSavedViewFilters, normalizeSavedViewSort } from './savedViews'
 import { MAX_TASK_DEPTH } from './taskTree';
 import {
   LEAVE_TYPE_KEYS,
-  leaveDayCount,
+  leaveSpanDays,
   normalizeOvertimeAbsenceReason,
+  roundLeaveDays,
   validateLeaveInput,
   validateOvertimeAbsenceReason,
 } from './team';
@@ -814,23 +815,25 @@ export function parseBackup(text: string): BackupFile {
     const startDate = requireString(item.startDate, 'leaveRecords[].startDate');
     const endDate = requireString(item.endDate, 'leaveRecords[].endDate');
     const reason = requireString(item.reason, 'leaveRecords[].reason');
-    const leaveError = validateLeaveInput(startDate, endDate, reason);
+    // V0.16.1：天数由人工填写；旧备份缺 days 时按区间自然日补齐后再校验。
+    const rawDays =
+      typeof item.days === 'number' && Number.isFinite(item.days) && item.days > 0
+        ? item.days
+        : leaveSpanDays(startDate, endDate);
+    const leaveError = validateLeaveInput(startDate, endDate, rawDays, reason);
     if (leaveError) throw new Error(`备份中的请假记录不完整：${leaveError}`);
-    const days = leaveDayCount(startDate, endDate);
     leaveRecords.push({
       id,
       projectId,
       memberId,
       startDate,
       endDate,
-      days,
+      days: roundLeaveDays(rawDays),
       leaveType:
         typeof item.leaveType === 'string' &&
         (LEAVE_TYPE_KEYS as readonly string[]).includes(item.leaveType)
           ? (item.leaveType as LeaveType)
           : 'other',
-      status:
-        item.status === 'approved' || item.status === 'rejected' ? item.status : 'pending',
       reason: reason.trim(),
       note: typeof item.note === 'string' ? item.note : '',
       createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),

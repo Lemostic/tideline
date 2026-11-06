@@ -1487,10 +1487,10 @@
   }
 }
 
-/* ===== 请假记录（V0.16.0） ===== */
+/* ===== 请假记录（V0.16.0 / V0.16.1 改为纯记录口径） ===== */
 .leave-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-muted);
@@ -1570,11 +1570,6 @@
   color: var(--primary-strong);
 }
 
-.leave-month-stat.is-pending {
-  color: var(--warn-ink);
-  font-weight: 600;
-}
-
 .leave-month .team-records {
   border: 1px solid var(--line);
   border-radius: 0 0 9px 9px;
@@ -1585,47 +1580,16 @@
   border-top: 0;
 }
 
-.team-leave-record.status-approved {
-  background: rgba(15, 118, 110, 0.025);
-}
-
-.team-leave-record.status-pending {
-  background: var(--accent-soft);
-}
-
-.team-leave-record.status-rejected {
-  background: var(--danger-soft);
-}
-
-.team-leave-type,
-.team-leave-status {
+.team-leave-type {
   display: inline-flex;
   align-items: center;
   height: 18px;
   padding: 0 7px;
   border-radius: 999px;
-  font-size: 9px;
-  font-weight: 600;
-}
-
-.team-leave-type {
   background: var(--surface-sunken);
   color: var(--muted);
-}
-
-.team-leave-status.status-approved {
-  background: var(--primary-soft);
-  color: var(--primary-strong);
-}
-
-.team-leave-status.status-pending {
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-}
-
-.team-leave-status.status-rejected {
-  background: var(--danger-soft);
-  color: var(--danger-ink);
+  font-size: 9px;
+  font-weight: 600;
 }
 
 .leave-days-preview {

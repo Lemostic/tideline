@@ -12,16 +12,17 @@ import {
   toDateKey,
 } from '@/lib/date';
 import {
-  approvedLeaveDays,
-  approvedLeaveDaysInMonth,
+  formatLeaveDays,
   formatMonthCN,
   isWeekend,
-  LEAVE_STATUS_META,
-  LEAVE_TYPE_META,
-  leaveDayCount,
-  leaveStatusLabel,
-  leaveTypeLabel,
+  LEAVE_DAYS_DECIMALS,
+  LEAVE_DAYS_MAX,
   LEAVE_REASON_MAX,
+  LEAVE_TYPE_META,
+  leaveDaysInMonth,
+  leaveDaysTotal,
+  leaveSpanDays,
+  leaveTypeLabel,
   memberPortraits,
   monthKey,
   OVERTIME_ABSENCE_REASON_MAX,
@@ -31,8 +32,6 @@ import {
   PERFORMANCE_CATEGORY_META,
   performanceByMember,
   performanceCategoryLabel,
-  pendingLeaveCount,
-  pendingLeaveCountInMonth,
   PROJECT_COLORS,
   projectLeave,
   projectMeta,
@@ -52,7 +51,6 @@ import {
 } from '@/lib/team';
 import type {
   LeaveRecord,
-  LeaveStatus,
   LeaveType,
   MemberTenure,
   OvertimeRecord,
@@ -234,10 +232,8 @@ export function ProjectDetailPage() {
   const overtimeTotal = overtimeHoursInMonth(overtime, month);
   const overtimeAbsenceTotal = overtimeAbsenceCountInMonth(overtime, month);
   const performanceNet = monthPerformance.reduce((sum, record) => sum + record.points, 0);
-  const leaveMonthDays = approvedLeaveDaysInMonth(leave, month);
-  const leaveTotalDays = approvedLeaveDays(leave);
-  const leavePendingTotal = pendingLeaveCount(leave);
-  const leaveMonthPending = pendingLeaveCountInMonth(leave, month);
+  const leaveMonthDays = leaveDaysInMonth(leave, month);
+  const leaveTotalDays = leaveDaysTotal(leave);
   const portraits = memberPortraits(
     {
       members: snapshot.teamMembers,
@@ -250,22 +246,18 @@ export function ProjectDetailPage() {
     project.id,
   );
   const leaveGroups = useMemo(() => {
-    const groups = new Map<
-      string,
-      { key: string; records: LeaveRecord[]; days: number; pending: number }
-    >();
+    const groups = new Map<string, { key: string; records: LeaveRecord[]; days: number }>();
     for (const record of leave) {
       const key = record.startDate.slice(0, 7) || '未知月份';
       const existing = groups.get(key);
       if (existing) existing.records.push(record);
-      else groups.set(key, { key, records: [record], days: 0, pending: 0 });
+      else groups.set(key, { key, records: [record], days: 0 });
     }
     return [...groups.values()]
       .map((group) => ({
         ...group,
         records: [...group.records].sort((a, b) => b.startDate.localeCompare(a.startDate)),
-        days: approvedLeaveDays(group.records),
-        pending: pendingLeaveCount(group.records),
+        days: leaveDaysTotal(group.records),
       }))
       .sort((a, b) => b.key.localeCompare(a.key));
   }, [leave]);
@@ -422,11 +414,8 @@ export function ProjectDetailPage() {
             <span>本月绩效</span>
           </div>
           <div>
-            <strong>{leaveMonthDays}<em>天</em></strong>
-            <span>
-              本月请假
-              {leaveMonthPending > 0 ? ` · 待审批 ${leaveMonthPending}` : ''}
-            </span>
+            <strong>{formatLeaveDays(leaveMonthDays)}<em>天</em></strong>
+            <span>本月请假</span>
           </div>
         </div>
       </header>
@@ -826,7 +815,7 @@ export function ProjectDetailPage() {
               <EmptyState
                 icon={<Icon name="calendar" size={22} />}
                 title="还没有本项目的请假记录"
-                description="登记成员的请假区间与事由；已批准的请假计入资源占用，待审批与已驳回只做留档。"
+                description="登记成员的请假区间、天数与事由即可。这里只做留档，不需要审批 —— 同事请假时已经同意过。"
               />
             </div>
           ) : (
@@ -837,16 +826,12 @@ export function ProjectDetailPage() {
                   <span>请假记录</span>
                 </div>
                 <div>
-                  <strong>{leaveTotalDays}<em>天</em></strong>
-                  <span>已批准合计</span>
+                  <strong>{formatLeaveDays(leaveTotalDays)}<em>天</em></strong>
+                  <span>累计请假</span>
                 </div>
                 <div>
-                  <strong>{leavePendingTotal}</strong>
-                  <span>待审批</span>
-                </div>
-                <div>
-                  <strong>{leaveMonthDays}<em>天</em></strong>
-                  <span>本月已批准</span>
+                  <strong>{formatLeaveDays(leaveMonthDays)}<em>天</em></strong>
+                  <span>本月请假</span>
                 </div>
               </div>
               <div className="leave-months">
@@ -858,32 +843,25 @@ export function ProjectDetailPage() {
                       </span>
                       <span className="leave-month-total">
                         <span className="leave-month-stat">{group.records.length} 条</span>
-                        <span className="leave-month-stat is-approved">{group.days} 天</span>
-                        {group.pending > 0 ? (
-                          <span className="leave-month-stat is-pending">待审批 {group.pending}</span>
-                        ) : null}
+                        <span className="leave-month-stat is-approved">
+                          {formatLeaveDays(group.days)} 天
+                        </span>
                       </span>
                     </div>
                     <div className="team-records">
                       {group.records.map((record) => {
                         const member = memberById.get(record.memberId);
                         return (
-                          <article
-                            className={`team-record team-leave-record status-${record.status}`}
-                            key={record.id}
-                          >
+                          <article className="team-record team-leave-record" key={record.id}>
                             <div className="team-record-date">
                               <strong>{record.startDate.slice(5).replace('-', '/')}</strong>
-                              <span>{record.days} 天</span>
+                              <span>{formatLeaveDays(record.days)} 天</span>
                             </div>
                             <div className="team-record-main">
                               <div className="team-record-title">
                                 {member?.name ?? '未知成员'}
                                 <span className="team-leave-type">
                                   {leaveTypeLabel(record.leaveType)}
-                                </span>
-                                <span className={`team-leave-status status-${record.status}`}>
-                                  {leaveStatusLabel(record.status)}
                                 </span>
                               </div>
                               <div className="team-record-meta">
@@ -895,44 +873,6 @@ export function ProjectDetailPage() {
                               </div>
                             </div>
                             <div className="team-record-actions">
-                              {record.status === 'approved' ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-sm"
-                                  onClick={() =>
-                                    void updateLeave(record.id, {
-                                      status: 'pending',
-                                    }).catch(() => undefined)
-                                  }
-                                >
-                                  改为待审批
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-sm"
-                                  onClick={() =>
-                                    void updateLeave(record.id, {
-                                      status: 'approved',
-                                    }).catch(() => undefined)
-                                  }
-                                >
-                                  批准
-                                </button>
-                              )}
-                              {record.status !== 'rejected' ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-sm"
-                                  onClick={() =>
-                                    void updateLeave(record.id, {
-                                      status: 'rejected',
-                                    }).catch(() => undefined)
-                                  }
-                                >
-                                  驳回
-                                </button>
-                              ) : null}
                               <button
                                 type="button"
                                 className="btn btn-icon"
@@ -1272,8 +1212,8 @@ export function ProjectDetailPage() {
                           <span>累计加班</span>
                         </div>
                         <div className="portrait-metric">
-                          <strong>{portrait.leaveDays}<em>天</em></strong>
-                          <span>已批准请假</span>
+                          <strong>{formatLeaveDays(portrait.leaveDays)}<em>天</em></strong>
+                          <span>累计请假</span>
                         </div>
                         <div className="portrait-metric">
                           <strong>
@@ -1506,8 +1446,8 @@ export function ProjectDetailPage() {
               memberId: input.memberId,
               startDate: input.startDate,
               endDate: input.endDate,
+              days: input.days,
               leaveType: input.leaveType,
-              status: input.status,
               reason: input.reason,
               note: input.note,
             });
@@ -2150,8 +2090,8 @@ function LeaveModal({
     memberId: string;
     startDate: string;
     endDate: string;
+    days: number;
     leaveType: LeaveType;
-    status: LeaveStatus;
     reason: string;
     note: string;
   }) => Promise<void>;
@@ -2159,8 +2099,8 @@ function LeaveModal({
   const [memberId, setMemberId] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [daysInput, setDaysInput] = useState('');
   const [leaveType, setLeaveType] = useState<LeaveType>('personal');
-  const [status, setStatus] = useState<LeaveStatus>('approved');
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -2171,8 +2111,8 @@ function LeaveModal({
     setMemberId(record?.memberId ?? members[0]?.id ?? '');
     setStartDate(record?.startDate ?? '');
     setEndDate(record?.endDate ?? '');
+    setDaysInput(record ? formatLeaveDays(record.days) : '');
     setLeaveType(record?.leaveType ?? 'personal');
-    setStatus(record?.status ?? 'approved');
     setReason(record?.reason ?? '');
     setNote(record?.note ?? '');
     setBusy(false);
@@ -2182,13 +2122,35 @@ function LeaveModal({
   if (!open) return null;
 
   const reasonCount = Array.from(reason).length;
-  const days = leaveDayCount(startDate, endDate);
+  const spanDays = leaveSpanDays(startDate, endDate);
+  const days = Number(daysInput);
+  // 只允许两位小数：输入时就截断，避免提交后才发现被四舍五入。
+  const handleDaysChange = (raw: string) => {
+    const cleaned = raw.replace(/[^\d.]/g, '');
+    if (cleaned === '') {
+      setDaysInput('');
+      return;
+    }
+    const value = Number(cleaned);
+    if (!Number.isFinite(value)) return;
+    const [intPart, decimalPart = ''] = cleaned.split('.');
+    if (cleaned.includes('.')) {
+      setDaysInput(`${intPart}.${decimalPart.slice(0, LEAVE_DAYS_DECIMALS)}`);
+    } else {
+      setDaysInput(intPart);
+    }
+  };
 
   const submit = async () => {
     if (busy) return;
-    const reasonError = validateLeaveInput(startDate, endDate, reason);
-    if (reasonError) {
-      setError(reasonError);
+    if (daysInput.trim() === '') {
+      setError('请填写请假天数');
+      return;
+    }
+    const parsedDays = Number(daysInput);
+    const error_ = validateLeaveInput(startDate, endDate, parsedDays, reason);
+    if (error_) {
+      setError(error_);
       return;
     }
     setBusy(true);
@@ -2197,8 +2159,8 @@ function LeaveModal({
         memberId,
         startDate,
         endDate,
+        days: parsedDays,
         leaveType,
-        status,
         reason: reason.trim(),
         note: note.trim(),
       });
@@ -2211,7 +2173,7 @@ function LeaveModal({
   return (
     <Modal
       title={record ? '编辑请假记录' : '添加请假记录'}
-      subtitle="请假按自然日统计，含首尾两天"
+      subtitle="只做留档，不需要审批；天数按实际情况填写，最多两位小数"
       onClose={() => (busy ? undefined : onClose())}
       footer={
         <>
@@ -2266,24 +2228,28 @@ function LeaveModal({
             <DatePicker value={endDate} onChange={setEndDate} ariaLabel="请假结束日期" />
           </label>
           <label className="team-form-field">
-            <span>审批状态</span>
-            <select
-              className="select"
-              value={status}
-              onChange={(event) => setStatus(event.target.value as LeaveStatus)}
-              aria-label="请假审批状态"
-            >
-              {LEAVE_STATUS_META.map((item) => (
-                <option key={item.key} value={item.key}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+            <span>请假天数</span>
+            <input
+              className="input"
+              type="text"
+              inputMode="decimal"
+              value={daysInput}
+              onChange={(event) => handleDaysChange(event.target.value)}
+              aria-label="请假天数"
+              placeholder="例如：3 或 0.5"
+            />
+            <span className="team-form-counter">
+              {spanDays > 0
+                ? `区间共 ${spanDays} 个自然日，按实际天数填写`
+                : `最多 ${LEAVE_DAYS_MAX} 天，最多 ${LEAVE_DAYS_DECIMALS} 位小数`}
+            </span>
           </label>
           <div className="team-form-field">
-            <span>请假天数</span>
-            <div className={`leave-days-preview${days > 0 ? ' is-ready' : ''}`}>
-              {days > 0 ? `${days} 天` : '选择起止日期后自动计算'}
+            <span>折算说明</span>
+            <div className={`leave-days-preview${Number.isFinite(days) && days > 0 ? ' is-ready' : ''}`}>
+              {Number.isFinite(days) && days > 0
+                ? `${formatLeaveDays(days)} 天`
+                : '填写后显示天数'}
             </div>
           </div>
         </div>

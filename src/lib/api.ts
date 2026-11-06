@@ -28,8 +28,9 @@ import { todayKey } from './date';
 import { MAX_TASK_DEPTH } from './taskTree';
 import {
   LEAVE_TYPE_KEYS,
-  leaveDayCount,
+  leaveSpanDays,
   normalizeOvertimeAbsenceReason,
+  roundLeaveDays,
   validateLeaveInput,
   validateOvertimeAbsenceReason,
 } from './team';
@@ -69,7 +70,6 @@ import type {
   InboxItem,
   LeavePatch,
   LeaveRecord,
-  LeaveStatus,
   LeaveType,
   List,
   ListPatch,
@@ -773,9 +773,9 @@ function normalizeLeaveType(value: unknown): LeaveType {
   return typeof value === 'string' && LEAVE_TYPES.includes(value) ? (value as LeaveType) : 'other';
 }
 
-function normalizeLeaveStatus(value: unknown): LeaveStatus {
-  if (value === 'approved' || value === 'rejected') return value;
-  return 'pending';
+/** V0.16.1：请假只做记录，天数由人工填写，写库前统一四舍五入到两位。 */
+function normalizeLeaveDays(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? roundLeaveDays(value) : fallback;
 }
 
 function loadLocalDb(): LocalDb {
@@ -961,21 +961,23 @@ function loadLocalDb(): LocalDb {
             .map((item) => {
               const startDate = typeof item.startDate === 'string' ? item.startDate : '';
               const endDate = typeof item.endDate === 'string' ? item.endDate : '';
-              return {
-                ...item,
+              const now = nowISO();
+              // 显式构造：V0.16.1 去掉了审批状态，旧数据里的 status 不再带进快照。
+              const record: LeaveRecord = {
+                id: item.id,
                 projectId: typeof item.projectId === 'string' ? item.projectId : '',
+                memberId: item.memberId,
                 startDate,
                 endDate,
-                // 旧数据没有 days 字段时按起止日期补齐。
-                days:
-                  typeof item.days === 'number' && item.days > 0
-                    ? item.days
-                    : leaveDayCount(startDate, endDate),
+                // V0.16.1：天数改为人工填写，旧数据缺 days 时按区间自然日补齐。
+                days: normalizeLeaveDays(item.days, leaveSpanDays(startDate, endDate)),
                 leaveType: normalizeLeaveType(item.leaveType),
-                status: normalizeLeaveStatus(item.status),
                 reason: typeof item.reason === 'string' ? item.reason : '',
                 note: typeof item.note === 'string' ? item.note : '',
+                createdAt: typeof item.createdAt === 'string' ? item.createdAt : now,
+                updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : now,
               };
+              return record;
             })
         : [],
       memberTenures: Array.isArray(parsed.memberTenures)
@@ -2701,8 +2703,10 @@ const localApi: TidelineApi = {
     const startDate = input.startDate.trim();
     const endDate = input.endDate.trim();
     const reason = input.reason?.trim() ?? '';
-    const error = validateLeaveInput(startDate, endDate, reason);
+    // 先按原始值校验（保留「超过两位小数」的拒绝），再归一化后落库。
+    const error = validateLeaveInput(startDate, endDate, input.days, reason);
     if (error) throw new Error(error);
+    const days = roundLeaveDays(input.days);
     const now = nowISO();
     const record: LeaveRecord = {
       id: createId('lv'),
@@ -2710,9 +2714,8 @@ const localApi: TidelineApi = {
       memberId: input.memberId,
       startDate,
       endDate,
-      days: leaveDayCount(startDate, endDate),
+      days,
       leaveType: normalizeLeaveType(input.leaveType),
-      status: input.status === undefined ? 'approved' : normalizeLeaveStatus(input.status),
       reason,
       note: input.note ?? '',
       createdAt: now,
@@ -2734,14 +2737,14 @@ const localApi: TidelineApi = {
     }
     const startDate = patch.startDate !== undefined ? patch.startDate.trim() : record.startDate;
     const endDate = patch.endDate !== undefined ? patch.endDate.trim() : record.endDate;
+    const rawDays = patch.days !== undefined ? patch.days : record.days;
     const reason = patch.reason !== undefined ? patch.reason.trim() : record.reason;
-    const error = validateLeaveInput(startDate, endDate, reason);
+    const error = validateLeaveInput(startDate, endDate, rawDays, reason);
     if (error) throw new Error(error);
     record.startDate = startDate;
     record.endDate = endDate;
-    record.days = leaveDayCount(startDate, endDate);
+    record.days = roundLeaveDays(rawDays);
     if (patch.leaveType !== undefined) record.leaveType = normalizeLeaveType(patch.leaveType);
-    if (patch.status !== undefined) record.status = normalizeLeaveStatus(patch.status);
     record.reason = reason;
     if (patch.note !== undefined) record.note = patch.note;
     record.updatedAt = nowISO();

@@ -1,6 +1,5 @@
 import type {
   LeaveRecord,
-  LeaveStatus,
   LeaveType,
   MemberTenure,
   OvertimeRecord,
@@ -327,7 +326,7 @@ export function formatTenureRange(tenure: MemberTenure): string {
   return `${tenure.startedAt} → ${tenure.endedAt ?? '至今'}`;
 }
 
-// ---------- 请假记录（V0.16.0） ----------
+// ---------- 请假记录（V0.16.0 / V0.16.1 改为纯记录口径） ----------
 
 export const LEAVE_TYPE_META: ReadonlyArray<{ key: LeaveType; label: string }> = [
   { key: 'annual', label: '年假' },
@@ -345,51 +344,77 @@ export const LEAVE_TYPE_KEYS: ReadonlyArray<LeaveType> = LEAVE_TYPE_META.map(
   (item) => item.key,
 );
 
-export const LEAVE_STATUS_META: ReadonlyArray<{ key: LeaveStatus; label: string }> = [
-  { key: 'pending', label: '待审批' },
-  { key: 'approved', label: '已批准' },
-  { key: 'rejected', label: '已驳回' },
-];
-
 export function leaveTypeLabel(type: LeaveType): string {
   return LEAVE_TYPE_META.find((item) => item.key === type)?.label ?? '其他';
-}
-
-export function leaveStatusLabel(status: LeaveStatus): string {
-  return LEAVE_STATUS_META.find((item) => item.key === status)?.label ?? '待审批';
 }
 
 /** 请假事由长度上限，前端表单与数据层共用。 */
 export const LEAVE_REASON_MAX = 200;
 
-/** 单条请假记录的最大跨度（自然日），防止误填整年区间。 */
+/** 单条请假天数上限，防止误填。 */
 export const LEAVE_DAYS_MAX = 366;
 
-/** 请假天数（自然日，含首尾）；起止日期非法时返回 0。 */
-export function leaveDayCount(startDate: string, endDate: string): number {
+/** 请假天数允许的小数位数。 */
+export const LEAVE_DAYS_DECIMALS = 2;
+
+/** 请假天数四舍五入到两位小数，写库与展示共用同一口径。 */
+export function roundLeaveDays(days: number): number {
+  if (!Number.isFinite(days)) return 0;
+  return Math.round(days * 100) / 100;
+}
+
+/** 格式化请假天数：去掉多余的小数零，例如 3 →「3」、3.50 →「3.5」。 */
+export function formatLeaveDays(days: number): string {
+  const rounded = roundLeaveDays(days);
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(LEAVE_DAYS_DECIMALS).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+/** 请假区间的自然日跨度（含首尾），仅作填写天数时的参考值。 */
+export function leaveSpanDays(startDate: string, endDate: string): number {
   if (!startDate || !endDate) return 0;
   const span = diffDays(startDate, endDate);
   if (span < 0) return 0;
   return span + 1;
 }
 
+/** 校验请假的日期区间：起止必填、结束不得早于开始、跨度不超过上限。 */
+export function validateLeaveRange(startDate: string, endDate: string): string | null {
+  if (!startDate) return '请选择请假开始日期';
+  if (!endDate) return '请选择请假结束日期';
+  const span = leaveSpanDays(startDate, endDate);
+  if (span <= 0) return '结束日期不能早于开始日期';
+  if (span > LEAVE_DAYS_MAX) return `请假区间不能超过 ${LEAVE_DAYS_MAX} 天`;
+  return null;
+}
+
+/** 校验请假天数：必填、大于 0、不超过上限、最多两位小数。 */
+export function validateLeaveDays(days: number): string | null {
+  if (!Number.isFinite(days)) return '请填写请假天数';
+  if (days <= 0) return '请假天数必须大于 0';
+  if (days > LEAVE_DAYS_MAX) return `请假天数不能超过 ${LEAVE_DAYS_MAX} 天`;
+  if (Math.abs(roundLeaveDays(days) - days) > 1e-9) {
+    return `请假天数最多 ${LEAVE_DAYS_DECIMALS} 位小数`;
+  }
+  return null;
+}
+
 /**
- * 校验请假区间与事由：
- * - 起止日期必填，结束日期不得早于开始日期；
- * - 跨度不超过上限；
+ * 校验整条请假记录：
+ * - 起止日期合法；
+ * - 天数合法；
  * - 事由必填，1–200 字。
  * 通过校验返回 null，否则返回中文错误文案。
  */
 export function validateLeaveInput(
   startDate: string,
   endDate: string,
+  days: number,
   reason: string,
 ): string | null {
-  if (!startDate) return '请选择请假开始日期';
-  if (!endDate) return '请选择请假结束日期';
-  const days = leaveDayCount(startDate, endDate);
-  if (days <= 0) return '结束日期不能早于开始日期';
-  if (days > LEAVE_DAYS_MAX) return `请假跨度不能超过 ${LEAVE_DAYS_MAX} 天`;
+  const rangeError = validateLeaveRange(startDate, endDate);
+  if (rangeError) return rangeError;
+  const daysError = validateLeaveDays(days);
+  if (daysError) return daysError;
   const text = reason.trim();
   if (!text) return '请填写请假事由';
   // 与 Rust 侧 chars().count() 对齐，按 Unicode 码点计数。
@@ -407,54 +432,23 @@ export function memberLeave(records: LeaveRecord[], memberId: string): LeaveReco
   return records.filter((record) => record.memberId === memberId);
 }
 
-/** 已批准的请假天数合计（待审批与已驳回不计入资源占用）。 */
-export function approvedLeaveDays(records: LeaveRecord[]): number {
-  return records
-    .filter((record) => record.status === 'approved')
-    .reduce((sum, record) => sum + record.days, 0);
+/** 请假天数合计。 */
+export function leaveDaysTotal(records: LeaveRecord[]): number {
+  return roundLeaveDays(records.reduce((sum, record) => sum + record.days, 0));
 }
 
-/** 某条请假记录落在 [from, to] 区间内的天数（跨月的记录按天切分）。 */
-export function leaveDaysInRange(record: LeaveRecord, from: string, to: string): number {
-  if (!from || !to) return record.days;
-  const start = record.startDate > from ? record.startDate : from;
-  const end = record.endDate < to ? record.endDate : to;
-  if (start > end) return 0;
-  return diffDays(start, end) + 1;
-}
-
-/** 某月的首尾日期（YYYY-MM → YYYY-MM-DD）。 */
-export function monthRange(month: string): { from: string; to: string } {
-  const [year, value] = month.split('-');
-  const days = new Date(Number(year), Number(value), 0).getDate();
-  return {
-    from: `${month}-01`,
-    to: `${month}-${`${days}`.padStart(2, '0')}`,
-  };
-}
-
-/** 指定月份内已批准的请假天数合计（跨月记录按天切分）。 */
-export function approvedLeaveDaysInMonth(records: LeaveRecord[], month: string): number {
-  const { from, to } = monthRange(month);
-  return records
-    .filter((record) => record.status === 'approved')
-    .reduce((sum, record) => sum + leaveDaysInRange(record, from, to), 0);
-}
-
-/** 待审批的请假条数。 */
-export function pendingLeaveCount(records: LeaveRecord[]): number {
-  return records.filter((record) => record.status === 'pending').length;
-}
-
-/** 指定月份内待审批的请假条数（跨月记录只要与该月有交集就计入）。 */
-export function pendingLeaveCountInMonth(records: LeaveRecord[], month: string): number {
-  const { from, to } = monthRange(month);
-  return records.filter(
-    (record) =>
-      record.status === 'pending' &&
-      record.startDate <= to &&
-      record.endDate >= from,
-  ).length;
+/**
+ * 指定月份内的请假天数合计。
+ *
+ * 天数由人工填写，已与日历天数解耦，因此不做跨月切分：
+ * 整条记录按「请假开始日期所在月份」归属，口径简单且可解释。
+ */
+export function leaveDaysInMonth(records: LeaveRecord[], month: string): number {
+  return roundLeaveDays(
+    records
+      .filter((record) => record.startDate.startsWith(month))
+      .reduce((sum, record) => sum + record.days, 0),
+  );
 }
 
 // ---------- 用户画像（V0.16.0） ----------
@@ -495,12 +489,10 @@ export interface MemberPortrait {
   overtimeAbsent: number;
   /** 周末出勤率 0–1；没有实际排班时为 null */
   attendanceRate: number | null;
-  /** 已批准请假天数 */
+  /** 累计请假天数 */
   leaveDays: number;
-  /** 请假条数（含待审批与已驳回） */
+  /** 请假记录条数 */
   leaveCount: number;
-  /** 待审批请假条数 */
-  leavePending: number;
   /** 绩效净分 */
   performancePoints: number;
   /** 绩效记录条数 */
@@ -538,7 +530,7 @@ export function memberPortraits(source: PortraitSource, projectId: string): Memb
     const scheduled = memberOvertime.filter((record) => record.status === 'planned');
     const realized = done.length + absent.length;
     const points = memberPerformance.reduce((sum, record) => sum + record.points, 0);
-    const leaveDays = approvedLeaveDays(memberLeaveRecords);
+    const leaveDays = leaveDaysTotal(memberLeaveRecords);
 
     const portrait: MemberPortrait = {
       member,
@@ -554,7 +546,6 @@ export function memberPortraits(source: PortraitSource, projectId: string): Memb
       attendanceRate: realized > 0 ? done.length / realized : null,
       leaveDays,
       leaveCount: memberLeaveRecords.length,
-      leavePending: pendingLeaveCount(memberLeaveRecords),
       performancePoints: points,
       performanceCount: memberPerformance.length,
       tags: [],
@@ -600,9 +591,6 @@ export function portraitTags(portrait: MemberPortrait): MemberPortraitTag[] {
   }
   if (portrait.leaveDays >= PORTRAIT_THRESHOLD.leaveDays) {
     tags.push({ key: 'leave-long', label: '请假期偏长', tone: 'warning' });
-  }
-  if (portrait.leavePending > 0) {
-    tags.push({ key: 'leave-pending', label: '有假单待审批', tone: 'neutral' });
   }
   return tags;
 }

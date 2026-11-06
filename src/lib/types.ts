@@ -518,10 +518,12 @@ export type LeaveType =
   | 'bereavement'
   | 'other';
 
-/** V0.16.0：请假审批状态 */
-export type LeaveStatus = 'pending' | 'approved' | 'rejected';
-
-/** V0.16.0：请假记录（按项目隔离统计） */
+/**
+ * V0.16.1：请假记录（按项目隔离统计）。
+ *
+ * 只做记录，没有审批流程 —— 同事请假事前提过就是已同意，这里仅登记留档。
+ * 起止日期只描述请假区间，天数由用户手工填写（最多两位小数），二者不必相等。
+ */
 export interface LeaveRecord {
   id: string;
   projectId: string;
@@ -530,10 +532,9 @@ export interface LeaveRecord {
   startDate: string;
   /** 结束日期 YYYY-MM-DD（含当天） */
   endDate: string;
-  /** 请假天数（自然日，含首尾），由起止日期推导 */
+  /** 请假天数，人工填写，最多两位小数 */
   days: number;
   leaveType: LeaveType;
-  status: LeaveStatus;
   /** 请假事由 */
   reason: string;
   note: string;
@@ -610,14 +611,15 @@ export interface NewLeaveInput {
   memberId: string;
   startDate: string;
   endDate: string;
+  /** 请假天数，人工填写，最多两位小数 */
+  days: number;
   leaveType?: LeaveType;
-  status?: LeaveStatus;
   reason?: string;
   note?: string;
 }
 
 export type LeavePatch = Partial<
-  Pick<LeaveRecord, 'memberId' | 'startDate' | 'endDate' | 'leaveType' | 'status' | 'reason' | 'note'>
+  Pick<LeaveRecord, 'memberId' | 'startDate' | 'endDate' | 'days' | 'leaveType' | 'reason' | 'note'>
 >;
 
 export type BoardPatch = Partial<

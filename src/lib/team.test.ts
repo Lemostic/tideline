@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeMembers,
-  approvedLeaveDays,
-  approvedLeaveDaysInMonth,
+  formatLeaveDays,
   isWeekend,
-  leaveDayCount,
-  leaveStatusLabel,
+  leaveDaysInMonth,
+  leaveDaysTotal,
+  leaveSpanDays,
   leaveTypeLabel,
   memberPortraits,
   normalizeOvertimeAbsenceReason,
@@ -15,8 +15,6 @@ import {
   overtimeDoneHours,
   overtimeHoursInMonth,
   overtimeStatusLabel,
-  pendingLeaveCount,
-  pendingLeaveCountInMonth,
   performanceByMember,
   projectLeave,
   projectMembers,
@@ -26,16 +24,18 @@ import {
   projectRolesOf,
   projectTenureStats,
   roleName,
+  roundLeaveDays,
   tenureDays,
   tenureIsActive,
   tenureOverlapsRange,
   tenureSummaryForProject,
+  validateLeaveDays,
   validateLeaveInput,
+  validateLeaveRange,
   validateOvertimeAbsenceReason,
 } from '@/lib/team';
 import type {
   LeaveRecord,
-  LeaveStatus,
   LeaveType,
   OvertimeRecord,
   OvertimeStatus,
@@ -110,7 +110,7 @@ function leave(
   memberId: string,
   startDate: string,
   endDate: string,
-  status: LeaveStatus = 'approved',
+  days = 1,
   leaveType: LeaveType = 'personal',
 ): LeaveRecord {
   return {
@@ -119,9 +119,8 @@ function leave(
     memberId,
     startDate,
     endDate,
-    days: leaveDayCount(startDate, endDate),
+    days,
     leaveType,
-    status,
     reason: '家中有事',
     note: '',
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -270,68 +269,87 @@ describe('team helpers', () => {
     expect(tenureOverlapsRange(first, '2026-02-01', '2026-02-20')).toBe(false);
   });
 
-  it('请假天数按自然日含首尾计算', () => {
-    expect(leaveDayCount('2026-10-01', '2026-10-01')).toBe(1);
-    expect(leaveDayCount('2026-10-01', '2026-10-03')).toBe(3);
-    expect(leaveDayCount('2026-10-01', '2026-11-01')).toBe(32);
+  it('请假区间跨度按自然日含首尾计算，仅作填写参考', () => {
+    expect(leaveSpanDays('2026-10-01', '2026-10-01')).toBe(1);
+    expect(leaveSpanDays('2026-10-01', '2026-10-03')).toBe(3);
+    expect(leaveSpanDays('2026-10-01', '2026-11-01')).toBe(32);
     // 结束早于开始时不算天数
-    expect(leaveDayCount('2026-10-05', '2026-10-01')).toBe(0);
-    expect(leaveDayCount('', '2026-10-01')).toBe(0);
+    expect(leaveSpanDays('2026-10-05', '2026-10-01')).toBe(0);
+    expect(leaveSpanDays('', '2026-10-01')).toBe(0);
+  });
+
+  it('请假天数允许两位小数，超出即截断为两位', () => {
+    expect(roundLeaveDays(3)).toBe(3);
+    expect(roundLeaveDays(0.5)).toBe(0.5);
+    expect(roundLeaveDays(1.234)).toBe(1.23);
+    expect(roundLeaveDays(2.005)).toBe(2.01);
+    expect(roundLeaveDays(Number.NaN)).toBe(0);
+    expect(formatLeaveDays(3)).toBe('3');
+    expect(formatLeaveDays(3.5)).toBe('3.5');
+    expect(formatLeaveDays(0.25)).toBe('0.25');
+    expect(formatLeaveDays(2.005)).toBe('2.01');
+  });
+
+  it('请假天数必须大于 0、不超过 366 且最多两位小数', () => {
+    expect(validateLeaveDays(0)).toBe('请假天数必须大于 0');
+    expect(validateLeaveDays(-1)).toBe('请假天数必须大于 0');
+    expect(validateLeaveDays(Number.NaN)).toBe('请填写请假天数');
+    expect(validateLeaveDays(367)).toBe('请假天数不能超过 366 天');
+    expect(validateLeaveDays(1.234)).toBe('请假天数最多 2 位小数');
+    expect(validateLeaveDays(0.5)).toBeNull();
+    expect(validateLeaveDays(1.25)).toBeNull();
+    expect(validateLeaveDays(366)).toBeNull();
   });
 
   it('请假必填起止日期、结束不早于开始、事由 1–200 字', () => {
-    expect(validateLeaveInput('', '2026-10-01', '事由')).toBe('请选择请假开始日期');
-    expect(validateLeaveInput('2026-10-01', '', '事由')).toBe('请选择请假结束日期');
-    expect(validateLeaveInput('2026-10-05', '2026-10-01', '事由')).toBe(
-      '结束日期不能早于开始日期',
+    expect(validateLeaveRange('', '2026-10-01')).toBe('请选择请假开始日期');
+    expect(validateLeaveRange('2026-10-01', '')).toBe('请选择请假结束日期');
+    expect(validateLeaveRange('2026-10-05', '2026-10-01')).toBe('结束日期不能早于开始日期');
+    expect(validateLeaveRange('2020-01-01', '2026-01-01')).toBe('请假区间不能超过 366 天');
+    expect(validateLeaveRange('2026-10-01', '2026-10-02')).toBeNull();
+
+    expect(validateLeaveInput('2026-10-01', '2026-10-02', 0, '家中有事')).toBe(
+      '请假天数必须大于 0',
     );
-    expect(validateLeaveInput('2026-10-01', '2026-10-02', '   ')).toBe('请填写请假事由');
-    expect(validateLeaveInput('2026-10-01', '2026-10-02', '家中有事')).toBeNull();
-    expect(validateLeaveInput('2026-10-01', '2026-10-02', 'x'.repeat(201))).toBe(
+    expect(validateLeaveInput('2026-10-01', '2026-10-02', 1.234, '家中有事')).toBe(
+      '请假天数最多 2 位小数',
+    );
+    expect(validateLeaveInput('2026-10-01', '2026-10-02', 1, '   ')).toBe('请填写请假事由');
+    expect(validateLeaveInput('2026-10-01', '2026-10-02', 1, '家中有事')).toBeNull();
+    expect(validateLeaveInput('2026-10-01', '2026-10-02', 1, 'x'.repeat(201))).toBe(
       '请假事由最多 200 字',
     );
-    expect(validateLeaveInput('2026-10-01', '2026-10-02', 'x'.repeat(200))).toBeNull();
+    expect(validateLeaveInput('2026-10-01', '2026-10-02', 1, 'x'.repeat(200))).toBeNull();
     // 与 Rust 侧一致，按 Unicode 码点计数
-    expect(validateLeaveInput('2026-10-01', '2026-10-02', '🙂'.repeat(200))).toBeNull();
-    expect(validateLeaveInput('2026-10-01', '2026-10-02', '🙂'.repeat(201))).toBe(
+    expect(validateLeaveInput('2026-10-01', '2026-10-02', 1, '🙂'.repeat(200))).toBeNull();
+    expect(validateLeaveInput('2026-10-01', '2026-10-02', 1, '🙂'.repeat(201))).toBe(
       '请假事由最多 200 字',
-    );
-    // 跨度上限
-    expect(validateLeaveInput('2020-01-01', '2026-01-01', '事由')).toBe(
-      '请假跨度不能超过 366 天',
     );
   });
 
-  it('请假类型与状态有统一中文标签', () => {
+  it('请假类型有统一中文标签', () => {
     expect(leaveTypeLabel('annual')).toBe('年假');
     expect(leaveTypeLabel('sick')).toBe('病假');
     expect(leaveTypeLabel('other')).toBe('其他');
-    expect(leaveStatusLabel('pending')).toBe('待审批');
-    expect(leaveStatusLabel('approved')).toBe('已批准');
-    expect(leaveStatusLabel('rejected')).toBe('已驳回');
   });
 
-  it('只有已批准的请假计入资源占用', () => {
+  it('请假只做记录：天数全部计入，不区分审批状态', () => {
     const records = [
-      leave('1', 'p1', 'a', '2026-10-01', '2026-10-03'),
-      leave('2', 'p1', 'a', '2026-10-10', '2026-10-11', 'pending'),
-      leave('3', 'p1', 'b', '2026-10-05', '2026-10-06', 'rejected'),
+      leave('1', 'p1', 'a', '2026-10-01', '2026-10-03', 3),
+      leave('2', 'p1', 'a', '2026-10-10', '2026-10-11', 0.5),
+      leave('3', 'p1', 'b', '2026-10-05', '2026-10-06', 2.25),
     ];
-    expect(approvedLeaveDays(records)).toBe(3);
-    expect(pendingLeaveCount(records)).toBe(1);
+    expect(leaveDaysTotal(records)).toBe(5.75);
     expect(projectLeave(records, 'p1')).toHaveLength(3);
     expect(projectLeave(records, 'p2')).toHaveLength(0);
-    expect(approvedLeaveDaysInMonth(records, '2026-10')).toBe(3);
-    expect(approvedLeaveDaysInMonth(records, '2026-09')).toBe(0);
-    expect(pendingLeaveCountInMonth(records, '2026-10')).toBe(1);
-    expect(pendingLeaveCountInMonth(records, '2026-09')).toBe(0);
+    expect(leaveDaysInMonth(records, '2026-10')).toBe(5.75);
+    expect(leaveDaysInMonth(records, '2026-09')).toBe(0);
   });
 
-  it('跨月的请假按月切分天数', () => {
-    const records = [leave('1', 'p1', 'a', '2026-10-28', '2026-11-02')];
-    // 10 月 28–31 日共 4 天，11 月 1–2 日共 2 天
-    expect(approvedLeaveDaysInMonth(records, '2026-10')).toBe(4);
-    expect(approvedLeaveDaysInMonth(records, '2026-11')).toBe(2);
+  it('跨月的请假按开始日期归属月份，不做天数切分', () => {
+    const records = [leave('1', 'p1', 'a', '2026-10-28', '2026-11-02', 6)];
+    expect(leaveDaysInMonth(records, '2026-10')).toBe(6);
+    expect(leaveDaysInMonth(records, '2026-11')).toBe(0);
   });
 
   it('生成成员画像：汇总投入、加班、请假与绩效并给出标签', () => {
@@ -367,7 +385,7 @@ describe('team helpers', () => {
           overtime('2', 'p1', 'a', '2026-10-04', 8, 'absent', '临时有事'),
           overtime('3', 'p1', 'a', '2026-10-11', 8, 'absent', '临时有事'),
         ],
-        leave: [leave('1', 'p1', 'a', '2026-10-01', '2026-10-06')],
+        leave: [leave('1', 'p1', 'a', '2026-10-01', '2026-10-06', 6)],
         performance: [performance('1', 'p1', 'a', '2026-10-03', 5)],
         roles,
       },
@@ -385,7 +403,6 @@ describe('team helpers', () => {
       overtimeAbsent: 2,
       leaveDays: 6,
       leaveCount: 1,
-      leavePending: 0,
       performancePoints: 5,
       performanceCount: 1,
     });
