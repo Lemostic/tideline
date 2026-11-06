@@ -4,8 +4,10 @@ import { Icon } from '@/components/Icon';
 import { EmptyState, Modal } from '@/components/Modal';
 import { PageHeadBand } from '@/components/PageHeadBand';
 import {
+  approvedLeaveDays,
   overtimeAbsenceCount,
   overtimeDoneHours,
+  pendingLeaveCount,
   PROJECT_COLORS,
   projectMeta,
   projectMembers,
@@ -43,6 +45,8 @@ export function TeamPage() {
     (record) => record.status === 'done',
   ).length;
   const overtimeAbsenceTotal = overtimeAbsenceCount(snapshot.overtimeRecords);
+  const leaveDaysTotal = approvedLeaveDays(snapshot.leaveRecords);
+  const leavePendingTotal = pendingLeaveCount(snapshot.leaveRecords);
 
   const projectStats = useMemo(
     () =>
@@ -119,6 +123,17 @@ export function TeamPage() {
             {snapshot.performanceRecords.reduce((sum, record) => sum + record.points, 0)}
           </strong>
           <div className="team-stat-hint">{snapshot.performanceRecords.length} 条加减分</div>
+        </div>
+        <div className="team-stat">
+          <span>请假合计</span>
+          <strong>
+            {leaveDaysTotal}
+            <em>天</em>
+          </strong>
+          <div className="team-stat-hint">
+            {snapshot.leaveRecords.length} 条请假
+            {leavePendingTotal > 0 ? ` · ${leavePendingTotal} 条待审批` : ''}
+          </div>
         </div>
       </section>
 

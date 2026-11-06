@@ -12,7 +12,17 @@ import {
   toDateKey,
 } from '@/lib/date';
 import {
+  approvedLeaveDays,
+  approvedLeaveDaysInMonth,
+  formatMonthCN,
   isWeekend,
+  LEAVE_STATUS_META,
+  LEAVE_TYPE_META,
+  leaveDayCount,
+  leaveStatusLabel,
+  leaveTypeLabel,
+  LEAVE_REASON_MAX,
+  memberPortraits,
   monthKey,
   OVERTIME_ABSENCE_REASON_MAX,
   overtimeAbsenceCountInMonth,
@@ -21,7 +31,10 @@ import {
   PERFORMANCE_CATEGORY_META,
   performanceByMember,
   performanceCategoryLabel,
+  pendingLeaveCount,
+  pendingLeaveCountInMonth,
   PROJECT_COLORS,
+  projectLeave,
   projectMeta,
   projectMembers,
   projectOvertime,
@@ -34,9 +47,13 @@ import {
   tenureDays,
   tenureOverlapsRange,
   tenureSummaryForProject,
+  validateLeaveInput,
   validateOvertimeAbsenceReason,
 } from '@/lib/team';
 import type {
+  LeaveRecord,
+  LeaveStatus,
+  LeaveType,
   MemberTenure,
   OvertimeRecord,
   OvertimeStatus,
@@ -65,7 +82,14 @@ function formatDate(value: string): string {
   return value.slice(0, 10).replaceAll('-', '/');
 }
 
-type Tab = 'members' | 'tenures' | 'overtime' | 'performance' | 'settings';
+type Tab =
+  | 'members'
+  | 'tenures'
+  | 'leave'
+  | 'overtime'
+  | 'performance'
+  | 'portrait'
+  | 'settings';
 
 export function ProjectDetailPage() {
   const { projectId = '' } = useParams();
@@ -86,6 +110,9 @@ export function ProjectDetailPage() {
   const deleteOvertime = useAppStore((state) => state.deleteOvertime);
   const createPerformance = useAppStore((state) => state.createPerformance);
   const deletePerformance = useAppStore((state) => state.deletePerformance);
+  const createLeave = useAppStore((state) => state.createLeave);
+  const updateLeave = useAppStore((state) => state.updateLeave);
+  const deleteLeave = useAppStore((state) => state.deleteLeave);
   const createRole = useAppStore((state) => state.createProjectRole);
   const updateRole = useAppStore((state) => state.updateProjectRole);
   const deleteRole = useAppStore((state) => state.deleteProjectRole);
@@ -101,6 +128,8 @@ export function ProjectDetailPage() {
   const [overtimeEditing, setOvertimeEditing] = useState<OvertimeRecord | null>(null);
   const [overtimeAbsence, setOvertimeAbsence] = useState<OvertimeRecord | null>(null);
   const [performanceOpen, setPerformanceOpen] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [leaveEditing, setLeaveEditing] = useState<LeaveRecord | null>(null);
   const [roleOpen, setRoleOpen] = useState(false);
   const [roleEditing, setRoleEditing] = useState<ProjectRole | null>(null);
   const [metaOpen, setMetaOpen] = useState(false);
@@ -130,6 +159,7 @@ export function ProjectDetailPage() {
   const roles = projectRolesOf(snapshot.projectRoles, project.id);
   const overtime = projectOvertime(snapshot.overtimeRecords, project.id);
   const performance = projectPerformance(snapshot.performanceRecords, project.id);
+  const leave = projectLeave(snapshot.leaveRecords, project.id);
   const weekStartsOn = useSettingsStore((state) => state.weekStartsOn);
 
   const overtimeGroups = useMemo(() => {
@@ -204,6 +234,41 @@ export function ProjectDetailPage() {
   const overtimeTotal = overtimeHoursInMonth(overtime, month);
   const overtimeAbsenceTotal = overtimeAbsenceCountInMonth(overtime, month);
   const performanceNet = monthPerformance.reduce((sum, record) => sum + record.points, 0);
+  const leaveMonthDays = approvedLeaveDaysInMonth(leave, month);
+  const leaveTotalDays = approvedLeaveDays(leave);
+  const leavePendingTotal = pendingLeaveCount(leave);
+  const leaveMonthPending = pendingLeaveCountInMonth(leave, month);
+  const portraits = memberPortraits(
+    {
+      members: snapshot.teamMembers,
+      tenures: snapshot.memberTenures,
+      overtime: snapshot.overtimeRecords,
+      leave: snapshot.leaveRecords,
+      performance: snapshot.performanceRecords,
+      roles: snapshot.projectRoles,
+    },
+    project.id,
+  );
+  const leaveGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      { key: string; records: LeaveRecord[]; days: number; pending: number }
+    >();
+    for (const record of leave) {
+      const key = record.startDate.slice(0, 7) || '未知月份';
+      const existing = groups.get(key);
+      if (existing) existing.records.push(record);
+      else groups.set(key, { key, records: [record], days: 0, pending: 0 });
+    }
+    return [...groups.values()]
+      .map((group) => ({
+        ...group,
+        records: [...group.records].sort((a, b) => b.startDate.localeCompare(a.startDate)),
+        days: approvedLeaveDays(group.records),
+        pending: pendingLeaveCount(group.records),
+      }))
+      .sort((a, b) => b.key.localeCompare(a.key));
+  }, [leave]);
   const roleCounts = roles.map((role) => ({
     ...role,
     count: active.filter((member) => member.roleId === role.id).length,
@@ -356,6 +421,13 @@ export function ProjectDetailPage() {
             <strong>{performanceNet > 0 ? '+' : ''}{performanceNet}</strong>
             <span>本月绩效</span>
           </div>
+          <div>
+            <strong>{leaveMonthDays}<em>天</em></strong>
+            <span>
+              本月请假
+              {leaveMonthPending > 0 ? ` · 待审批 ${leaveMonthPending}` : ''}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -364,8 +436,10 @@ export function ProjectDetailPage() {
           {[
             { key: 'members', label: '成员', count: members.length },
             { key: 'tenures', label: '投入记录', count: tenures.length },
+            { key: 'leave', label: '请假记录', count: leave.length },
             { key: 'overtime', label: '周末加班', count: overtime.length },
             { key: 'performance', label: '绩效加减分', count: performance.length },
+            { key: 'portrait', label: '用户画像', count: portraits.length },
             { key: 'settings', label: '项目设置', count: roles.length + meta.length },
           ].map((item) => (
             <button
@@ -406,6 +480,19 @@ export function ProjectDetailPage() {
             disabled={members.length === 0}
           >
             <Icon name="plus" size={14} /> 添加时间段
+          </button>
+        ) : null}
+        {tab === 'leave' ? (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => {
+              setLeaveEditing(null);
+              setLeaveOpen(true);
+            }}
+            disabled={members.length === 0}
+          >
+            <Icon name="plus" size={14} /> 请假记录
           </button>
         ) : null}
         {tab === 'overtime' ? (
@@ -732,6 +819,162 @@ export function ProjectDetailPage() {
         </section>
       ) : null}
 
+      {tab === 'leave' ? (
+        <section className="team-panel">
+          {leave.length === 0 ? (
+            <div className="team-empty">
+              <EmptyState
+                icon={<Icon name="calendar" size={22} />}
+                title="还没有本项目的请假记录"
+                description="登记成员的请假区间与事由；已批准的请假计入资源占用，待审批与已驳回只做留档。"
+              />
+            </div>
+          ) : (
+            <>
+              <div className="leave-summary">
+                <div>
+                  <strong>{leave.length}</strong>
+                  <span>请假记录</span>
+                </div>
+                <div>
+                  <strong>{leaveTotalDays}<em>天</em></strong>
+                  <span>已批准合计</span>
+                </div>
+                <div>
+                  <strong>{leavePendingTotal}</strong>
+                  <span>待审批</span>
+                </div>
+                <div>
+                  <strong>{leaveMonthDays}<em>天</em></strong>
+                  <span>本月已批准</span>
+                </div>
+              </div>
+              <div className="leave-months">
+                {leaveGroups.map((group) => (
+                  <section className="leave-month" key={group.key}>
+                    <div className="leave-month-head">
+                      <span className="leave-month-title">
+                        {group.key === '未知月份' ? group.key : formatMonthCN(group.key)}
+                      </span>
+                      <span className="leave-month-total">
+                        <span className="leave-month-stat">{group.records.length} 条</span>
+                        <span className="leave-month-stat is-approved">{group.days} 天</span>
+                        {group.pending > 0 ? (
+                          <span className="leave-month-stat is-pending">待审批 {group.pending}</span>
+                        ) : null}
+                      </span>
+                    </div>
+                    <div className="team-records">
+                      {group.records.map((record) => {
+                        const member = memberById.get(record.memberId);
+                        return (
+                          <article
+                            className={`team-record team-leave-record status-${record.status}`}
+                            key={record.id}
+                          >
+                            <div className="team-record-date">
+                              <strong>{record.startDate.slice(5).replace('-', '/')}</strong>
+                              <span>{record.days} 天</span>
+                            </div>
+                            <div className="team-record-main">
+                              <div className="team-record-title">
+                                {member?.name ?? '未知成员'}
+                                <span className="team-leave-type">
+                                  {leaveTypeLabel(record.leaveType)}
+                                </span>
+                                <span className={`team-leave-status status-${record.status}`}>
+                                  {leaveStatusLabel(record.status)}
+                                </span>
+                              </div>
+                              <div className="team-record-meta">
+                                <span>
+                                  {record.startDate} → {record.endDate}
+                                </span>
+                                <span>{record.reason}</span>
+                                {record.note ? <span>{record.note}</span> : null}
+                              </div>
+                            </div>
+                            <div className="team-record-actions">
+                              {record.status === 'approved' ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() =>
+                                    void updateLeave(record.id, {
+                                      status: 'pending',
+                                    }).catch(() => undefined)
+                                  }
+                                >
+                                  改为待审批
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() =>
+                                    void updateLeave(record.id, {
+                                      status: 'approved',
+                                    }).catch(() => undefined)
+                                  }
+                                >
+                                  批准
+                                </button>
+                              )}
+                              {record.status !== 'rejected' ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() =>
+                                    void updateLeave(record.id, {
+                                      status: 'rejected',
+                                    }).catch(() => undefined)
+                                  }
+                                >
+                                  驳回
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="btn btn-icon"
+                                aria-label="编辑请假记录"
+                                onClick={() => {
+                                  setLeaveEditing(record);
+                                  setLeaveOpen(true);
+                                }}
+                              >
+                                <Icon name="pencil" size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-icon"
+                                aria-label="删除请假记录"
+                                onClick={() => {
+                                  void requestConfirm({
+                                    title: '删除这条请假记录',
+                                    description: '这条记录会从项目统计与成员画像中移除。',
+                                    confirmLabel: '删除记录',
+                                    tone: 'danger',
+                                  }).then((confirmed) => {
+                                    if (!confirmed) return;
+                                    void deleteLeave(record.id).catch(() => undefined);
+                                  });
+                                }}
+                              >
+                                <Icon name="trash" size={13} />
+                              </button>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      ) : null}
+
       {tab === 'overtime' ? (
         <section className="team-panel">
           {overtime.length === 0 ? (
@@ -969,6 +1212,117 @@ export function ProjectDetailPage() {
         </section>
       ) : null}
 
+      {tab === 'portrait' ? (
+        <section className="team-panel">
+          {portraits.length === 0 ? (
+            <div className="team-empty">
+              <EmptyState
+                icon={<Icon name="users" size={22} />}
+                title="本项目还没有成员画像"
+                description="先在「成员」页添加成员；画像会自动汇总投入人天、周末加班、请假与绩效四个维度。"
+              />
+            </div>
+          ) : (
+            <>
+              <div className="portrait-legend">
+                <span>画像按投入人天排序，标签由本项目的投入、加班、请假与绩效数据推导</span>
+                <span className="portrait-legend-keys">
+                  <em className="is-positive">正向</em>
+                  <em className="is-neutral">中性</em>
+                  <em className="is-warning">需关注</em>
+                </span>
+              </div>
+              <div className="portrait-grid">
+                {portraits.map((portrait) => {
+                  const rate = portrait.attendanceRate;
+                  return (
+                    <article className="portrait-card" key={portrait.member.id}>
+                      <header className="portrait-head">
+                        <span className="team-avatar">{initials(portrait.member.name)}</span>
+                        <div className="portrait-head-main">
+                          <div className="portrait-title">
+                            <h3>{portrait.member.name}</h3>
+                            <span
+                              className="team-role"
+                              style={{
+                                backgroundColor: `${portrait.roleColor}18`,
+                                color: portrait.roleColor,
+                              }}
+                            >
+                              {portrait.roleName}
+                            </span>
+                            <span className={`team-status status-${portrait.member.status}`}>
+                              {portrait.member.status === 'active' ? '在组' : '已释放'}
+                            </span>
+                          </div>
+                          <p className="portrait-sub">
+                            入组 {formatDate(portrait.member.joinedAt)} · 投入{' '}
+                            {portrait.tenureSegments} 段
+                          </p>
+                        </div>
+                      </header>
+
+                      <div className="portrait-metrics">
+                        <div className="portrait-metric">
+                          <strong>{portrait.tenureDays}<em>天</em></strong>
+                          <span>累计投入</span>
+                        </div>
+                        <div className="portrait-metric">
+                          <strong>{portrait.overtimeHours}<em>h</em></strong>
+                          <span>累计加班</span>
+                        </div>
+                        <div className="portrait-metric">
+                          <strong>{portrait.leaveDays}<em>天</em></strong>
+                          <span>已批准请假</span>
+                        </div>
+                        <div className="portrait-metric">
+                          <strong>
+                            {portrait.performancePoints > 0 ? '+' : ''}
+                            {portrait.performancePoints}
+                          </strong>
+                          <span>绩效净分</span>
+                        </div>
+                      </div>
+
+                      <div className="portrait-meter">
+                        <div className="portrait-meter-head">
+                          <span>周末出勤率</span>
+                          <strong>
+                            {rate === null
+                              ? '暂无排班'
+                              : `${Math.round(rate * 100)}%（${portrait.overtimeDone}/${portrait.overtimeDone + portrait.overtimeAbsent}）`}
+                          </strong>
+                        </div>
+                        <div className="portrait-meter-track">
+                          <span
+                            className="portrait-meter-fill"
+                            style={{ width: `${rate === null ? 0 : Math.round(rate * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {portrait.tags.length > 0 ? (
+                        <div className="portrait-tags">
+                          {portrait.tags.map((tag) => (
+                            <span className={`portrait-tag is-${tag.tone}`} key={tag.key}>
+                              {tag.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="portrait-tags">
+                          <span className="portrait-tag is-neutral">暂无画像标签</span>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
+      ) : null}
+
       {tab === 'settings' ? (
         <section className="project-settings-grid">
           <div className="team-panel project-settings-panel">
@@ -1136,6 +1490,32 @@ export function ProjectDetailPage() {
         onSubmit={async (input) => {
           await createPerformance(input);
           setPerformanceOpen(false);
+        }}
+      />
+      <LeaveModal
+        open={leaveOpen}
+        members={members}
+        record={leaveEditing}
+        onClose={() => {
+          setLeaveOpen(false);
+          setLeaveEditing(null);
+        }}
+        onSubmit={async (input) => {
+          if (leaveEditing) {
+            await updateLeave(leaveEditing.id, {
+              memberId: input.memberId,
+              startDate: input.startDate,
+              endDate: input.endDate,
+              leaveType: input.leaveType,
+              status: input.status,
+              reason: input.reason,
+              note: input.note,
+            });
+          } else {
+            await createLeave(input);
+          }
+          setLeaveOpen(false);
+          setLeaveEditing(null);
         }}
       />
       <TenureModal
@@ -1747,6 +2127,188 @@ function PerformanceModal({
             maxLength={180}
             onChange={(event) => setNote(event.target.value)}
             aria-label="绩效补充说明"
+          />
+        </label>
+        {error ? <p className="team-form-error">{error}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
+function LeaveModal({
+  open,
+  members,
+  record,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  members: TeamMember[];
+  record: LeaveRecord | null;
+  onClose: () => void;
+  onSubmit: (input: {
+    memberId: string;
+    startDate: string;
+    endDate: string;
+    leaveType: LeaveType;
+    status: LeaveStatus;
+    reason: string;
+    note: string;
+  }) => Promise<void>;
+}) {
+  const [memberId, setMemberId] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [leaveType, setLeaveType] = useState<LeaveType>('personal');
+  const [status, setStatus] = useState<LeaveStatus>('approved');
+  const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setMemberId(record?.memberId ?? members[0]?.id ?? '');
+    setStartDate(record?.startDate ?? '');
+    setEndDate(record?.endDate ?? '');
+    setLeaveType(record?.leaveType ?? 'personal');
+    setStatus(record?.status ?? 'approved');
+    setReason(record?.reason ?? '');
+    setNote(record?.note ?? '');
+    setBusy(false);
+    setError(null);
+  }, [open, members, record]);
+
+  if (!open) return null;
+
+  const reasonCount = Array.from(reason).length;
+  const days = leaveDayCount(startDate, endDate);
+
+  const submit = async () => {
+    if (busy) return;
+    const reasonError = validateLeaveInput(startDate, endDate, reason);
+    if (reasonError) {
+      setError(reasonError);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSubmit({
+        memberId,
+        startDate,
+        endDate,
+        leaveType,
+        status,
+        reason: reason.trim(),
+        note: note.trim(),
+      });
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : String(submitError));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={record ? '编辑请假记录' : '添加请假记录'}
+      subtitle="请假按自然日统计，含首尾两天"
+      onClose={() => (busy ? undefined : onClose())}
+      footer={
+        <>
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
+            取消
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={busy}>
+            {busy ? '保存中…' : record ? '保存修改' : '保存请假记录'}
+          </button>
+        </>
+      }
+    >
+      <div className="team-form">
+        <div className="team-form-grid">
+          <label className="team-form-field">
+            <span>成员</span>
+            <select
+              className="select"
+              value={memberId}
+              onChange={(event) => setMemberId(event.target.value)}
+              aria-label="请假成员"
+            >
+              {members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name}
+                  {member.status === 'released' ? '（已释放）' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="team-form-field">
+            <span>请假类型</span>
+            <select
+              className="select"
+              value={leaveType}
+              onChange={(event) => setLeaveType(event.target.value as LeaveType)}
+              aria-label="请假类型"
+            >
+              {LEAVE_TYPE_META.map((item) => (
+                <option key={item.key} value={item.key}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="team-form-field">
+            <span>开始日期</span>
+            <DatePicker value={startDate} onChange={setStartDate} ariaLabel="请假开始日期" />
+          </label>
+          <label className="team-form-field">
+            <span>结束日期</span>
+            <DatePicker value={endDate} onChange={setEndDate} ariaLabel="请假结束日期" />
+          </label>
+          <label className="team-form-field">
+            <span>审批状态</span>
+            <select
+              className="select"
+              value={status}
+              onChange={(event) => setStatus(event.target.value as LeaveStatus)}
+              aria-label="请假审批状态"
+            >
+              {LEAVE_STATUS_META.map((item) => (
+                <option key={item.key} value={item.key}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="team-form-field">
+            <span>请假天数</span>
+            <div className={`leave-days-preview${days > 0 ? ' is-ready' : ''}`}>
+              {days > 0 ? `${days} 天` : '选择起止日期后自动计算'}
+            </div>
+          </div>
+        </div>
+        <label className="team-form-field">
+          <span>请假事由（必填）</span>
+          <input
+            className="input"
+            value={reason}
+            maxLength={LEAVE_REASON_MAX}
+            onChange={(event) => setReason(event.target.value)}
+            aria-label="请假事由"
+            placeholder="例如：家里有事、家人生病、年假出行…"
+          />
+          <span className="team-form-counter">
+            {reasonCount}/{LEAVE_REASON_MAX} 字
+          </span>
+        </label>
+        <label className="team-form-field">
+          <span>补充说明（可选）</span>
+          <textarea
+            className="input team-form-textarea"
+            value={note}
+            maxLength={180}
+            onChange={(event) => setNote(event.target.value)}
+            aria-label="请假补充说明"
           />
         </label>
         {error ? <p className="team-form-error">{error}</p> : null}
