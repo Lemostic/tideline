@@ -324,10 +324,11 @@ fn normalize_legacy_backup(backup: &mut BackupFile) {
                 .cloned()
                 .unwrap_or_else(|| fallback_project_id.clone());
         }
-        // 旧备份可能没有 `days` 字段（反序列化后为 0），按起止日期重新推导。
-        if record.days <= 0 {
-            record.days = repo::inclusive_days_between(&record.start_date, &record.end_date)
-                .unwrap_or(1);
+        // 旧备份可能没有 `days` 字段（反序列化后为 0），按起止日期回填自然日天数。
+        if !record.days.is_finite() || record.days <= 0.0 {
+            let fallback = repo::inclusive_days_between(&record.start_date, &record.end_date)
+                .unwrap_or(1) as f64;
+            record.days = (fallback * 100.0).round() / 100.0;
         }
     }
 }
@@ -742,8 +743,15 @@ pub fn validate(backup: &BackupFile) -> Result<(), String> {
         if !project_ids.contains(record.project_id.as_str()) {
             return Err("请假记录引用了不存在的项目".to_string());
         }
-        if record.days < 1 {
+        if record.days <= 0.0 || !record.days.is_finite() {
             return Err("备份中的请假天数无效".to_string());
+        }
+        if record.days > 366.0 {
+            return Err("备份中的请假天数超过上限".to_string());
+        }
+        // 天数最多两位小数。
+        if ((record.days * 100.0).round() / 100.0 - record.days).abs() > 1e-9 {
+            return Err("备份中的请假天数最多 2 位小数".to_string());
         }
         // ISO 日期可以直接按字符串比较先后。
         if record.end_date < record.start_date {
@@ -1367,9 +1375,9 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
     for record in &backup.leave_records {
         tx.execute(
             "INSERT INTO leave_records \
-             (id, project_id, member_id, start_date, end_date, days, leave_type, status, reason, note, \
+             (id, project_id, member_id, start_date, end_date, days, leave_type, reason, note, \
               created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 &record.id,
                 &record.project_id,
@@ -1378,7 +1386,6 @@ pub fn restore(conn: &mut Connection, backup: &BackupFile) -> Result<BackupSumma
                 &record.end_date,
                 record.days,
                 record.leave_type.as_str(),
-                record.status.as_str(),
                 &record.reason,
                 &record.note,
                 &record.created_at,
@@ -1956,8 +1963,8 @@ mod tests {
                 member_id: member.id.clone(),
                 start_date: "2026-10-01".to_string(),
                 end_date: "2026-10-03".to_string(),
+                days: 3.5,
                 leave_type: Some(LeaveType::Annual),
-                status: Some(LeaveStatus::Approved),
                 reason: "家中有事".to_string(),
                 note: Some("已同步".to_string()),
             },
@@ -1985,9 +1992,8 @@ mod tests {
         assert_eq!(record.member_id, member.id);
         assert_eq!(record.start_date, "2026-10-01");
         assert_eq!(record.end_date, "2026-10-03");
-        assert_eq!(record.days, 3);
+        assert_eq!(record.days, 3.5, "天数按用户手填值往返");
         assert_eq!(record.leave_type, LeaveType::Annual);
-        assert_eq!(record.status, LeaveStatus::Approved);
         assert_eq!(record.reason, "家中有事");
         assert_eq!(record.note, "已同步");
     }
@@ -2006,9 +2012,21 @@ mod tests {
 
         // 天数非法：校验必须拦下。
         let mut backup = build(&conn).expect("构建备份");
-        backup.leave_records[0].days = 0;
+        backup.leave_records[0].days = 0.0;
         let error = validate(&backup).expect_err("应拒绝非法天数");
         assert_eq!(error, "备份中的请假天数无效");
+
+        // 天数超过上限：校验必须拦下。
+        let mut backup = build(&conn).expect("构建备份");
+        backup.leave_records[0].days = 400.0;
+        let error = validate(&backup).expect_err("应拒绝超限天数");
+        assert_eq!(error, "备份中的请假天数超过上限");
+
+        // 天数超过两位小数：校验必须拦下。
+        let mut backup = build(&conn).expect("构建备份");
+        backup.leave_records[0].days = 1.234;
+        let error = validate(&backup).expect_err("应拒绝多位小数的天数");
+        assert_eq!(error, "备份中的请假天数最多 2 位小数");
 
         // 日期区间倒置：校验必须拦下。
         let mut backup = build(&conn).expect("构建备份");

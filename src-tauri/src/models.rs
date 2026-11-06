@@ -578,33 +578,6 @@ impl LeaveType {
     }
 }
 
-/// 请假审批状态（V0.16.0）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LeaveStatus {
-    Pending,
-    Approved,
-    Rejected,
-}
-
-impl LeaveStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Approved => "approved",
-            Self::Rejected => "rejected",
-        }
-    }
-
-    pub fn from_db(raw: &str) -> Self {
-        match raw {
-            "approved" => Self::Approved,
-            "rejected" => Self::Rejected,
-            _ => Self::Pending,
-        }
-    }
-}
-
 /// 项目状态（V0.9）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -743,7 +716,7 @@ pub struct PerformanceRecord {
     pub created_at: String,
 }
 
-/// 请假记录（V0.16.0）：起止日期均含当天，`days` 为自然日天数。
+/// 请假记录（V0.16.0）：起止日期仅作区间参考，天数由用户手填。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LeaveRecord {
@@ -756,21 +729,15 @@ pub struct LeaveRecord {
     pub start_date: String,
     /// 结束日期 YYYY-MM-DD（含当天）
     pub end_date: String,
-    /// 请假天数（自然日，含首尾）；旧备份可能缺省，按 1 处理。
-    #[serde(default = "default_leave_days")]
-    pub days: i64,
+    /// 请假天数（手动填写，最多两位小数）；旧备份可能缺省，按 0 处理。
+    #[serde(default)]
+    pub days: f64,
     pub leave_type: LeaveType,
-    pub status: LeaveStatus,
     /// 请假事由（1–200 字）
     pub reason: String,
     pub note: String,
     pub created_at: String,
     pub updated_at: String,
-}
-
-/// 旧备份缺少 `days` 时的兜底值：至少 1 天。
-fn default_leave_days() -> i64 {
-    1
 }
 
 // ---------------------------------------------------------------------------
@@ -1636,16 +1603,17 @@ pub struct UpdatePerformanceInput {
 /// 新建请假记录的入参（V0.16.0）。
 ///
 /// `project_id` 不由前端传入：服务端按成员的所属项目推导，与加班 / 绩效一致。
+/// `days` 为用户手填的天数（最多两位小数），不再由起止日期推导。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewLeaveInput {
     pub member_id: String,
     pub start_date: String,
     pub end_date: String,
+    /// 请假天数（手动填写，> 0，最多两位小数）
+    pub days: f64,
     #[serde(default)]
     pub leave_type: Option<LeaveType>,
-    #[serde(default)]
-    pub status: Option<LeaveStatus>,
     /// 请假事由必填；缺省时按空串处理并由校验拦下。
     #[serde(default)]
     pub reason: String,
@@ -1664,9 +1632,9 @@ pub struct LeavePatch {
     #[serde(default)]
     pub end_date: Option<String>,
     #[serde(default)]
-    pub leave_type: Option<LeaveType>,
+    pub days: Option<f64>,
     #[serde(default)]
-    pub status: Option<LeaveStatus>,
+    pub leave_type: Option<LeaveType>,
     #[serde(default)]
     pub reason: Option<String>,
     #[serde(default)]

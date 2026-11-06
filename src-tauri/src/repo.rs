@@ -1361,9 +1361,8 @@ fn row_to_leave(row: &Row<'_>) -> rusqlite::Result<LeaveRecord> {
         member_id: row.get("member_id")?,
         start_date: row.get("start_date")?,
         end_date: row.get("end_date")?,
-        days: row.get::<_, Option<i64>>("days")?.unwrap_or(1),
+        days: row.get::<_, Option<f64>>("days")?.unwrap_or_default(),
         leave_type: LeaveType::from_db(row.get::<_, String>("leave_type")?.as_str()),
-        status: LeaveStatus::from_db(row.get::<_, String>("status")?.as_str()),
         reason: row.get("reason")?,
         note: row.get("note")?,
         created_at: row.get("created_at")?,
@@ -2054,9 +2053,15 @@ pub fn delete_performance(conn: &mut Connection, input: IdInput) -> DbResult<()>
 /// 请假事由长度上限，与前端表单保持一致。
 const LEAVE_REASON_MAX_CHARS: usize = 200;
 
+/// 请假天数上限，与前端表单保持一致。
+const LEAVE_DAYS_MAX: f64 = 366.0;
+
+/// 请假天数允许的小数位数，与前端 `LEAVE_DAYS_DECIMALS` 一致。
+const LEAVE_DAYS_DECIMALS: u32 = 2;
+
 /// 请假记录的全部列，供查询与插入复用。
 const LEAVE_COLUMNS: &str = "id, project_id, member_id, start_date, end_date, days, \
-     leave_type, status, reason, note, created_at, updated_at";
+     leave_type, reason, note, created_at, updated_at";
 
 /// 归一请假事由：trim 后必须非空，且不超过 200 字。
 fn normalize_leave_reason(reason: &str) -> DbResult<String> {
@@ -2068,6 +2073,22 @@ fn normalize_leave_reason(reason: &str) -> DbResult<String> {
         return Err(format!("请假事由最多 {LEAVE_REASON_MAX_CHARS} 字"));
     }
     Ok(text.to_string())
+}
+
+/// 归一请假天数：必须 > 0、<= 366，且最多两位小数；写库前四舍五入到两位。
+fn normalize_leave_days(days: f64) -> DbResult<f64> {
+    if !days.is_finite() || days <= 0.0 {
+        return Err("请假天数必须大于 0".to_string());
+    }
+    if days > LEAVE_DAYS_MAX {
+        return Err(format!("请假天数不能超过 {LEAVE_DAYS_MAX} 天"));
+    }
+    let factor = 10f64.powi(LEAVE_DAYS_DECIMALS as i32);
+    let rounded = (days * factor).round() / factor;
+    if (rounded - days).abs() > 1e-9 {
+        return Err(format!("请假天数最多 {LEAVE_DAYS_DECIMALS} 位小数"));
+    }
+    Ok(rounded)
 }
 
 /// 计算两个 `YYYY-MM-DD` 之间的自然日天数（含首尾）。
@@ -2086,13 +2107,13 @@ pub fn inclusive_days_between(start_date: &str, end_date: &str) -> Option<i64> {
     }
 }
 
-/// 校验请假起止日期，返回含首尾的自然日天数。
+/// 校验请假起止日期：必须是合法且不倒置的 ISO 日期对。
 ///
-/// 结束日期早于开始日期时按非法区间处理；日期格式非法时同样拒绝，
-/// 避免把无法推导天数的脏数据写进库。
-fn leave_days_between(start_date: &str, end_date: &str) -> DbResult<i64> {
-    if let Some(days) = inclusive_days_between(start_date, end_date) {
-        return Ok(days);
+/// 天数改为用户手填后，起止日期只作区间参考，但仍然要求格式合法且
+/// 结束日期不早于开始日期，避免把明显错误的区间写进库。
+fn validate_leave_date_range(start_date: &str, end_date: &str) -> DbResult<()> {
+    if inclusive_days_between(start_date, end_date).is_some() {
+        return Ok(());
     }
     // 两个日期都能解析但区间倒置 → 报区间错误；否则是格式错误。
     if parse_iso_date(start_date).is_some() && parse_iso_date(end_date).is_some() {
@@ -2123,12 +2144,13 @@ fn get_leave(conn: &Connection, id: &str) -> DbResult<LeaveRecord> {
     .ok_or_else(|| format!("请假记录不存在：{id}"))
 }
 
-/// 新建请假记录：项目归属按成员推导，天数由起止日期在服务端计算。
+/// 新建请假记录：项目归属按成员推导，天数由用户手填。
 pub fn create_leave(conn: &mut Connection, input: NewLeaveInput) -> DbResult<LeaveRecord> {
     let member = require_team_member(conn, &input.member_id)?;
     let start_date = input.start_date.trim().to_string();
     let end_date = input.end_date.trim().to_string();
-    let days = leave_days_between(&start_date, &end_date)?;
+    validate_leave_date_range(&start_date, &end_date)?;
+    let days = normalize_leave_days(input.days)?;
     let reason = normalize_leave_reason(&input.reason)?;
     let now = now_iso();
     let record = LeaveRecord {
@@ -2139,7 +2161,6 @@ pub fn create_leave(conn: &mut Connection, input: NewLeaveInput) -> DbResult<Lea
         end_date,
         days,
         leave_type: input.leave_type.unwrap_or(LeaveType::Other),
-        status: input.status.unwrap_or(LeaveStatus::Approved),
         reason,
         note: input.note.unwrap_or_default(),
         created_at: now.clone(),
@@ -2147,9 +2168,9 @@ pub fn create_leave(conn: &mut Connection, input: NewLeaveInput) -> DbResult<Lea
     };
     conn.execute(
         "INSERT INTO leave_records \
-         (id, project_id, member_id, start_date, end_date, days, leave_type, status, reason, note, \
+         (id, project_id, member_id, start_date, end_date, days, leave_type, reason, note, \
           created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             &record.id,
             &record.project_id,
@@ -2158,7 +2179,6 @@ pub fn create_leave(conn: &mut Connection, input: NewLeaveInput) -> DbResult<Lea
             &record.end_date,
             record.days,
             record.leave_type.as_str(),
-            record.status.as_str(),
             &record.reason,
             &record.note,
             &record.created_at,
@@ -2169,7 +2189,7 @@ pub fn create_leave(conn: &mut Connection, input: NewLeaveInput) -> DbResult<Lea
     Ok(record)
 }
 
-/// 修改请假记录：换成员时重新推导项目，改日期时重新推导天数。
+/// 修改请假记录：换成员时重新推导项目，改天数时按用户输入落库。
 pub fn update_leave(conn: &mut Connection, input: UpdateLeaveInput) -> DbResult<LeaveRecord> {
     let mut record = get_leave(conn, &input.id)?;
     if let Some(member_id) = input.patch.member_id {
@@ -2189,13 +2209,13 @@ pub fn update_leave(conn: &mut Connection, input: UpdateLeaveInput) -> DbResult<
             record.end_date = trimmed.to_string();
         }
     }
-    // 起止日期始终重新校验并推导天数，避免客户端传入过期天数。
-    record.days = leave_days_between(&record.start_date, &record.end_date)?;
+    // 起止日期始终重新校验；天数与日期无关，改日期不会动它。
+    validate_leave_date_range(&record.start_date, &record.end_date)?;
+    if let Some(days) = input.patch.days {
+        record.days = normalize_leave_days(days)?;
+    }
     if let Some(leave_type) = input.patch.leave_type {
         record.leave_type = leave_type;
-    }
-    if let Some(status) = input.patch.status {
-        record.status = status;
     }
     if let Some(reason) = input.patch.reason {
         record.reason = normalize_leave_reason(&reason)?;
@@ -2206,8 +2226,7 @@ pub fn update_leave(conn: &mut Connection, input: UpdateLeaveInput) -> DbResult<
     record.updated_at = now_iso();
     conn.execute(
         "UPDATE leave_records SET project_id = ?1, member_id = ?2, start_date = ?3, end_date = ?4, \
-         days = ?5, leave_type = ?6, status = ?7, reason = ?8, note = ?9, updated_at = ?10 \
-         WHERE id = ?11",
+         days = ?5, leave_type = ?6, reason = ?7, note = ?8, updated_at = ?9 WHERE id = ?10",
         params![
             &record.project_id,
             &record.member_id,
@@ -2215,7 +2234,6 @@ pub fn update_leave(conn: &mut Connection, input: UpdateLeaveInput) -> DbResult<
             &record.end_date,
             record.days,
             record.leave_type.as_str(),
-            record.status.as_str(),
             &record.reason,
             &record.note,
             &record.updated_at,
@@ -6072,21 +6090,20 @@ mod tests {
                 member_id: member.id.clone(),
                 start_date: "2026-10-01".to_string(),
                 end_date: "2026-10-03".to_string(),
+                days: 3.5,
                 leave_type: Some(LeaveType::Annual),
-                status: Some(LeaveStatus::Pending),
                 reason: "家中有事".to_string(),
                 note: Some("已同步".to_string()),
             },
         )
         .expect("创建请假");
-        assert_eq!(leave.days, 3, "自然日含首尾");
-        assert_eq!(leave.status, LeaveStatus::Pending);
+        assert_eq!(leave.days, 3.5, "天数按用户输入原样保存");
         assert_eq!(leave.leave_type, LeaveType::Annual);
         assert_eq!(leave.project_id, project.id, "项目归属按成员推导");
         assert_eq!(leave.member_id, member.id);
         assert_eq!(leave.reason, "家中有事");
 
-        // 改日期后天数重新推导。
+        // 改日期不会动天数：天数是用户手填的。
         let updated = update_leave(
             &mut conn,
             UpdateLeaveInput {
@@ -6094,22 +6111,33 @@ mod tests {
                 patch: LeavePatch {
                     start_date: Some("2026-11-01".to_string()),
                     end_date: Some("2026-11-05".to_string()),
-                    status: Some(LeaveStatus::Approved),
                     ..Default::default()
                 },
             },
         )
-        .expect("修改请假");
-        assert_eq!(updated.days, 5, "改日期后天数重算");
+        .expect("修改请假日期");
+        assert_eq!(updated.days, 3.5, "改日期不动天数");
         assert_eq!(updated.start_date, "2026-11-01");
         assert_eq!(updated.end_date, "2026-11-05");
-        assert_eq!(updated.status, LeaveStatus::Approved);
-        assert_eq!(updated.leave_type, LeaveType::Annual);
+
+        // 改天数按用户输入落库。
+        let updated = update_leave(
+            &mut conn,
+            UpdateLeaveInput {
+                id: leave.id.clone(),
+                patch: LeavePatch {
+                    days: Some(2.25),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("修改请假期天数");
+        assert_eq!(updated.days, 2.25);
 
         let snapshot = get_snapshot(&conn).expect("快照");
         assert_eq!(snapshot.leave_records.len(), 1);
         assert_eq!(snapshot.leave_records[0].id, leave.id);
-        assert_eq!(snapshot.leave_records[0].days, 5);
+        assert_eq!(snapshot.leave_records[0].days, 2.25);
 
         // 删成员 → 请假记录级联删除。
         delete_team_member(&mut conn, id_input(&member.id)).expect("删除成员");
@@ -6119,7 +6147,7 @@ mod tests {
     }
 
     #[test]
-    fn leave_records_reject_inverted_dates_and_empty_reason() {
+    fn leave_records_reject_invalid_dates_reason_and_days() {
         let mut conn = memory_db();
         let (_project, member) = leave_fixture(&mut conn);
 
@@ -6130,8 +6158,8 @@ mod tests {
                 member_id: member.id.clone(),
                 start_date: "2026-10-10".to_string(),
                 end_date: "2026-10-01".to_string(),
+                days: 1.0,
                 leave_type: None,
-                status: None,
                 reason: "家中有事".to_string(),
                 note: None,
             },
@@ -6146,8 +6174,8 @@ mod tests {
                 member_id: member.id.clone(),
                 start_date: "2026-10-01".to_string(),
                 end_date: "2026-10-02".to_string(),
+                days: 1.0,
                 leave_type: None,
-                status: None,
                 reason: "   ".to_string(),
                 note: None,
             },
@@ -6162,14 +6190,62 @@ mod tests {
                 member_id: member.id.clone(),
                 start_date: "2026-10-01".to_string(),
                 end_date: "2026-10-02".to_string(),
+                days: 1.0,
                 leave_type: None,
-                status: None,
                 reason: "事".repeat(201),
                 note: None,
             },
         )
         .expect_err("应拒绝过长事由");
         assert_eq!(too_long, "请假事由最多 200 字");
+
+        // 天数 <= 0：拒绝。
+        let zero_days = create_leave(
+            &mut conn,
+            NewLeaveInput {
+                member_id: member.id.clone(),
+                start_date: "2026-10-01".to_string(),
+                end_date: "2026-10-02".to_string(),
+                days: 0.0,
+                leave_type: None,
+                reason: "家中有事".to_string(),
+                note: None,
+            },
+        )
+        .expect_err("应拒绝非法天数");
+        assert_eq!(zero_days, "请假天数必须大于 0");
+
+        // 天数超过上限：拒绝。
+        let too_many = create_leave(
+            &mut conn,
+            NewLeaveInput {
+                member_id: member.id.clone(),
+                start_date: "2026-10-01".to_string(),
+                end_date: "2026-10-02".to_string(),
+                days: 400.0,
+                leave_type: None,
+                reason: "家中有事".to_string(),
+                note: None,
+            },
+        )
+        .expect_err("应拒绝超限天数");
+        assert_eq!(too_many, "请假天数不能超过 366 天");
+
+        // 天数超过两位小数：拒绝。
+        let too_precise = create_leave(
+            &mut conn,
+            NewLeaveInput {
+                member_id: member.id.clone(),
+                start_date: "2026-10-01".to_string(),
+                end_date: "2026-10-02".to_string(),
+                days: 1.234,
+                leave_type: None,
+                reason: "家中有事".to_string(),
+                note: None,
+            },
+        )
+        .expect_err("应拒绝多位小数的天数");
+        assert_eq!(too_precise, "请假天数最多 2 位小数");
 
         assert!(get_leave_records(&conn).expect("请假列表").is_empty());
     }

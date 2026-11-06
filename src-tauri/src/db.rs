@@ -6,10 +6,13 @@
 //! V0.2 起任务表新增 `start_date / labels / subtasks` 三列，V0.3 再新增 `deleted_at`
 //! 软删除列：新库直接按最新结构建表，旧库（V0.1 / V0.2 已有用户数据）在启动时按列存在性
 //! 做幂等 `ALTER TABLE` 迁移，不重建表。V0.4 新增 `card_dependencies` 依赖表。
-//! 迁移完成后写入 `PRAGMA user_version = 20`。
+//! 迁移完成后写入 `PRAGMA user_version = 21`。
 //!
 //! V0.16.0 新增 `leave_records`（请假记录）表：同样靠 `CREATE TABLE IF NOT EXISTS`
-//! 在每次开库时补齐，旧库无需列迁移；`days` 由起止日期在服务端推导。
+//! 在每次开库时补齐，旧库无需列迁移。
+//!
+//! V0.16.1：请假记录没有审批流程，`status` 列被移除；`days` 改为用户手填的天数
+//! （REAL，最多两位小数），不再由起止日期推导。v20 旧库按表重建的方式迁移。
 //!
 //! V0.14.0：`cards` 增加 `parent_card_id`（自引用，NULL = 主任务），子任务成为
 //! 真实卡片；旧库的 `cards.subtasks` JSON 在迁移时展开为子卡片并清空。
@@ -283,16 +286,15 @@ CREATE TABLE IF NOT EXISTS performance_records (
     created_at TEXT NOT NULL
 );
 
--- V0.16.0 请假记录：自然日（含首尾）跨 start_date ~ end_date，days 由服务端推导
+-- V0.16.0 请假记录：天数由用户手填（最多两位小数），起止日期仅作区间参考
 CREATE TABLE IF NOT EXISTS leave_records (
     id          TEXT PRIMARY KEY NOT NULL,
     project_id  TEXT REFERENCES projects (id) ON DELETE CASCADE,
     member_id   TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
     start_date  TEXT NOT NULL,
     end_date    TEXT NOT NULL,
-    days        INTEGER NOT NULL DEFAULT 1,
+    days        REAL NOT NULL DEFAULT 0,
     leave_type  TEXT NOT NULL DEFAULT 'other',
-    status      TEXT NOT NULL DEFAULT 'approved',
     reason      TEXT NOT NULL,
     note        TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL,
@@ -483,7 +485,7 @@ fn init(connection: &Connection) -> Result<(), String> {
 }
 
 /// 当前 schema 版本，写入 `PRAGMA user_version` 便于排查用户库结构。
-const SCHEMA_VERSION: i64 = 20;
+const SCHEMA_VERSION: i64 = 21;
 
 /// 任务表历史演进新增列：列名 → 旧库迁移用的 `ALTER TABLE` 语句。
 ///
@@ -668,9 +670,63 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
         .execute_batch("CREATE INDEX IF NOT EXISTS idx_cards_parent ON cards (parent_card_id);")
         .map_err(|error| format!("创建 cards.parent_card_id 索引失败：{error}"))?;
     expand_legacy_subtasks(connection)?;
+    // V0.16.1：请假记录去掉 status 列、天数改为手填 REAL（v20 旧库重建表）。
+    migrate_leave_records_v21(connection)?;
     connection
         .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|error| format!("写入 user_version 失败：{error}"))?;
+    Ok(())
+}
+
+/// V0.16.1：请假记录去掉审批状态，天数改为用户手填（REAL，最多两位小数）。
+///
+/// v20 旧库的 `leave_records` 带 `status` 列且 `days` 是 INTEGER，无法靠 `ALTER`
+/// 删列 / 改类型，因此按「列存在性」判定后重建整张表：
+/// - 新表 `leave_records_v21` 少一列 `status`，`days` 改成 `REAL NOT NULL DEFAULT 0`；
+/// - 旧天数按「空或 <= 0 时取 1.0」迁移，整数天数原样带过来（INTEGER → REAL）；
+/// - 旧表连带索引一起被删掉，所以两个索引都要重建。
+///
+/// 整段 DDL/DML 放在一个事务里：要么全部成功，要么整体回滚，不会留下半张表。
+/// 新库（表已是 v21 形状）没有 `status` 列，直接早退，重复执行是空操作。
+fn migrate_leave_records_v21(connection: &Connection) -> Result<(), String> {
+    if !table_columns(connection, "leave_records")?
+        .iter()
+        .any(|name| name == "status")
+    {
+        return Ok(());
+    }
+    connection
+        .execute_batch(
+            "BEGIN;
+             CREATE TABLE leave_records_v21 (
+                 id          TEXT PRIMARY KEY NOT NULL,
+                 project_id  TEXT REFERENCES projects (id) ON DELETE CASCADE,
+                 member_id   TEXT NOT NULL REFERENCES team_members (id) ON DELETE CASCADE,
+                 start_date  TEXT NOT NULL,
+                 end_date    TEXT NOT NULL,
+                 days        REAL NOT NULL DEFAULT 0,
+                 leave_type  TEXT NOT NULL DEFAULT 'other',
+                 reason      TEXT NOT NULL,
+                 note        TEXT NOT NULL DEFAULT '',
+                 created_at  TEXT NOT NULL,
+                 updated_at  TEXT NOT NULL
+             );
+             INSERT INTO leave_records_v21 \
+                 (id, project_id, member_id, start_date, end_date, days, leave_type, reason, note, \
+                  created_at, updated_at) \
+             SELECT id, project_id, member_id, start_date, end_date, \
+                    CASE WHEN days IS NULL OR days <= 0 THEN 1.0 ELSE days END, \
+                    leave_type, reason, note, created_at, updated_at \
+             FROM leave_records;
+             DROP TABLE leave_records;
+             ALTER TABLE leave_records_v21 RENAME TO leave_records;
+             CREATE INDEX IF NOT EXISTS idx_leave_member_date ON leave_records (member_id, start_date);
+             CREATE INDEX IF NOT EXISTS idx_leave_project_date ON leave_records (project_id, start_date);
+             COMMIT;",
+        )
+        .map_err(|error| {
+            format!("迁移 leave_records 表失败（请先备份数据库后重试）：{error}")
+        })?;
     Ok(())
 }
 
@@ -1340,6 +1396,93 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("read user_version");
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    /// V0.16.1：v20 旧库的 `leave_records` 带 `status` 列且 `days` 是 INTEGER，
+    /// 启动流程按「列存在性」重建表：去掉 `status`、`days` 改成 REAL，旧行完整保留，
+    /// `user_version` 升到 21；重复启动保持幂等。
+    #[test]
+    fn v20_leave_records_drop_status_and_days_becomes_real() {
+        let connection = Connection::open_in_memory().expect("memory database");
+        // 模拟 v20 旧库：leave_records 还是「带 status + INTEGER days」的形状。
+        let v20_schema = SCHEMA.replace(
+            "    days        REAL NOT NULL DEFAULT 0,\n    leave_type  TEXT NOT NULL DEFAULT 'other',\n    reason      TEXT NOT NULL,",
+            "    days        INTEGER NOT NULL DEFAULT 1,\n    leave_type  TEXT NOT NULL DEFAULT 'other',\n    status      TEXT NOT NULL DEFAULT 'approved',\n    reason      TEXT NOT NULL,",
+        );
+        assert!(v20_schema.contains("status      TEXT NOT NULL DEFAULT 'approved'"));
+        assert!(!v20_schema.contains("days        REAL NOT NULL DEFAULT 0"));
+        connection.execute_batch(&v20_schema).expect("create v20 schema");
+        connection
+            .execute_batch(
+                "INSERT INTO projects (id, name, created_at, updated_at) \
+                     VALUES ('p1', '项目', 'now', 'now');
+                 INSERT INTO team_members \
+                     (id, project_id, name, joined_at, created_at, updated_at) \
+                     VALUES ('m1', 'p1', '张三', '2026-01-01', 'now', 'now');
+                 INSERT INTO leave_records \
+                     (id, project_id, member_id, start_date, end_date, days, leave_type, status, \
+                      reason, note, created_at, updated_at) \
+                     VALUES ('lv1', 'p1', 'm1', '2026-10-01', '2026-10-03', 3, 'annual', 'approved', \
+                     '家中有事', '备注', 'now', 'now');
+                 PRAGMA user_version = 20;",
+            )
+            .expect("seed v20 leave record");
+
+        let columns = table_columns(&connection, "leave_records").expect("read columns");
+        assert!(columns.iter().any(|name| name == "status"));
+        assert!(columns.iter().any(|name| name == "days"));
+
+        // 走两次真实启动流程，验证重建表与幂等。
+        init(&connection).expect("启动流程应重建 leave_records 表");
+        init(&connection).expect("重复启动应保持幂等");
+
+        let columns = table_columns(&connection, "leave_records").expect("read columns");
+        assert!(!columns.iter().any(|name| name == "status"), "status 列应被移除");
+        assert!(columns.iter().any(|name| name == "days"));
+        let row: (String, String, String, String, f64, String, String, String) = connection
+            .query_row(
+                "SELECT id, project_id, member_id, start_date, days, leave_type, reason, note \
+                 FROM leave_records WHERE id = 'lv1'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .expect("read migrated leave record");
+        assert_eq!(row.0, "lv1");
+        assert_eq!(row.1, "p1");
+        assert_eq!(row.2, "m1");
+        assert_eq!(row.3, "2026-10-01");
+        assert_eq!(row.4, 3.0, "旧 INTEGER 天数应原样迁移为 REAL");
+        assert_eq!(row.5, "annual");
+        assert_eq!(row.6, "家中有事");
+        assert_eq!(row.7, "备注");
+
+        // 两个索引都要重建（旧表被删时索引一并没了）。
+        let indexes: Vec<String> = connection
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+            .expect("query indexes")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("read indexes")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect indexes");
+        assert!(indexes.iter().any(|name| name == "idx_leave_member_date"));
+        assert!(indexes.iter().any(|name| name == "idx_leave_project_date"));
+
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user_version");
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(version, 21);
     }
 
     #[test]
