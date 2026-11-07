@@ -89,7 +89,7 @@ function snapshot(): Snapshot {
 }
 
 const filters: DashboardFilters = {
-  boardId: null,
+  boardIds: null,
   rangeDays: 7,
   weekStartsOn: 1,
   now,
@@ -114,11 +114,24 @@ describe('dashboard aggregation', () => {
   });
 
   it('按看板过滤只统计该看板', () => {
-    const data = buildDashboard(snapshot(), 0, { ...filters, boardId: 'b1' });
+    const data = buildDashboard(snapshot(), 0, { ...filters, boardIds: ['b1'] });
     expect(data.board?.title).toBe('看板一');
     expect(data.kpis.total).toBe(5);
     expect(data.kpis.overdue).toBe(1);
     expect(data.boardHealth).toHaveLength(2);
+  });
+
+  it('多选看板合并成同一个池', () => {
+    const data = buildDashboard(snapshot(), 0, { ...filters, boardIds: ['b1', 'b2'] });
+    // 两块板都选中，等价于全部看板
+    expect(data.board).toBeNull();
+    expect(data.kpis.total).toBe(6);
+  });
+
+  it('所选看板全被删除时回落为全部看板', () => {
+    const data = buildDashboard(snapshot(), 0, { ...filters, boardIds: ['gone'] });
+    expect(data.kpis.total).toBe(6);
+    expect(data.board).toBeNull();
   });
 
   it('趋势按天聚合新建与完成', () => {

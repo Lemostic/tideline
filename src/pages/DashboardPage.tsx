@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { EmptyState } from '@/components/Modal';
@@ -12,13 +12,20 @@ import {
   type CrossFilter,
   type DashboardRange,
   type DimensionKey,
-  type DimensionSlice,
   type AgingBucket,
   type PrioritySlice,
   type StatusSlice,
   type ThroughputPoint,
   type TrendPoint,
 } from '@/lib/dashboard';
+import {
+  buildPoolBreakdown,
+  POOL_DIMENSIONS,
+  POOL_SEGMENTS,
+  type PoolDimension,
+  type PoolGroup,
+  type PoolRange,
+} from '@/lib/pool';
 import { boardColorValue, type Card } from '@/lib/types';
 import { useAppStore, useSnapshot } from '@/store/appStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -41,8 +48,35 @@ const PRIORITY_COLORS: Record<string, string> = {
   none: '#d9ded6',
 };
 
+/** 任务池四段：完成 = 成功色，风险从左到右递增 */
+const POOL_COLORS: Record<string, string> = {
+  done: '#2f8a53',
+  overdue: '#c54a3a',
+  dueSoon: '#e9a23b',
+  open: '#b9c4bd',
+};
+
+/** 看板范围：全部 / 看板集 / 自定义多选 */
+type BoardScope =
+  | { kind: 'all' }
+  | { kind: 'set'; id: string }
+  | { kind: 'manual'; ids: string[] };
+
 function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
+}
+
+/** 把范围解析成传给聚合层的看板 id 列表；null = 全部看板 */
+function resolveScopeIds(scope: BoardScope, snapshot: ReturnType<typeof useSnapshot>): string[] | null {
+  if (scope.kind === 'all') return null;
+  if (scope.kind === 'set') {
+    const set = snapshot.boardSets.find((item) => item.id === scope.id);
+    if (!set) return null;
+    const alive = set.boardIds.filter((id) => snapshot.boards.some((board) => board.id === id));
+    return alive.length === 0 ? null : alive;
+  }
+  const alive = scope.ids.filter((id) => snapshot.boards.some((board) => board.id === id));
+  return alive.length === 0 ? null : alive;
 }
 
 /**
@@ -57,38 +91,54 @@ export function DashboardPage() {
   const openCard = useUiStore((state) => state.openCard);
   const weekStartsOn = useSettingsStore((state) => state.weekStartsOn);
 
-  const [boardFilter, setBoardFilter] = useState('all');
+  const [scope, setScope] = useState<BoardScope>({ kind: 'all' });
   const [rangeDays, setRangeDays] = useState<DashboardRange>(30);
   /** 交叉筛选：在结构维度上点选某一格，其余图表跟着过滤 */
   const [crossFilter, setCrossFilter] = useState<CrossFilter | null>(null);
+  /** 任务池维度单独持有，便于在池内切换分组口径 */
+  const [poolDimension, setPoolDimension] = useState<PoolDimension>('board');
+  const [poolRange, setPoolRange] = useState<PoolRange>(30);
 
   useEffect(() => {
     void loadTrash().catch(() => undefined);
   }, [loadTrash]);
 
   const now = useMemo(() => new Date(), [snapshot.cards]);
-  const activeBoardId =
-    boardFilter !== 'all' && snapshot.boards.some((board) => board.id === boardFilter)
-      ? boardFilter
-      : null;
+  const scopeIds = useMemo(() => resolveScopeIds(scope, snapshot), [scope, snapshot]);
 
   const data = useMemo(
     () =>
       buildDashboard(snapshot, trash.length, {
-        boardId: activeBoardId,
+        boardIds: scopeIds,
         rangeDays,
         weekStartsOn,
         now,
         crossFilter,
       }),
-    [snapshot, trash.length, activeBoardId, rangeDays, weekStartsOn, now, crossFilter],
+    [snapshot, trash.length, scopeIds, rangeDays, weekStartsOn, now, crossFilter],
   );
 
-  const toggleCrossFilter = useCallback((dimension: DimensionKey, key: string) => {
-    setCrossFilter((current) =>
-      current && current.dimension === dimension && current.key === key ? null : { dimension, key },
+  // 池只统计范围内主任务，并跟随交叉筛选；与 buildDashboard 口径保持一致
+  const poolCards = useMemo(() => {
+    const ids = scopeIds ? new Set(scopeIds) : null;
+    return snapshot.cards.filter(
+      (card) => card.parentCardId === null && (!ids || ids.has(card.boardId)),
     );
-  }, []);
+  }, [snapshot.cards, scopeIds]);
+
+  const pool = useMemo(
+    () =>
+      buildPoolBreakdown(poolCards, {
+        dimension: poolDimension,
+        rangeDays: poolRange,
+        weekStartsOn,
+        now,
+        boardTitle: new Map(snapshot.boards.map((board) => [board.id, board.title])),
+        listTitle: new Map(snapshot.lists.map((list) => [list.id, list.title])),
+        crossFilter,
+      }),
+    [poolCards, poolDimension, poolRange, weekStartsOn, now, snapshot.boards, snapshot.lists, crossFilter],
+  );
 
   const boardById = useMemo(
     () => new Map(snapshot.boards.map((board) => [board.id, board])),
@@ -128,21 +178,12 @@ export function DashboardPage() {
         ]}
         actions={
           <div className="dashboard-controls">
-            <label className="dashboard-select">
-              <Icon name="layout-grid" size={13} />
-              <select
-                value={boardFilter}
-                onChange={(event) => setBoardFilter(event.target.value)}
-                aria-label="选择看板"
-              >
-                <option value="all">全部看板</option>
-                {snapshot.boards.map((board) => (
-                  <option key={board.id} value={board.id}>
-                    {board.title}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ScopePicker
+              scope={scope}
+              boards={snapshot.boards}
+              boardSets={snapshot.boardSets}
+              onChange={setScope}
+            />
             <div className="dashboard-range" role="tablist" aria-label="统计时间范围">
               {DASHBOARD_RANGES.map((days) => (
                 <button
@@ -221,6 +262,88 @@ export function DashboardPage() {
       </section>
 
       <div className="dashboard-grid">
+        <section className="dash-card dash-pool">
+          <div className="dash-card-head">
+            <div>
+              <h2 className="dash-card-title">任务池</h2>
+              <p className="dash-card-desc">
+                {pool.rangeApplied
+                  ? `近 ${poolRange} 天新建的任务，柱高 = 当周入池量，绿色部分为已完成`
+                  : '统计范围内全部任务，柱高 = 分组的池子大小，绿色部分为已完成'}
+              </p>
+            </div>
+            <div className="dash-pool-tools">
+              <div className="dash-legend dash-pool-legend">
+                {POOL_SEGMENTS.map((segment) => (
+                  <span key={segment.key}>
+                    <i style={{ background: POOL_COLORS[segment.key] }} />
+                    {segment.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <PoolOverview pool={pool} />
+
+          <div className="dash-pool-bar">
+            <div className="dashboard-range" role="tablist" aria-label="任务池分组维度">
+              {POOL_DIMENSIONS.map((dimension) => (
+                <button
+                  key={dimension.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={poolDimension === dimension.key}
+                  className={`dashboard-range-btn${poolDimension === dimension.key ? ' is-active' : ''}`}
+                  onClick={() => setPoolDimension(dimension.key)}
+                >
+                  {dimension.label}
+                </button>
+              ))}
+            </div>
+            {poolDimension === 'week' ? (
+              <div className="dashboard-range" role="tablist" aria-label="任务池时间范围">
+                {[7, 30, 90].map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    role="tab"
+                    aria-selected={poolRange === days}
+                    className={`dashboard-range-btn${poolRange === days ? ' is-active' : ''}`}
+                    onClick={() => setPoolRange(days as PoolRange)}
+                  >
+                    {days} 天
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <span className="dash-pool-hint">
+                {poolDimension === 'board' || poolDimension === 'list' || poolDimension === 'label'
+                  ? '点柱子可按该组交叉筛选其余图表'
+                  : '优先级固定顺序，便于横向对比'}
+              </span>
+            )}
+          </div>
+
+          <PoolChart
+            groups={pool.groups}
+            maxTotal={Math.max(1, ...pool.groups.map((group) => group.total))}
+            clickable={
+              poolDimension === 'board' || poolDimension === 'list' || poolDimension === 'label'
+            }
+            activeDimension={poolDimension as DimensionKey}
+            crossFilter={crossFilter}
+            onSelect={(key) => {
+              const dimension = poolDimension as DimensionKey;
+              setCrossFilter((current) =>
+                current && current.dimension === dimension && current.key === key
+                  ? null
+                  : { dimension, key },
+              );
+            }}
+          />
+        </section>
+
         <section className="dash-card dash-trend">
           <div className="dash-card-head">
             <div>
@@ -339,38 +462,6 @@ export function DashboardPage() {
             />
           </div>
           <AgingChart buckets={data.aging} />
-        </section>
-
-        <section className="dash-card dash-dimension">
-          <div className="dash-card-head">
-            <div>
-              <h2 className="dash-card-title">任务构成</h2>
-              <p className="dash-card-desc">点某一格，页面其余图表按它交叉筛选</p>
-            </div>
-          </div>
-          <div className="dash-dimension-groups">
-            <DimensionBars
-              title="按看板"
-              dimension="board"
-              slices={data.byBoard}
-              active={data.crossFilter}
-              onSelect={toggleCrossFilter}
-            />
-            <DimensionBars
-              title="按列表"
-              dimension="list"
-              slices={data.byList}
-              active={data.crossFilter}
-              onSelect={toggleCrossFilter}
-            />
-            <DimensionBars
-              title="按标签"
-              dimension="label"
-              slices={data.byLabel}
-              active={data.crossFilter}
-              onSelect={toggleCrossFilter}
-            />
-          </div>
         </section>
       </div>
     </div>
@@ -806,69 +897,226 @@ function AgingChart({ buckets }: { buckets: AgingBucket[] }) {
   );
 }
 
-/** 结构维度：横向条形，条内按「已完成 / 未完成」分段；点条即交叉筛选 */
-function DimensionBars({
-  title,
-  dimension,
-  slices,
-  active,
+/** 统计范围选择器：全部看板 / 看板集 / 自定义多选 */
+function ScopePicker({
+  scope,
+  boards,
+  boardSets,
+  onChange,
+}: {
+  scope: BoardScope;
+  boards: ReadonlyArray<{ id: string; title: string }>;
+  boardSets: ReadonlyArray<{ id: string; title: string; boardIds: string[] }>;
+  onChange: Dispatch<SetStateAction<BoardScope>>;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const label =
+    scope.kind === 'all'
+      ? '全部看板'
+      : scope.kind === 'set'
+        ? boardSets.find((set) => set.id === scope.id)?.title ?? '看板集'
+        : `已选 ${scope.ids.length} 个看板`;
+
+  const manualIds = scope.kind === 'manual' ? scope.ids : [];
+
+  // 连续点选多个看板时，若基于渲染时的 scope 快照计算，后一次会覆盖前一次；
+  // 用函数式更新拿到上一份选择，才能正确累加 / 取消。
+  const toggleBoard = (id: string) => {
+    onChange((current) => {
+      const currentIds = current.kind === 'manual' ? current.ids : [];
+      const next = currentIds.includes(id)
+        ? currentIds.filter((item) => item !== id)
+        : [...currentIds, id];
+      // 清空选择等同于回到「全部看板」，避免出现 0 块板的空池
+      return next.length === 0 ? { kind: 'all' } : { kind: 'manual', ids: next };
+    });
+  };
+
+  return (
+    <div className="menu" ref={rootRef}>
+      <button
+        type="button"
+        className="dashboard-scope-btn"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label="选择统计范围"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Icon name="layout-grid" size={13} />
+        <span className="dashboard-scope-label">{label}</span>
+        <Icon name="chevron-down" size={12} />
+      </button>
+      {open ? (
+        <div className="menu-pop left dashboard-scope-pop" role="dialog" aria-label="统计范围">
+          <button
+            type="button"
+            className={`menu-item${scope.kind === 'all' ? ' is-active' : ''}`}
+            onClick={() => onChange({ kind: 'all' })}
+          >
+            <Icon name={scope.kind === 'all' ? 'check' : 'layers'} size={14} />
+            <span>全部看板</span>
+          </button>
+          {boardSets.length > 0 ? <div className="menu-sep" /> : null}
+          {boardSets.map((set) => (
+            <button
+              key={set.id}
+              type="button"
+              className={`menu-item${
+                scope.kind === 'set' && scope.id === set.id ? ' is-active' : ''
+              }`}
+              onClick={() => onChange({ kind: 'set', id: set.id })}
+            >
+              <Icon name={scope.kind === 'set' && scope.id === set.id ? 'check' : 'layers'} size={14} />
+              <span>{set.title}</span>
+              <span className="dashboard-scope-count">{set.boardIds.length}</span>
+            </button>
+          ))}
+          <div className="menu-sep" />
+          <div className="dashboard-scope-group-title">自定义选择</div>
+          <div className="dashboard-scope-list">
+            {boards.map((board) => {
+              const checked = manualIds.includes(board.id);
+              return (
+                <button
+                  key={board.id}
+                  type="button"
+                  className={`menu-item${checked ? ' is-active' : ''}`}
+                  role="checkbox"
+                  aria-checked={checked}
+                  onClick={() => toggleBoard(board.id)}
+                >
+                  <span className={`dashboard-scope-check${checked ? ' is-on' : ''}`}>
+                    {checked ? <Icon name="check" size={10} /> : null}
+                  </span>
+                  <span>{board.title}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 池总览：维度无关的全量视角 —— 总量、已完成、完成率、陈积 */
+function PoolOverview({ pool }: { pool: ReturnType<typeof buildPoolBreakdown> }) {
+  const empty = pool.total === 0;
+  return (
+    <div className="dash-pool-overview">
+      <div className="dash-pool-stats">
+        <span className="dash-pool-stat">
+          <span className="dash-pool-stat-label">池总量</span>
+          <strong className="dash-pool-stat-value">{pool.total}</strong>
+        </span>
+        <span className="dash-pool-stat">
+          <span className="dash-pool-stat-label">已完成</span>
+          <strong className="dash-pool-stat-value is-done">{pool.done}</strong>
+        </span>
+        <span className="dash-pool-stat">
+          <span className="dash-pool-stat-label">完成率</span>
+          <strong className="dash-pool-stat-value">{percent(pool.completionRate)}</strong>
+        </span>
+        <span className="dash-pool-stat">
+          <span className="dash-pool-stat-label">陈积 30 天+</span>
+          <strong className={`dash-pool-stat-value${pool.stale > 0 ? ' is-danger' : ''}`}>
+            {pool.stale}
+          </strong>
+        </span>
+      </div>
+      <div
+        className="dash-pool-meter"
+        role="img"
+        aria-label={empty ? '任务池为空' : `池内已完成 ${pool.done} / ${pool.total}`}
+      >
+        {empty ? (
+          <span className="dash-pool-meter-empty">池子为空</span>
+        ) : (
+          <span className="dash-pool-meter-done" style={{ width: `${pool.completionRate * 100}%` }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 堆叠柱：每根柱 = 一个分组的池子大小，段内从下到上按风险递增 */
+function PoolChart({
+  groups,
+  maxTotal,
+  clickable,
+  activeDimension,
+  crossFilter,
   onSelect,
 }: {
-  title: string;
-  dimension: DimensionKey;
-  slices: DimensionSlice[];
-  active: CrossFilter | null;
-  onSelect: (dimension: DimensionKey, key: string) => void;
+  groups: PoolGroup[];
+  maxTotal: number;
+  clickable: boolean;
+  activeDimension: DimensionKey;
+  crossFilter: CrossFilter | null;
+  onSelect: (key: string) => void;
 }) {
-  const max = Math.max(1, ...slices.map((slice) => slice.total));
-  if (slices.length === 0) {
-    return (
-      <div className="dash-dimension-group">
-        <span className="dash-dimension-title">{title}</span>
-        <p className="dash-empty-text">没有数据</p>
-      </div>
-    );
+  if (groups.length === 0) {
+    return <p className="dash-empty-text">当前范围内没有任务，池子为空。</p>;
   }
+  // 列太多时压缩间距，保证 90 天周视图仍然可读
+  const dense = groups.length > 12;
   return (
-    <div className="dash-dimension-group">
-      <span className="dash-dimension-title">{title}</span>
-      <ul className="dash-dimension-list">
-        {slices.slice(0, 6).map((slice) => {
-          const selected = active?.dimension === dimension && active.key === slice.key;
-          const doneWidth = (slice.completed / max) * 100;
-          const overdueWidth = (slice.overdue / max) * 100;
-          return (
-            <li key={slice.key}>
-              <button
-                type="button"
-                className={`dash-dimension-row${selected ? ' is-selected' : ''}`}
-                onClick={() => onSelect(dimension, slice.key)}
-                aria-pressed={selected}
-                title={`${slice.label}：${slice.total} 个任务，已完成 ${slice.completed} 个，逾期 ${slice.overdue} 个`}
+    <div className={`dash-pool-chart${dense ? ' is-dense' : ''}`} role="img" aria-label="任务池堆积图">
+      {groups.map((group) => {
+        const selected =
+          clickable && crossFilter?.dimension === activeDimension && crossFilter.key === group.key;
+        const height = (group.total / maxTotal) * 100;
+        return (
+          <button
+            key={group.key}
+            type="button"
+            className={`dash-pool-col${selected ? ' is-selected' : ''}${clickable ? ' is-clickable' : ''}`}
+            disabled={!clickable || group.total === 0}
+            onClick={() => onSelect(group.key)}
+            aria-pressed={clickable ? selected : undefined}
+            title={`${group.label}：池 ${group.total} 个 · 已完成 ${group.done} 个 · 逾期 ${group.overdue} 个 · 本周到期 ${group.dueSoon} 个 · 正常推进 ${group.open} 个（完成率 ${percent(group.completionRate)}）`}
+          >
+            <span className="dash-pool-rate">
+              {group.total === 0 ? '' : percent(group.completionRate)}
+            </span>
+            <span className="dash-pool-track">
+              <span
+                className="dash-pool-stack"
+                style={{ height: `${group.total === 0 ? 2 : Math.max(2, height)}%` }}
               >
-                <span className="dash-dimension-name">{slice.label}</span>
-                <span className="dash-dimension-track">
-                  <span
-                    className="dash-dimension-total"
-                    style={{ width: `${(slice.total / max) * 100}%` }}
-                  />
-                  <span
-                    className="dash-dimension-done"
-                    style={{ width: `${doneWidth}%` }}
-                    aria-hidden="true"
-                  />
-                  <span
-                    className="dash-dimension-overdue"
-                    style={{ left: `${doneWidth}%`, width: `${overdueWidth}%` }}
-                    aria-hidden="true"
-                  />
-                </span>
-                <span className="dash-dimension-count">{slice.total}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                {POOL_SEGMENTS.map((segment) =>
+                  group[segment.key] === 0 ? null : (
+                    <span
+                      key={segment.key}
+                      className={`dash-pool-seg is-${segment.key}`}
+                      style={{ flexGrow: group[segment.key] }}
+                    />
+                  ),
+                )}
+              </span>
+            </span>
+            <span className="dash-pool-col-label">{group.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

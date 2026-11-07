@@ -28,8 +28,11 @@ export const DASHBOARD_RANGES = [7, 30, 90] as const;
 export type DashboardRange = (typeof DASHBOARD_RANGES)[number];
 
 export interface DashboardFilters {
-  /** null 表示全部看板 */
-  boardId: string | null;
+  /**
+   * 统计范围：null 表示全部看板；数组表示若干看板合并成一个池
+   * （单看板就是长度为 1 的数组，看板集则展开成集内看板 id）。
+   */
+  boardIds: string[] | null;
   rangeDays: DashboardRange;
   weekStartsOn: WeekStart;
   now?: Date;
@@ -412,13 +415,18 @@ export function buildDashboard(
   filters: DashboardFilters,
 ): DashboardData {
   const now = filters.now ?? new Date();
-  const selectedBoard = filters.boardId
-    ? snapshot.boards.find((board) => board.id === filters.boardId) ?? null
-    : null;
-  const boardId = selectedBoard?.id ?? null;
+  // 范围：null = 全部看板；数组 = 若干看板形成一个池（单看板即长度 1）
+  const requested = filters.boardIds ? new Set(filters.boardIds) : null;
+  const scopedBoards = requested
+    ? snapshot.boards.filter((board) => requested.has(board.id))
+    : snapshot.boards;
+  // 所选看板全部被删除时回落为「全部看板」，避免页面空白却无从解释
+  const scopeBoards = requested && scopedBoards.length === 0 ? snapshot.boards : scopedBoards;
+  const selectedBoard = scopeBoards.length === 1 ? scopeBoards[0] : null;
+  const boardIds = requested && scopedBoards.length > 0 ? new Set(scopeBoards.map((b) => b.id)) : null;
   // V0.14.0：任务类指标只统计主任务；子任务只进入「子任务完成率」。
-  const allCards = boardId
-    ? snapshot.cards.filter((card) => card.boardId === boardId)
+  const allCards = boardIds
+    ? snapshot.cards.filter((card) => boardIds.has(card.boardId))
     : snapshot.cards;
   const baseCards = allCards.filter((card) => card.parentCardId === null);
 
