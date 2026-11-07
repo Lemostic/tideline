@@ -3825,7 +3825,7 @@ dependencies = [
 
 [[package]]
 name = "tideline"
-version = "0.16.1"
+version = "0.17.0"
 dependencies = [
  "base64 0.22.1",
  "rfd",
