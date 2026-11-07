@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 
 const pkg = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
@@ -43,5 +43,14 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false,
+  },
+  test: {
+    server: {
+      deps: {
+        // exceljs 是体量很大的 CJS 包：走 vite 的 SSR 转换要把整棵依赖树逐个转换，
+        // 单次 import 要十几秒，测试直接撞上默认 5s 超时。交给 Node 原生加载即可。
+        external: [/exceljs/],
+      },
+    },
   },
 });
