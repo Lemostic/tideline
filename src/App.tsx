@@ -82,7 +82,7 @@ export default function App() {
 
   return (
     <HashRouter>
-      <div className="app-shell">
+      <div className="app-shell app-shell--glass">
         <Sidebar />
         <div className="app-main">
           <TopBar />

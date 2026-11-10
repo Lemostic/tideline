@@ -42,6 +42,8 @@ describe('theme helpers', () => {
     expect(palette['--primary-soft']).not.toBe('#2563eb');
     expect(palette['--ink']).toBe('#172033');
     expect(palette['--line']).toMatch(/^#[0-9a-f]{6}$/);
+    expect(palette['--glass-surface']).toContain('rgba(');
+    expect(palette['--glass-shadow']).toContain('0 18px 46px');
   });
 
   it('主题解析返回对应名称与颜色', () => {

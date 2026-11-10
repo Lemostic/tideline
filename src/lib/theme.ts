@@ -280,6 +280,17 @@ export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
   const accentWash = alpha(accent, 0.14);
   const successWash = alpha(success, 0.12);
   const dangerGlow = alpha(danger, 0.24);
+  // 液态玻璃：保留主题色的冷暖倾向，只调整透明度与高光，
+  // 让同一套材质在不同主题、不同页面底色上都成立。
+  const glassSurface = alpha(surface, 0.72);
+  const glassSurfaceStrong = alpha(surface, 0.86);
+  const glassSurfaceSoft = alpha(surface, 0.46);
+  const glassSunken = alpha(bg, 0.44);
+  const glassMuted = alpha(surfaceMuted, 0.5);
+  const glassHover = alpha(surfaceHover, 0.78);
+  const glassControl = alpha(surface, 0.82);
+  const glassPrimaryGlow = alpha(primary, 0.16);
+  const glassAccentGlow = alpha(accent, 0.12);
   // 数据色对应的淡染底：看板色板里四种语义色的小面积背景
   const dataBlue = '#4c8dff';
   const dataAmber = '#e9a23b';
@@ -330,6 +341,21 @@ export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
     '--accent-wash': accentWash,
     '--success-wash': successWash,
     '--danger-glow': dangerGlow,
+    '--glass-surface': glassSurface,
+    '--glass-surface-strong': glassSurfaceStrong,
+    '--glass-surface-soft': glassSurfaceSoft,
+    '--glass-sunken': glassSunken,
+    '--glass-muted': glassMuted,
+    '--glass-hover': glassHover,
+    '--glass-control': glassControl,
+    '--glass-border': alpha('#ffffff', 0.64),
+    '--glass-border-strong': alpha('#ffffff', 0.82),
+    '--glass-sheen': alpha('#ffffff', 0.38),
+    '--glass-primary-glow': glassPrimaryGlow,
+    '--glass-accent-glow': glassAccentGlow,
+    '--glass-shadow': `0 18px 46px ${alpha(ink, 0.1)}, 0 2px 8px ${alpha(ink, 0.04)}`,
+    '--glass-shadow-hover': `0 24px 60px ${alpha(ink, 0.14)}, 0 4px 14px ${alpha(ink, 0.06)}`,
+    '--glass-inner': `inset 0 1px 0 ${alpha('#ffffff', 0.9)}, inset 0 -1px 0 ${alpha('#ffffff', 0.16)}`,
     '--data-blue': dataBlue,
     '--data-amber': dataAmber,
     '--data-green': dataGreen,
