@@ -32,19 +32,19 @@
 .app-shell--glass::before {
   inset: -18%;
   background:
-    radial-gradient(ellipse 46% 42% at 16% 16%, var(--glass-primary-glow), transparent 72%),
-    radial-gradient(ellipse 40% 36% at 86% 10%, var(--glass-accent-glow), transparent 74%),
-    radial-gradient(ellipse 54% 48% at 76% 86%, var(--glass-primary-glow), transparent 74%),
+    radial-gradient(ellipse 44% 40% at 12% 14%, var(--glass-primary-glow), transparent 72%),
+    radial-gradient(ellipse 38% 34% at 88% 9%, var(--glass-accent-glow), transparent 72%),
+    radial-gradient(ellipse 52% 46% at 78% 88%, var(--glass-primary-glow), transparent 74%),
+    radial-gradient(ellipse 42% 36% at 28% 82%, var(--glass-accent-glow), transparent 76%),
     linear-gradient(145deg, var(--bg-app) 0%, var(--surface-sunken) 56%, var(--bg-app) 100%);
 }
 
 .app-shell--glass::after {
   inset: 0;
   background:
-    radial-gradient(ellipse 54% 16% at 8% 38%, rgba(255, 255, 255, 0.38), transparent 74%),
-    radial-gradient(ellipse 44% 13% at 94% 63%, rgba(255, 255, 255, 0.3), transparent 72%),
-    radial-gradient(ellipse 36% 11% at 52% 92%, var(--glass-accent-glow), transparent 76%);
-  mix-blend-mode: screen;
+    radial-gradient(ellipse 58% 18% at 9% 34%, rgba(255, 255, 255, 0.62), transparent 74%),
+    radial-gradient(ellipse 48% 14% at 94% 62%, rgba(255, 255, 255, 0.5), transparent 72%),
+    radial-gradient(ellipse 54% 30% at 54% 105%, rgba(25, 39, 44, 0.055), transparent 72%);
   opacity: 0.72;
 }
 
@@ -307,15 +307,18 @@
 /* 不支持背景模糊时改回实体表面，优先保证可读性。 */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .app-shell--glass {
-    --surface: color-mix(in srgb, var(--glass-surface-strong) 88%, white);
+    --surface: var(--glass-surface-strong);
     --surface-muted: var(--glass-surface-strong);
     --surface-sunken: var(--glass-surface);
     --surface-hover: var(--glass-surface-strong);
   }
 
+  .app-shell--glass .sidebar,
+  .app-shell--glass .topbar::before {
+    background: var(--glass-surface-strong);
+  }
+
   .app-shell--glass :is(
-      .sidebar,
-      .topbar::before,
       .wb-card,
       .home-board-card,
       .settings-card,
@@ -337,9 +340,14 @@
     --surface-hover: var(--glass-surface-strong);
   }
 
+  .app-shell--glass .sidebar,
+  .app-shell--glass .topbar::before {
+    background: var(--glass-surface-strong);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
   .app-shell--glass :is(
-      .sidebar,
-      .topbar::before,
       .wb-card,
       .home-board-card,
       .settings-card,
@@ -349,6 +357,33 @@
       .modal,
       .drawer.drawer-modal
     ) {
+    background: var(--glass-surface-strong);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .app-shell--glass {
+    --surface: var(--glass-surface-strong);
+    --surface-muted: var(--glass-surface-strong);
+    --surface-sunken: var(--glass-surface);
+    --surface-hover: var(--glass-surface-strong);
+  }
+}
+
+@media (forced-colors: active) {
+  .app-shell--glass::before,
+  .app-shell--glass::after {
+    display: none;
+  }
+
+  .app-shell--glass,
+  .app-shell--glass .sidebar,
+  .app-shell--glass .topbar::before,
+  .app-shell--glass :is(.modal, .drawer.drawer-modal) {
+    background: Canvas;
+    box-shadow: none;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }

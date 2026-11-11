@@ -23,6 +23,7 @@ Thumbs.db
 # test / verification artifacts
 .playwright/
 .verify/
+.taste-skill/
 /screenshots/
 coverage/
 *.log

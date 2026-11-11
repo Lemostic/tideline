@@ -282,15 +282,15 @@ export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
   const dangerGlow = alpha(danger, 0.24);
   // 液态玻璃：保留主题色的冷暖倾向，只调整透明度与高光，
   // 让同一套材质在不同主题、不同页面底色上都成立。
-  const glassSurface = alpha(surface, 0.72);
-  const glassSurfaceStrong = alpha(surface, 0.86);
-  const glassSurfaceSoft = alpha(surface, 0.46);
-  const glassSunken = alpha(bg, 0.44);
-  const glassMuted = alpha(surfaceMuted, 0.5);
-  const glassHover = alpha(surfaceHover, 0.78);
-  const glassControl = alpha(surface, 0.82);
-  const glassPrimaryGlow = alpha(primary, 0.16);
-  const glassAccentGlow = alpha(accent, 0.12);
+  const glassSurface = alpha(surface, 0.56);
+  const glassSurfaceStrong = alpha(surface, 0.78);
+  const glassSurfaceSoft = alpha(surface, 0.34);
+  const glassSunken = alpha(bg, 0.38);
+  const glassMuted = alpha(surfaceMuted, 0.44);
+  const glassHover = alpha(surfaceHover, 0.72);
+  const glassControl = alpha(surface, 0.74);
+  const glassPrimaryGlow = alpha(primary, 0.5);
+  const glassAccentGlow = alpha(accent, 0.32);
   // 数据色对应的淡染底：看板色板里四种语义色的小面积背景
   const dataBlue = '#4c8dff';
   const dataAmber = '#e9a23b';
@@ -350,7 +350,7 @@ export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
     '--glass-control': glassControl,
     '--glass-border': alpha('#ffffff', 0.64),
     '--glass-border-strong': alpha('#ffffff', 0.82),
-    '--glass-sheen': alpha('#ffffff', 0.38),
+    '--glass-sheen': alpha('#ffffff', 0.24),
     '--glass-primary-glow': glassPrimaryGlow,
     '--glass-accent-glow': glassAccentGlow,
     '--glass-shadow': `0 18px 46px ${alpha(ink, 0.1)}, 0 2px 8px ${alpha(ink, 0.04)}`,
