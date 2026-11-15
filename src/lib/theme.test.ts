@@ -44,6 +44,11 @@ describe('theme helpers', () => {
     expect(palette['--line']).toMatch(/^#[0-9a-f]{6}$/);
     expect(palette['--glass-surface']).toContain('rgba(');
     expect(palette['--glass-shadow']).toContain('0 18px 46px');
+    const surfaceAlpha = Number(/rgba\(\d+, \d+, \d+, ([\d.]+)\)/.exec(palette['--glass-surface'])?.[1]);
+    expect(surfaceAlpha).toBeGreaterThan(0.3);
+    expect(surfaceAlpha).toBeLessThan(0.5);
+    expect(palette['--lg-rim']).toContain('rgba(');
+    expect(palette['--lg-specular']).toContain('rgba(');
   });
 
   it('主题解析返回对应名称与颜色', () => {

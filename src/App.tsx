@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { BrandMark } from '@/components/Icon';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { LiquidGlassFilters } from '@/components/LiquidGlassFilters';
 import { NewBoardModal } from '@/components/NewBoardModal';
 import { SearchDialog } from '@/components/SearchDialog';
 import { Sidebar } from '@/components/Sidebar';
@@ -9,8 +10,10 @@ import { TaskDrawer } from '@/components/TaskDrawer';
 import { ToastStack } from '@/components/ToastStack';
 import { TopBar } from '@/components/TopBar';
 import { BoardPage } from '@/pages/BoardPage';
+import { BoardsPage } from '@/pages/BoardsPage';
 import { BoardSetDetailPage } from '@/pages/BoardSetDetailPage';
 import { BoardSetsPage } from '@/pages/BoardSetsPage';
+import { CockpitPage } from '@/pages/CockpitPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { GoalDetailPage } from '@/pages/GoalDetailPage';
 import { GoalsPage } from '@/pages/GoalsPage';
@@ -22,6 +25,7 @@ import { TeamPage } from '@/pages/TeamPage';
 import { ProjectDetailPage } from '@/pages/ProjectDetailPage';
 import { RequirementPage } from '@/pages/RequirementPage';
 import { TemplatesPage } from '@/pages/TemplatesPage';
+import { TimelinePage } from '@/pages/TimelinePage';
 import { TrashPage } from '@/pages/TrashPage';
 import { WorkbenchPage } from '@/pages/WorkbenchPage';
 import { useAppStore } from '@/store/appStore';
@@ -30,6 +34,7 @@ import { applyTheme } from '@/lib/theme';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useUiStore } from '@/store/uiStore';
 import { isUpdateCheckDue, useUpdateStore } from '@/store/updateStore';
+import { useGlassPointer } from '@/hooks/useGlassPointer';
 
 export default function App() {
   const init = useAppStore((state) => state.init);
@@ -40,6 +45,9 @@ export default function App() {
   const themeId = useSettingsStore((state) => state.themeId);
   const customTheme = useSettingsStore((state) => state.customTheme);
   const cardSize = useSettingsStore((state) => state.cardSize);
+  const shellRef = useRef<HTMLDivElement>(null);
+
+  useGlassPointer(shellRef);
 
   useEffect(() => {
     void init();
@@ -82,7 +90,8 @@ export default function App() {
 
   return (
     <HashRouter>
-      <div className="app-shell app-shell--glass">
+      <div className="app-shell app-shell--glass" ref={shellRef}>
+        <LiquidGlassFilters />
         <Sidebar />
         <div className="app-main">
           <TopBar />
@@ -95,7 +104,11 @@ export default function App() {
           ) : null}
           <div className="app-content">
             <Routes>
-              <Route path="/" element={<WorkbenchPage />} />
+              <Route path="/" element={<CockpitPage />} />
+              <Route path="/boards" element={<BoardsPage />} />
+              <Route path="/timeline" element={<TimelinePage />} />
+              <Route path="/insights" element={<DashboardPage />} />
+              <Route path="/workbench" element={<WorkbenchPage />} />
               <Route path="/tasks" element={<MyTasksPage />} />
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="/templates" element={<TemplatesPage />} />
@@ -104,7 +117,7 @@ export default function App() {
               <Route path="/trash" element={<TrashPage />} />
               <Route path="/data" element={<Navigate to="/settings?tab=data" replace />} />
               <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/dashboard" element={<Navigate to="/insights" replace />} />
               {/* 使用统计已下线（偏离看板工具定位）；保留路由重定向，旧链接不会 404 */}
               <Route path="/usage" element={<Navigate to="/" replace />} />
               <Route path="/board/:boardId" element={<BoardPage />} />

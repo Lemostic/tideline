@@ -282,13 +282,16 @@ export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
   const dangerGlow = alpha(danger, 0.24);
   // 液态玻璃：保留主题色的冷暖倾向，只调整透明度与高光，
   // 让同一套材质在不同主题、不同页面底色上都成立。
-  const glassSurface = alpha(surface, 0.56);
-  const glassSurfaceStrong = alpha(surface, 0.78);
-  const glassSurfaceSoft = alpha(surface, 0.34);
-  const glassSunken = alpha(bg, 0.38);
-  const glassMuted = alpha(surfaceMuted, 0.44);
-  const glassHover = alpha(surfaceHover, 0.72);
-  const glassControl = alpha(surface, 0.74);
+  // 液态玻璃 v2：降低底色浓度，让背景折射与边缘光承担质感；
+  // 强表面只用于承载文字的浮层，避免整屏又变回白色磨砂板。
+  const glassSurface = alpha(surface, 0.42);
+  const glassSurfaceStrong = alpha(surface, 0.62);
+  const glassSurfaceSoft = alpha(surface, 0.24);
+  const glassSunken = alpha(bg, 0.22);
+  const glassMuted = alpha(surfaceMuted, 0.34);
+  const glassHover = alpha(surfaceHover, 0.56);
+  const glassControl = alpha(surface, 0.6);
+  const glassFloat = alpha(surface, 0.74);
   const glassPrimaryGlow = alpha(primary, 0.5);
   const glassAccentGlow = alpha(accent, 0.32);
   // 数据色对应的淡染底：看板色板里四种语义色的小面积背景
@@ -348,9 +351,16 @@ export function buildThemePalette(colors: ThemeBaseColors): ThemePalette {
     '--glass-muted': glassMuted,
     '--glass-hover': glassHover,
     '--glass-control': glassControl,
-    '--glass-border': alpha('#ffffff', 0.64),
-    '--glass-border-strong': alpha('#ffffff', 0.82),
-    '--glass-sheen': alpha('#ffffff', 0.24),
+    '--glass-float': glassFloat,
+    '--glass-border': alpha('#ffffff', 0.5),
+    '--glass-border-strong': alpha('#ffffff', 0.78),
+    '--glass-sheen': alpha('#ffffff', 0.18),
+    '--lg-rim': alpha('#ffffff', 0.86),
+    '--lg-rim-dim': alpha('#ffffff', 0.14),
+    '--lg-shade': alpha(ink, 0.16),
+    '--lg-specular': alpha('#ffffff', 0.22),
+    '--lg-ambient': alpha(ink, 0.1),
+    '--lg-contact': alpha(ink, 0.06),
     '--glass-primary-glow': glassPrimaryGlow,
     '--glass-accent-glow': glassAccentGlow,
     '--glass-shadow': `0 18px 46px ${alpha(ink, 0.1)}, 0 2px 8px ${alpha(ink, 0.04)}`,
